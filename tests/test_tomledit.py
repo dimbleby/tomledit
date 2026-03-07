@@ -577,6 +577,16 @@ class TestProxyContains:
         assert "b" in doc["arr"]
         assert "z" not in doc["arr"]
 
+    def test_array_of_tables_contains_matching_dict(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        assert {"name": "a"} in doc["items"]
+        assert {"name": "b"} in doc["items"]
+        assert {"name": "c"} not in doc["items"]
+
+    def test_array_of_tables_not_contains_partial(self) -> None:
+        doc = Document.parse("[[items]]\nx = 1\ny = 2\n")
+        assert {"x": 1} not in doc["items"]
+
 
 # ---------------------------------------------------------------------------
 # Item: __bool__
@@ -607,6 +617,38 @@ class TestProxyBool:
     def test_inline_table_falsy_when_empty(self) -> None:
         doc = Document.parse("meta = {}\n")
         assert bool(doc["meta"]) is False
+
+    def test_zero_int_falsy(self) -> None:
+        doc = Document.parse("x = 0\n")
+        assert bool(doc["x"]) is False
+
+    def test_nonzero_int_truthy(self) -> None:
+        doc = Document.parse("x = 42\n")
+        assert bool(doc["x"]) is True
+
+    def test_zero_float_falsy(self) -> None:
+        doc = Document.parse("x = 0.0\n")
+        assert bool(doc["x"]) is False
+
+    def test_nonzero_float_truthy(self) -> None:
+        doc = Document.parse("x = 3.14\n")
+        assert bool(doc["x"]) is True
+
+    def test_false_bool_falsy(self) -> None:
+        doc = Document.parse("x = false\n")
+        assert bool(doc["x"]) is False
+
+    def test_true_bool_truthy(self) -> None:
+        doc = Document.parse("x = true\n")
+        assert bool(doc["x"]) is True
+
+    def test_empty_string_falsy(self) -> None:
+        doc = Document.parse('x = ""\n')
+        assert bool(doc["x"]) is False
+
+    def test_nonempty_string_truthy(self) -> None:
+        doc = Document.parse('x = "hello"\n')
+        assert bool(doc["x"]) is True
 
 
 # ---------------------------------------------------------------------------
@@ -793,6 +835,21 @@ class TestProxyListMethods:
         doc = Document.parse("arr = [1, 2]\n")
         doc["arr"].insert(2, 3)
         assert doc["arr"][2] == 3
+
+    def test_insert_out_of_range_clamps(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        doc["arr"].insert(100, 4)
+        assert doc["arr"] == [1, 2, 3, 4]
+
+    def test_insert_negative_index(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        doc["arr"].insert(-1, 0)
+        assert doc["arr"] == [1, 2, 0, 3]
+
+    def test_insert_very_negative_clamps_to_zero(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        doc["arr"].insert(-100, 0)
+        assert doc["arr"] == [0, 1, 2, 3]
 
     def test_pop_last(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
@@ -984,6 +1041,11 @@ class TestErrorHandling:
         doc = Document.parse("[tbl]\nx = 1\n")
         with pytest.raises(TypeError, match="indices must be integers or strings"):
             doc["tbl"][1.5]  # type: ignore[call-overload]
+
+    def test_assign_none_raises(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(Exception, match=r"None.*not a valid TOML"):
+            doc["x"] = None
 
 
 class TestDocumentCompleteness:

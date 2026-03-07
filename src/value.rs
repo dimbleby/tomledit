@@ -31,6 +31,8 @@ impl From<Borrowed<'_, '_, PyDateTime>> for Datetime {
             nanosecond: Some(1000 * py_datetime.get_microsecond()),
         };
 
+        // TOML only supports minute-precision UTC offsets; any sub-minute
+        // component of the Python tzinfo is truncated by integer division.
         let offset = py_datetime
             .call_method0("utcoffset")
             .ok()

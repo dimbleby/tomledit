@@ -164,6 +164,26 @@ impl Document {
         !self.0.is_empty()
     }
 
+    pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+        if let Ok(other_doc) = other.cast::<Self>() {
+            let other_doc = other_doc.borrow();
+            let py = other.py();
+            let self_dict = PyDict::new(py);
+            for (k, v) in self.0.iter() {
+                self_dict.set_item(k, item_proxy::item_to_py(v, py)?)?;
+            }
+            let other_dict = PyDict::new(py);
+            for (k, v) in other_doc.0.iter() {
+                other_dict.set_item(k, item_proxy::item_to_py(v, py)?)?;
+            }
+            self_dict.eq(&other_dict).map_err(PyErr::from)
+        } else if let Ok(other_dict) = other.cast::<PyDict>() {
+            item_proxy::doc_entries_eq(self.0.iter(), self.0.len(), other_dict)
+        } else {
+            Ok(false)
+        }
+    }
+
     pub fn fmt(&mut self) {
         self.0.fmt()
     }

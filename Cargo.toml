@@ -1,0 +1,15 @@
+[package]
+name = "tomledit"
+license = "MIT"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "tomledit"
+crate-type = ["cdylib"]
+
+[dependencies]
+toml_edit = "0.25"
+
+[dependencies.pyo3]
+version = "0.28"

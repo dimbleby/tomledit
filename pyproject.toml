@@ -1,6 +1,6 @@
 [project]
 name = "tomledit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Format-preserving TOML parser"
 readme = "README.md"
 authors = [

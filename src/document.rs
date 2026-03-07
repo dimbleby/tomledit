@@ -50,13 +50,13 @@ impl Document {
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let keys: Vec<String> = self.0.iter().map(|(k, _)| k.to_owned()).collect();
+        let keys: Vec<&str> = self.0.iter().map(|(k, _)| k).collect();
         let list = keys.into_pyobject(py)?;
         Ok(list.try_iter()?.unbind())
     }
 
-    pub fn keys(&self) -> Vec<String> {
-        self.0.iter().map(|(k, _)| k.to_owned()).collect()
+    pub fn keys(&self) -> Vec<&str> {
+        self.0.iter().map(|(k, _)| k).collect()
     }
 
     pub fn items(slf: &Bound<'_, Self>) -> Vec<(String, ItemProxy)> {
@@ -165,16 +165,14 @@ impl Document {
     }
 
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let py = other.py();
         if let Ok(other_doc) = other.cast::<Self>() {
             let other_doc = other_doc.borrow();
-            let other_dict = PyDict::new(py);
-            for (k, v) in other_doc.0.iter() {
-                other_dict.set_item(k, item_proxy::item_to_py(v, py)?)?;
-            }
-            item_proxy::doc_entries_eq(self.0.iter(), self.0.len(), &other_dict)
+            Ok(item_proxy::items_structural_eq(
+                self.0.as_item(),
+                other_doc.0.as_item(),
+            ))
         } else if let Ok(other_dict) = other.cast::<PyDict>() {
-            item_proxy::doc_entries_eq(self.0.iter(), self.0.len(), other_dict)
+            item_proxy::table_entries_eq(self.0.iter(), self.0.len(), other_dict)
         } else {
             Ok(false)
         }

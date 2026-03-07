@@ -6,8 +6,7 @@ use toml_edit::DocumentMut as DocumentRs;
 
 use crate::error::TomlErrorWrapper;
 use crate::item::Item;
-use crate::item_proxy::{ItemProxy, Key};
-use crate::ops;
+use crate::item_proxy::{self, ItemProxy, Key};
 use crate::value::Table;
 
 #[pyclass(mapping, module = "tomledit")]
@@ -106,7 +105,7 @@ impl Document {
     }
 
     pub fn __setitem__(&mut self, key: &str, value: Item) {
-        ops::set_with_decor_preservation(self.0.as_item_mut(), key, value);
+        item_proxy::set_with_decor_preservation(self.0.as_item_mut(), key, value);
     }
 
     pub fn __delitem__(&mut self, key: &str) -> PyResult<()> {
@@ -124,7 +123,7 @@ impl Document {
         default: Option<Py<PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         match self.0.remove(key) {
-            Some(item) => ops::item_to_py(&item, py),
+            Some(item) => item_proxy::item_to_py(&item, py),
             None => match default {
                 Some(d) => Ok(d),
                 None => Err(PyKeyError::new_err(key.to_owned())),
@@ -133,14 +132,14 @@ impl Document {
     }
 
     pub fn update(&mut self, other: &Bound<'_, PyAny>) -> PyResult<()> {
-        ops::item_update(self.0.as_item_mut(), other)
+        item_proxy::item_update(self.0.as_item_mut(), other)
     }
 
     pub fn setdefault(slf: &Bound<'_, Self>, key: &str, default: Item) -> ItemProxy {
         {
             let mut doc = slf.borrow_mut();
             if !doc.0.contains_key(key) {
-                ops::set_with_decor_preservation(doc.0.as_item_mut(), key, default);
+                item_proxy::set_with_decor_preservation(doc.0.as_item_mut(), key, default);
             }
         }
         Self::make_proxy(slf, key)

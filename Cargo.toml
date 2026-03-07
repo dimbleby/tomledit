@@ -1,6 +1,6 @@
 [package]
 name = "tomledit"
-license = "MIT"
+license = "Apache-2.0 OR MIT"
 version = "0.1.0"
 edition = "2024"
 

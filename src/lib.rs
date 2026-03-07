@@ -2,7 +2,6 @@ mod document;
 mod error;
 mod item;
 mod item_proxy;
-mod ops;
 mod value;
 
 use document::Document;

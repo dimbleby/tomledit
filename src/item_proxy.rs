@@ -1,7 +1,7 @@
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{
-    PyDate, PyDateTime, PyDelta, PyDict, PyIterator, PyList, PySlice, PyTime, PyTzInfo,
+    PyBool, PyDate, PyDateTime, PyDelta, PyDict, PyIterator, PyList, PySlice, PyTime, PyTzInfo,
 };
 use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
@@ -279,12 +279,20 @@ impl ItemProxy {
         }
     }
 
-    #[pyo3(signature = (key=None))]
-    pub fn pop(&self, py: Python<'_>, key: Option<&Bound<'_, PyAny>>) -> PyResult<Py<PyAny>> {
+    #[pyo3(signature = (key=None, default=None))]
+    pub fn pop(
+        &self,
+        py: Python<'_>,
+        key: Option<&Bound<'_, PyAny>>,
+        default: Option<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
         let mut doc = self.document.bind(py).borrow_mut();
         let item = self.navigate_mut(&mut doc.0)?;
-        let removed = item_pop(item, key)?;
-        item_to_py(&removed.0, py)
+        match item_pop(item, key) {
+            Ok(removed) => item_to_py(&removed.0, py),
+            Err(e) if default.is_some() && e.is_instance_of::<PyKeyError>(py) => Ok(default.unwrap()),
+            Err(e) => Err(e),
+        }
     }
 
     pub fn update(&self, other: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -394,11 +402,13 @@ fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> PyResult<bool
         return Ok(b == other_b);
     }
     if let Some(i) = value.as_integer()
+        && other.cast::<PyBool>().is_err()
         && let Ok(other_i) = other.extract::<i64>()
     {
         return Ok(i == other_i);
     }
     if let Some(f) = value.as_float()
+        && other.cast::<PyBool>().is_err()
         && let Ok(other_f) = other.extract::<f64>()
     {
         return Ok(f == other_f);
@@ -467,6 +477,15 @@ fn table_entries_eq<'a>(
         }
     }
     Ok(true)
+}
+
+/// Public wrapper for Document.__eq__ comparing document entries to a dict.
+pub(crate) fn doc_entries_eq<'a>(
+    iter: impl Iterator<Item = (&'a str, &'a ItemRs)>,
+    len: usize,
+    other_dict: &Bound<'_, PyDict>,
+) -> PyResult<bool> {
+    table_entries_eq(iter, len, other_dict)
 }
 
 /// Compare a toml_edit Item to a Python object for equality.

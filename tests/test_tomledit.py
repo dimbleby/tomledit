@@ -406,6 +406,16 @@ class TestEquality:
         assert 30 == doc["owner"]["age"]  # noqa: SIM300
         assert [8001, 8001, 8002] == doc["database"]["ports"]  # noqa: SIM300
 
+    def test_bool_not_equal_to_int(self) -> None:
+        """TOML types are strict: bool != int, even though Python's True == 1."""
+        doc = Document.parse("count = 1\nflag = true\n")
+        assert doc["count"] != True  # noqa: E712
+        assert doc["flag"] != 1
+
+    def test_bool_not_equal_to_float(self) -> None:
+        doc = Document.parse("val = 1.0\n")
+        assert doc["val"] != True  # noqa: E712
+
 
 # ---------------------------------------------------------------------------
 # Format preservation
@@ -766,6 +776,16 @@ class TestProxyDictMethods:
         with pytest.raises(KeyError):
             doc["owner"].pop("nonexistent")
 
+    def test_pop_missing_with_default(self) -> None:
+        doc = make_doc()
+        assert doc["owner"].pop("nonexistent", 42) == 42
+
+    def test_pop_existing_ignores_default(self) -> None:
+        doc = make_doc()
+        val = doc["owner"].pop("age", 99)
+        assert val == 30
+        assert "age" not in doc["owner"]
+
     def test_update(self) -> None:
         doc = make_doc()
         doc["owner"].update({"name": "Bob", "email": "bob@example.com"})
@@ -1066,6 +1086,26 @@ class TestDocumentCompleteness:
     def test_bool_empty(self) -> None:
         doc = Document.parse("")
         assert bool(doc) is False
+
+    def test_eq_same_content(self) -> None:
+        a = Document.parse("x = 1\ny = 2\n")
+        b = Document.parse("x = 1\ny = 2\n")
+        assert a == b
+
+    def test_eq_different_content(self) -> None:
+        a = Document.parse("x = 1\n")
+        b = Document.parse("x = 2\n")
+        assert a != b
+
+    def test_eq_dict(self) -> None:
+        doc = Document.parse("x = 1\ny = 2\n")
+        assert doc == {"x": 1, "y": 2}
+        assert doc != {"x": 1}
+
+    def test_eq_unrelated_type(self) -> None:
+        doc = Document.parse("x = 1\n")
+        assert doc != 42
+        assert doc != "x = 1"
 
     def test_delitem_raises_key_error(self) -> None:
         doc = Document.parse("x = 1\n")

@@ -1481,3 +1481,34 @@ class TestDocumentConstructor:
     def test_none_is_empty(self) -> None:
         doc = Document(None)
         assert len(doc) == 0
+
+
+class TestDocumentValue:
+    """Document.value returns the entire document as a native Python dict."""
+
+    def test_simple(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        v = doc.value
+        assert v == {"a": 1, "b": 2}
+        assert type(v) is dict
+
+    def test_nested(self) -> None:
+        doc = Document.parse("[section]\nx = 1\ny = 2\n")
+        assert doc.value == {"section": {"x": 1, "y": 2}}
+
+    def test_empty(self) -> None:
+        doc = Document()
+        assert doc.value == {}
+
+    def test_complex(self) -> None:
+        doc = make_doc()
+        v = doc.value
+        assert v["title"] == "Example"
+        assert v["owner"] == {"name": "Alice", "age": 30, "active": True}
+        assert v["database"]["ports"] == [8001, 8001, 8002]
+
+    def test_value_is_a_copy(self) -> None:
+        doc = Document.parse("x = 1\n")
+        v = doc.value
+        v["x"] = 999
+        assert doc["x"] == 1

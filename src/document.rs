@@ -167,4 +167,14 @@ impl Document {
     pub fn fmt(&mut self) {
         self.0.fmt()
     }
+
+    /// The entire document as a native Python dict.
+    #[getter]
+    pub fn value(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let dict = PyDict::new(py);
+        for (k, v) in self.0.iter() {
+            dict.set_item(k, item_proxy::item_to_py(v, py)?)?;
+        }
+        Ok(dict.into_any().unbind())
+    }
 }

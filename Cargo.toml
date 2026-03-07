@@ -13,3 +13,4 @@ toml_edit = "0.25"
 
 [dependencies.pyo3]
 version = "0.28"
+features = ["generate-import-lib"]

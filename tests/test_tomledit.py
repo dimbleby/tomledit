@@ -307,18 +307,21 @@ class TestStr:
         assert str(doc) == SAMPLE
 
     def test_proxy_str_scalar(self) -> None:
-        doc = make_doc()
-        # toml_edit preserves formatting whitespace around the '='
-        assert "Example" in str(doc["title"])
+        doc = Document.parse("x = 42\n")
+        assert str(doc["x"]) == "42"
+
+    def test_proxy_str_string(self) -> None:
+        doc = Document.parse('name = "hello"\n')
+        assert str(doc["name"]) == "hello"
 
     def test_proxy_str_int(self) -> None:
         doc = make_doc()
-        assert "30" in str(doc["owner"]["age"])
+        assert str(doc["owner"]["age"]) == "30"
 
     def test_proxy_str_after_mutation(self) -> None:
         doc = make_doc()
         doc["owner"]["age"] = 99
-        assert str(doc["owner"]["age"]).strip() == "99"
+        assert str(doc["owner"]["age"]) == "99"
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +353,58 @@ class TestEquality:
         doc = make_doc()
         assert doc["owner"]["age"] != "30"
         assert doc["owner"]["name"] != 42
+
+    def test_datetime_proxy_eq(self) -> None:
+        doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
+        expected = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+        assert doc["dt"] == expected
+
+    def test_datetime_ne(self) -> None:
+        doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
+        wrong = datetime(2000, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        assert doc["dt"] != wrong
+
+    def test_array_equals_list(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        assert doc["arr"] == [1, 2, 3]
+
+    def test_array_not_equals_different_list(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        assert doc["arr"] != [1, 2, 4]
+
+    def test_array_not_equals_different_length(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        assert doc["arr"] != [1, 2]
+
+    def test_empty_array_equals_empty_list(self) -> None:
+        doc = Document.parse("arr = []\n")
+        assert doc["arr"] == []
+
+    def test_table_equals_dict(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        assert doc["t"] == {"a": 1, "b": 2}
+
+    def test_table_not_equals_different_dict(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert doc["t"] != {"a": 2}
+
+    def test_inline_table_equals_dict(self) -> None:
+        doc = Document.parse("meta = {x = 1, y = 2}\n")
+        assert doc["meta"] == {"x": 1, "y": 2}
+
+    def test_nested_array_equals_nested_list(self) -> None:
+        doc = Document.parse("arr = [[1, 2], [3, 4]]\n")
+        assert doc["arr"] == [[1, 2], [3, 4]]
+
+    def test_string_array_equals_list(self) -> None:
+        doc = Document.parse('arr = ["a", "b"]\n')
+        assert doc["arr"] == ["a", "b"]
+
+    def test_reverse_equality(self) -> None:
+        """Python falls back to proxy's __eq__ in both directions."""
+        doc = make_doc()
+        assert 30 == doc["owner"]["age"]  # noqa: SIM300
+        assert [8001, 8001, 8002] == doc["database"]["ports"]  # noqa: SIM300
 
 
 # ---------------------------------------------------------------------------
@@ -791,55 +846,6 @@ class TestProxyListMethods:
 
 
 # ---------------------------------------------------------------------------
-# Container equality
-# ---------------------------------------------------------------------------
-
-
-class TestContainerEquality:
-    def test_array_equals_list(self) -> None:
-        doc = Document.parse("arr = [1, 2, 3]\n")
-        assert doc["arr"] == [1, 2, 3]
-
-    def test_array_not_equals_different_list(self) -> None:
-        doc = Document.parse("arr = [1, 2, 3]\n")
-        assert doc["arr"] != [1, 2, 4]
-
-    def test_array_not_equals_different_length(self) -> None:
-        doc = Document.parse("arr = [1, 2, 3]\n")
-        assert doc["arr"] != [1, 2]
-
-    def test_empty_array_equals_empty_list(self) -> None:
-        doc = Document.parse("arr = []\n")
-        assert doc["arr"] == []
-
-    def test_table_equals_dict(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
-        assert doc["t"] == {"a": 1, "b": 2}
-
-    def test_table_not_equals_different_dict(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
-        assert doc["t"] != {"a": 2}
-
-    def test_inline_table_equals_dict(self) -> None:
-        doc = Document.parse("meta = {x = 1, y = 2}\n")
-        assert doc["meta"] == {"x": 1, "y": 2}
-
-    def test_nested_array_equals_nested_list(self) -> None:
-        doc = Document.parse("arr = [[1, 2], [3, 4]]\n")
-        assert doc["arr"] == [[1, 2], [3, 4]]
-
-    def test_string_array_equals_list(self) -> None:
-        doc = Document.parse('arr = ["a", "b"]\n')
-        assert doc["arr"] == ["a", "b"]
-
-    def test_reverse_equality(self) -> None:
-        """Python falls back to proxy's __eq__ in both directions."""
-        doc = make_doc()
-        assert 30 == doc["owner"]["age"]  # noqa: SIM300
-        assert [8001, 8001, 8002] == doc["database"]["ports"]  # noqa: SIM300
-
-
-# ---------------------------------------------------------------------------
 # pop() returns native Python values
 # ---------------------------------------------------------------------------
 
@@ -974,6 +980,11 @@ class TestErrorHandling:
         with pytest.raises(TypeError, match="keys"):
             doc["arr"].keys()
 
+    def test_bad_key_type_raises_type_error(self) -> None:
+        doc = Document.parse("[tbl]\nx = 1\n")
+        with pytest.raises(TypeError, match="indices must be integers or strings"):
+            doc["tbl"][1.5]  # type: ignore[call-overload]
+
 
 class TestDocumentCompleteness:
     """Document should have a complete dict-like API."""
@@ -1021,41 +1032,6 @@ class TestDocumentCompleteness:
         doc = Document.parse("x = 1\n")
         result = doc.setdefault("x", 99)
         assert result == 1
-
-
-class TestStrTrimming:
-    """__str__ should return clean values, not raw TOML fragments."""
-
-    def test_proxy_str_scalar(self) -> None:
-        doc = Document.parse("x = 42\n")
-        assert str(doc["x"]) == "42"
-
-    def test_proxy_str_string(self) -> None:
-        doc = Document.parse('name = "hello"\n')
-        assert str(doc["name"]) == "hello"
-
-
-class TestDatetimeEquality:
-    """Datetime values should compare equal to Python datetime objects."""
-
-    def test_datetime_proxy_eq(self) -> None:
-        doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
-        expected = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        assert doc["dt"] == expected
-
-    def test_datetime_ne(self) -> None:
-        doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
-        wrong = datetime(2000, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-        assert doc["dt"] != wrong
-
-
-class TestGetitemTypeError:
-    """Bad key types should produce clear error messages."""
-
-    def test_proxy_bad_key_type(self) -> None:
-        doc = Document.parse("[tbl]\nx = 1\n")
-        with pytest.raises(TypeError, match="indices must be integers or strings"):
-            doc["tbl"][1.5]  # type: ignore[call-overload]
 
 
 class TestNegativeIndexing:

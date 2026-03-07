@@ -16,8 +16,6 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-  "ruff>=0.8.0",
-  "mypy>=1.11.1",
   "pytest>=8.4.2",
 ]
 
@@ -28,41 +26,27 @@ build-backend = "maturin"
 [tool.maturin]
 features = ["pyo3/extension-module"]
 
-[tool.mypy]
-files = "."
-strict = true
-enable_error_code = [
-  "deprecated",
-  "explicit-override",
-  "ignore-without-code",
-  "redundant-expr",
-  "truthy-bool",
-  "truthy-iterable",
-  "unused-awaitable",
-]
-warn_unreachable = true
-
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-  "C90",    # mccabe
-  "COM",    # flake8-commas
-  "CPY",    # flake8-copyright
-  "D",      # pydocstyle
-  "DOC",    # pydoclint
-  "ERA",    # eradicate
-  "PD",     # pandas-vet
-  "PLR",    # pylint-refactor
-  "T20",    # flake8-print
-  "ANN401", # any-type
-  "E203",   # whitespace before ':'
-  "S101",   # assert-used
+  "C90",               # mccabe
+  "COM",               # flake8-commas
+  "CPY",               # flake8-copyright
+  "D",                 # pydocstyle
+  "DOC",               # pydoclint
+  "ERA",               # eradicate
+  "PD",                # pandas-vet
+  "PLR",               # pylint-refactor
+  "T20",               # flake8-print
+  "ANN401",            # any-type
+  "E203",              # whitespace before ':'
+  "S101",              # assert-used
 ]
 extend-safe-fixes = [
-  "TC", # flake8-type-checking
+  "TC",                # flake8-type-checking
 ]
 unfixable = [
-  "F841", # unused-variable
+  "F841",              # unused-variable
 ]
 
 [tool.ruff.lint.flake8-tidy-imports]

@@ -111,7 +111,7 @@ class TestWriteScalars:
     def test_set_nested_float(self) -> None:
         doc = make_doc()
         doc["database"]["connection_max"] = 9.81
-        assert doc["database"]["connection_max"] == 9.81  # noqa: RUF069
+        assert doc["database"]["connection_max"] == 9.81
 
     def test_set_deeply_nested_string(self) -> None:
         doc = make_doc()
@@ -160,7 +160,7 @@ class TestSetNewKeys:
     def test_add_float(self) -> None:
         doc = Document.parse("")
         doc["gravity"] = 9.81
-        assert doc["gravity"] == 9.81  # noqa: RUF069
+        assert doc["gravity"] == 9.81
 
     def test_add_bool(self) -> None:
         doc = Document.parse("")
@@ -194,7 +194,7 @@ class TestSetNewKeys:
         doc["mix"] = [1, "two", 3.0]
         assert doc["mix"][0] == 1
         assert doc["mix"][1] == "two"
-        assert doc["mix"][2] == 3.0  # noqa: RUF069
+        assert doc["mix"][2] == 3.0
 
     def test_add_datetime(self) -> None:
         doc = Document.parse("")
@@ -344,7 +344,7 @@ class TestEquality:
 
     def test_float_eq(self) -> None:
         doc = Document.parse("val = 2.5\n")
-        assert doc["val"] == 2.5  # noqa: RUF069
+        assert doc["val"] == 2.5
 
     def test_type_mismatch_not_equal(self) -> None:
         doc = make_doc()
@@ -870,7 +870,7 @@ class TestPopReturnsNative:
     def test_pop_float_returns_float(self) -> None:
         doc = Document.parse("x = 9.81\n")
         v = doc.pop("x")
-        assert v == 9.81  # noqa: RUF069
+        assert v == 9.81
         assert type(v) is float
 
     def test_pop_bool_returns_bool(self) -> None:
@@ -1328,7 +1328,7 @@ y = 2
     def test_float(self) -> None:
         doc = Document.parse(self.TOML)
         v = doc["gravity"].value
-        assert v == 9.81  # noqa: RUF069
+        assert v == 9.81
         assert type(v) is float
 
     def test_string(self) -> None:

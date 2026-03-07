@@ -1,7 +1,8 @@
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{
-    PyBool, PyDate, PyDateTime, PyDelta, PyDict, PyIterator, PyList, PySlice, PyTime, PyTzInfo,
+    PyBool, PyDate, PyDateTime, PyDelta, PyDict, PyIterator, PyList, PySlice, PyString, PyTime,
+    PyTzInfo,
 };
 use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
@@ -216,15 +217,14 @@ impl ItemProxy {
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = other.py();
 
-        // Proxy-vs-proxy: compare underlying items directly.
+        // Proxy-vs-proxy: compare underlying items directly in Rust.
         if let Ok(other_proxy) = other.cast::<Self>() {
             let other_proxy = other_proxy.borrow();
             let doc = self.document.bind(py).borrow();
             let self_item = self.navigate(&doc.0)?;
             let other_doc = other_proxy.document.bind(py).borrow();
             let other_item = other_proxy.navigate(&other_doc.0)?;
-            let other_py = item_to_py(other_item, py)?;
-            return item_eq(self_item, other_py.bind(py));
+            return Ok(items_structural_eq(self_item, other_item));
         }
 
         let doc = self.document.bind(py).borrow();
@@ -407,6 +407,58 @@ fn datetime_eq(a: &toml_edit::Datetime, b: &toml_edit::Datetime) -> bool {
         && normalize_offset(&a.offset) == normalize_offset(&b.offset)
 }
 
+/// Compare two toml_edit Values structurally (pure Rust, no Python allocation).
+fn values_structural_eq(a: &toml_edit::Value, b: &toml_edit::Value) -> bool {
+    if let (Some(a), Some(b)) = (a.as_bool(), b.as_bool()) {
+        return a == b;
+    }
+    if let (Some(a), Some(b)) = (a.as_integer(), b.as_integer()) {
+        return a == b;
+    }
+    if let (Some(a), Some(b)) = (a.as_float(), b.as_float()) {
+        return a == b;
+    }
+    if let (Some(a), Some(b)) = (a.as_str(), b.as_str()) {
+        return a == b;
+    }
+    if let (Some(a), Some(b)) = (a.as_datetime(), b.as_datetime()) {
+        return datetime_eq(a, b);
+    }
+    if let (Some(a), Some(b)) = (a.as_array(), b.as_array()) {
+        return a.len() == b.len()
+            && a.iter()
+                .zip(b.iter())
+                .all(|(va, vb)| values_structural_eq(va, vb));
+    }
+    if let (Some(a), Some(b)) = (a.as_inline_table(), b.as_inline_table()) {
+        return a.len() == b.len()
+            && a.iter()
+                .all(|(k, v)| b.get(k).is_some_and(|bv| values_structural_eq(v, bv)));
+    }
+    false
+}
+
+fn tables_structural_eq(a: &toml_edit::Table, b: &toml_edit::Table) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .all(|(k, v)| b.get(k).is_some_and(|bv| items_structural_eq(v, bv)))
+}
+
+pub(crate) fn items_structural_eq(a: &ItemRs, b: &ItemRs) -> bool {
+    match (a, b) {
+        (ItemRs::Value(va), ItemRs::Value(vb)) => values_structural_eq(va, vb),
+        (ItemRs::Table(ta), ItemRs::Table(tb)) => tables_structural_eq(ta, tb),
+        (ItemRs::ArrayOfTables(aa), ItemRs::ArrayOfTables(ab)) => {
+            aa.len() == ab.len()
+                && aa
+                    .iter()
+                    .zip(ab.iter())
+                    .all(|(ta, tb)| tables_structural_eq(ta, tb))
+        }
+        _ => false,
+    }
+}
+
 /// Compare a toml_edit Value to a Python object for equality.
 fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> PyResult<bool> {
     // Check bool before int (Python bool is subclass of int)
@@ -428,9 +480,9 @@ fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> PyResult<bool
         return Ok(f == other_f);
     }
     if let Some(s) = value.as_str()
-        && let Ok(other_s) = other.extract::<String>()
+        && let Ok(other_s) = other.cast::<PyString>()
     {
-        return Ok(s == other_s);
+        return Ok(other_s.to_str().is_ok_and(|o| s == o));
     }
     if let Some(dt) = value.as_datetime()
         && let Ok(py_dt) = other.cast::<PyDateTime>()
@@ -474,7 +526,7 @@ fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> PyResult<bool
 }
 
 /// Compare a toml_edit Table's entries to a Python dict for equality.
-fn table_entries_eq<'a>(
+pub(crate) fn table_entries_eq<'a>(
     iter: impl Iterator<Item = (&'a str, &'a ItemRs)>,
     len: usize,
     other_dict: &Bound<'_, PyDict>,
@@ -491,15 +543,6 @@ fn table_entries_eq<'a>(
         }
     }
     Ok(true)
-}
-
-/// Public wrapper for Document.__eq__ comparing document entries to a dict.
-pub(crate) fn doc_entries_eq<'a>(
-    iter: impl Iterator<Item = (&'a str, &'a ItemRs)>,
-    len: usize,
-    other_dict: &Bound<'_, PyDict>,
-) -> PyResult<bool> {
-    table_entries_eq(iter, len, other_dict)
 }
 
 /// Compare a toml_edit Item to a Python object for equality.
@@ -580,11 +623,11 @@ fn item_len(item: &ItemRs) -> Option<usize> {
 
 fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
     if let Some(table) = item.as_table() {
-        let key: String = value.extract()?;
-        Ok(table.contains_key(&key))
+        let key: &str = value.extract()?;
+        Ok(table.contains_key(key))
     } else if let Some(it) = item.as_inline_table() {
-        let key: String = value.extract()?;
-        Ok(it.contains_key(&key))
+        let key: &str = value.extract()?;
+        Ok(it.contains_key(key))
     } else if let Some(arr) = item.as_array() {
         for v in arr.iter() {
             if value_eq(v, value)? {
@@ -757,20 +800,16 @@ fn datetime_to_py(dt: &toml_edit::Datetime, py: Python<'_>) -> PyResult<Py<PyAny
 }
 
 /// Return the number of iterable children, or a TypeError for scalars.
-enum IterKind {
-    TableKeys(Vec<String>),
+enum IterKind<'a> {
+    TableKeys(Vec<&'a str>),
     ArrayLen(usize),
 }
 
-fn item_iter_info(item: &ItemRs) -> PyResult<IterKind> {
+fn item_iter_info<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
     if let Some(table) = item.as_table() {
-        Ok(IterKind::TableKeys(
-            table.iter().map(|(k, _)| k.to_owned()).collect(),
-        ))
+        Ok(IterKind::TableKeys(table.iter().map(|(k, _)| k).collect()))
     } else if let Some(it) = item.as_inline_table() {
-        Ok(IterKind::TableKeys(
-            it.iter().map(|(k, _)| k.to_owned()).collect(),
-        ))
+        Ok(IterKind::TableKeys(it.iter().map(|(k, _)| k).collect()))
     } else if let Some(arr) = item.as_array() {
         Ok(IterKind::ArrayLen(arr.len()))
     } else if let Some(aot) = item.as_array_of_tables() {
@@ -1097,29 +1136,23 @@ fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item>
 }
 
 pub(crate) fn item_update(item: &mut ItemRs, other: &Bound<'_, PyAny>) -> PyResult<()> {
-    let pairs: Vec<(String, Item)> = if let Ok(dict) = other.cast::<PyDict>() {
-        dict.iter()
-            .map(|(k, v)| {
-                let key: String = k.extract()?;
-                let val: Item = v.extract()?;
-                Ok((key, val))
-            })
-            .collect::<PyResult<_>>()?
-    } else {
-        return Err(PyTypeError::new_err("update() argument must be a dict"));
-    };
+    let dict = other
+        .cast::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("update() argument must be a dict"))?;
 
-    if item.is_table() || item.is_inline_table() {
-        for (key, value) in pairs {
-            set_with_decor_preservation(item, &key, value);
-        }
-        Ok(())
-    } else {
-        Err(PyTypeError::new_err(format!(
+    if !(item.is_table() || item.is_inline_table()) {
+        return Err(PyTypeError::new_err(format!(
             "'{}' does not support update()",
             item.type_name()
-        )))
+        )));
     }
+
+    for (k, v) in dict.iter() {
+        let key: &str = k.extract()?;
+        let val: Item = v.extract()?;
+        set_with_decor_preservation(item, key, val);
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

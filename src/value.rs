@@ -73,7 +73,8 @@ impl<'py> FromPyObject<'_, 'py> for Array {
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         let py_sequence = obj.cast::<PySequence>()?;
-        let mut values: Vec<ValueRs> = Vec::new();
+        let len = py_sequence.len()?;
+        let mut values: Vec<ValueRs> = Vec::with_capacity(len);
         for py_value in py_sequence.try_iter()? {
             let value: Value = py_value?.extract()?;
             values.push(value.0);
@@ -87,7 +88,8 @@ impl<'py> FromPyObject<'_, 'py> for Array {
 // ---------------------------------------------------------------------------
 
 fn extract_mapping_pairs(py_mapping: &Bound<'_, PyMapping>) -> PyResult<Vec<(String, ValueRs)>> {
-    let mut pairs = Vec::new();
+    let len = py_mapping.len()?;
+    let mut pairs = Vec::with_capacity(len);
     for item in py_mapping.items()? {
         let py_tuple = item.cast::<PyTuple>()?;
         let key: String = py_tuple.get_item(0)?.extract()?;
@@ -140,7 +142,8 @@ impl<'py> FromPyObject<'_, 'py> for ArrayOfTables {
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         let py_sequence = obj.cast::<PySequence>()?;
-        let mut tables: Vec<TableRs> = Vec::new();
+        let len = py_sequence.len()?;
+        let mut tables: Vec<TableRs> = Vec::with_capacity(len);
         for py_table in py_sequence.try_iter()? {
             let table: Table = py_table?.extract()?;
             tables.push(table.0);

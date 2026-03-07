@@ -1,0 +1,62 @@
+name: Linting
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ${{ matrix.image }}
+    strategy:
+      matrix:
+        os:
+          - Ubuntu
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+        include:
+          - os: Ubuntu
+            image: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up python {{ matrix.python-version }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+
+      - name: Check lockfile
+        run: uv lock --locked --offline
+
+      - name: Install project
+        run: uv sync -p ${{ matrix.python-version }}
+
+      - name: Install ruff
+        uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3.6.1
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format
+        run: ruff format --check .
+
+      - name: pytest
+        run: uv run pytest

@@ -80,17 +80,20 @@ impl Document {
     }
 
     #[pyo3(signature = (key, default=None))]
-    pub fn get(slf: &Bound<'_, Self>, key: &str, default: Option<&Bound<'_, PyAny>>) -> Py<PyAny> {
+    pub fn get(
+        slf: &Bound<'_, Self>,
+        key: &str,
+        default: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
         let py = slf.py();
         let doc = slf.borrow();
         if doc.0.get(key).is_some() {
-            Self::make_proxy(slf, key)
-                .into_pyobject(py)
-                .unwrap()
+            Ok(Self::make_proxy(slf, key)
+                .into_pyobject(py)?
                 .into_any()
-                .unbind()
+                .unbind())
         } else {
-            default.map_or_else(|| py.None(), |d| d.clone().unbind())
+            Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()))
         }
     }
 

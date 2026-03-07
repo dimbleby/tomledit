@@ -314,7 +314,7 @@ impl ItemProxy {
         item_append(item, value)
     }
 
-    pub fn insert(&self, py: Python<'_>, index: usize, value: Item) -> PyResult<()> {
+    pub fn insert(&self, py: Python<'_>, index: i64, value: Item) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
         let item = self.navigate_mut(&mut doc.0)?;
         item_insert(item, index, value)
@@ -560,11 +560,14 @@ fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         }
         Ok(false)
     } else if let Some(aot) = item.as_array_of_tables() {
-        if let Ok(idx) = value.extract::<usize>() {
-            Ok(idx < aot.len())
-        } else {
-            Ok(false)
+        if let Ok(other_dict) = value.cast::<PyDict>() {
+            for table in aot.iter() {
+                if table_entries_eq(table.iter(), table.len(), other_dict)? {
+                    return Ok(true);
+                }
+            }
         }
+        Ok(false)
     } else {
         Err(PyTypeError::new_err(
             "argument of type 'scalar' is not iterable",
@@ -573,10 +576,25 @@ fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
 }
 
 fn item_bool(item: &ItemRs) -> bool {
-    match item_len(item) {
-        Some(len) => len > 0,
-        None => true, // scalars are truthy
+    if let Some(len) = item_len(item) {
+        return len > 0;
     }
+    // Scalar truthiness: match Python semantics.
+    if let Some(value) = item.as_value() {
+        if let Some(b) = value.as_bool() {
+            return b;
+        }
+        if let Some(i) = value.as_integer() {
+            return i != 0;
+        }
+        if let Some(f) = value.as_float() {
+            return f != 0.0;
+        }
+        if let Some(s) = value.as_str() {
+            return !s.is_empty();
+        }
+    }
+    true
 }
 
 fn item_repr(item: &ItemRs) -> String {
@@ -1091,16 +1109,20 @@ fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
     }
 }
 
-fn item_insert(item: &mut ItemRs, index: usize, value: Item) -> PyResult<()> {
+fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
-        if index > arr.len() {
-            return Err(PyIndexError::new_err("insert index out of range"));
-        }
+        let len = arr.len();
+        // Clamp like Python's list.insert: negative wraps, out-of-range clamps.
+        let resolved = if index < 0 {
+            (len as i64 + index).max(0) as usize
+        } else {
+            (index as usize).min(len)
+        };
         let v = value
             .0
             .into_value()
             .map_err(|_| PyTypeError::new_err("cannot insert non-value into array"))?;
-        arr.insert(index, v);
+        arr.insert(resolved, v);
         Ok(())
     } else {
         Err(PyTypeError::new_err(format!(

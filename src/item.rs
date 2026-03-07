@@ -16,8 +16,9 @@ impl<'py> FromPyObject<'_, 'py> for Item {
         }
 
         if obj.is_none() {
-            let item = ItemRs::None;
-            return Ok(Self(item));
+            return Err(TomlError::new_err(
+                "None is not a valid TOML value (TOML has no null type)",
+            ));
         }
 
         if let Ok(table) = Table::extract(obj) {

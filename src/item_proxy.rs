@@ -215,6 +215,18 @@ impl ItemProxy {
 
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = other.py();
+
+        // Proxy-vs-proxy: compare underlying items directly.
+        if let Ok(other_proxy) = other.cast::<Self>() {
+            let other_proxy = other_proxy.borrow();
+            let doc = self.document.bind(py).borrow();
+            let self_item = self.navigate(&doc.0)?;
+            let other_doc = other_proxy.document.bind(py).borrow();
+            let other_item = other_proxy.navigate(&other_doc.0)?;
+            let other_py = item_to_py(other_item, py)?;
+            return item_eq(self_item, other_py.bind(py));
+        }
+
         let doc = self.document.bind(py).borrow();
         let item = self.navigate(&doc.0)?;
         item_eq(item, other)
@@ -290,7 +302,9 @@ impl ItemProxy {
         let item = self.navigate_mut(&mut doc.0)?;
         match item_pop(item, key) {
             Ok(removed) => item_to_py(&removed.0, py),
-            Err(e) if default.is_some() && e.is_instance_of::<PyKeyError>(py) => Ok(default.unwrap()),
+            Err(e) if default.is_some() && e.is_instance_of::<PyKeyError>(py) => {
+                Ok(default.unwrap())
+            }
             Err(e) => Err(e),
         }
     }

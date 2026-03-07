@@ -416,6 +416,28 @@ class TestEquality:
         doc = Document.parse("val = 1.0\n")
         assert doc["val"] != True  # noqa: E712
 
+    def test_proxy_vs_proxy_same_value(self) -> None:
+        """Two proxies pointing at equal values should compare equal."""
+        doc = Document.parse("a = 42\nb = 42\n")
+        assert doc["a"] == doc["b"]
+
+    def test_proxy_vs_proxy_different_value(self) -> None:
+        doc = Document.parse("a = 42\nb = 99\n")
+        assert doc["a"] != doc["b"]
+
+    def test_proxy_self_equality(self) -> None:
+        doc = Document.parse("a = 42\n")
+        assert doc["a"] == doc["a"]
+
+    def test_proxy_vs_proxy_nested(self) -> None:
+        doc = Document.parse("[t1]\nx = 1\n\n[t2]\nx = 1\n")
+        assert doc["t1"] == doc["t2"]
+
+    def test_proxy_vs_proxy_type_strict(self) -> None:
+        """Proxy-vs-proxy should preserve TOML type strictness."""
+        doc = Document.parse("count = 1\nflag = true\n")
+        assert doc["count"] != doc["flag"]
+
 
 # ---------------------------------------------------------------------------
 # Format preservation
@@ -1106,6 +1128,12 @@ class TestDocumentCompleteness:
         doc = Document.parse("x = 1\n")
         assert doc != 42
         assert doc != "x = 1"
+
+    def test_eq_doc_vs_doc_type_strict(self) -> None:
+        """Document-to-Document equality should respect TOML types."""
+        a = Document.parse("x = true\n")
+        b = Document.parse("x = 1\n")
+        assert a != b
 
     def test_delitem_raises_key_error(self) -> None:
         doc = Document.parse("x = 1\n")

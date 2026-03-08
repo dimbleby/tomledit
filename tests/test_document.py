@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from tests.conftest import make_doc
@@ -234,3 +236,30 @@ class TestDocumentFmt:
         doc = Document.parse("[t]\n  x  =  1\n")
         doc.fmt()
         assert str(doc) == "[t]\n  x  =  1\n"
+
+
+# ---------------------------------------------------------------------------
+# copy / deepcopy
+# ---------------------------------------------------------------------------
+
+
+class TestDocumentCopy:
+    def test_copy_produces_independent_document(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc2 = copy.copy(doc)
+        doc2["x"] = 2
+        assert doc["x"] == 1
+        assert doc2["x"] == 2
+
+    def test_deepcopy_produces_independent_document(self) -> None:
+        doc = Document.parse('[t]\nk = "v"\n')
+        doc2 = copy.deepcopy(doc)
+        doc2["t"]["k"] = "changed"
+        assert doc["t"]["k"] == "v"
+        assert doc2["t"]["k"] == "changed"
+
+    def test_copy_preserves_formatting(self) -> None:
+        text = "  x  =  1  \n\n[section]\n  key  =  'val'\n"
+        doc = Document.parse(text)
+        doc2 = copy.copy(doc)
+        assert str(doc2) == text

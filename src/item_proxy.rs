@@ -574,6 +574,35 @@ impl ItemProxy {
         item_fmt(item);
         Ok(())
     }
+
+    /// Parse a TOML value fragment, preserving its representation.
+    ///
+    /// Use this when you need a specific TOML representation that can't be
+    /// expressed through plain Python types, e.g. hex integers or literal strings:
+    ///
+    ///     doc["mask"] = Item.parse("0xFF")
+    ///     doc["msg"]  = Item.parse("'''multi\nline'''")
+    #[staticmethod]
+    fn parse(py: Python<'_>, text: &str) -> PyResult<Self> {
+        let value: ValueRs = text
+            .parse()
+            .map_err(|e: toml_edit::TomlError| PyValueError::new_err(e.to_string()))?;
+        let mut doc_rs = DocumentRs::new();
+        doc_rs["_"] = ItemRs::Value(value);
+        let doc = Py::new(
+            py,
+            Document {
+                inner: doc_rs,
+                generation: 0,
+            },
+        )?;
+        let generation = 0;
+        Ok(Self {
+            document: doc,
+            path: vec![Key::Str("_".to_owned())],
+            generation,
+        })
+    }
 }
 
 // ===========================================================================

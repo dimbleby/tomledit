@@ -1,7 +1,8 @@
 # Changelog
 
-## 0.4.1 (8 March 2026)
+## 0.5.0 (8 March 2026)
 
+- Add `Item.parse()`
 - Allow assigning `Documents`s back into the document (e.g. `doc1["a"] = doc2["b"]`)
 
 ## 0.4.0 (8 March 2026)

@@ -8,7 +8,7 @@ from datetime import datetime
 import pytest
 
 from tests.conftest import make_doc
-from tomledit import Document
+from tomledit import Document, Item
 
 # ---------------------------------------------------------------------------
 # Reading scalar values (like dict access)
@@ -421,3 +421,34 @@ class TestAssignItemProxy:
         doc["foo"] = doc
         assert doc["foo"] == {"a": 1, "b": 2}
         assert "foo" not in doc["foo"]
+
+
+# ---------------------------------------------------------------------------
+# Item.parse() — custom TOML representations
+# ---------------------------------------------------------------------------
+
+
+class TestItemParse:
+    def test_hex_integer(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc["x"] = Item.parse("0xFF")
+        assert str(doc) == "x = 0xFF\n"
+        assert doc["x"] == 255
+
+    def test_literal_string(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc["x"] = Item.parse("'literal'")
+        assert str(doc) == "x = 'literal'\n"
+
+    def test_multiline_string(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc["x"] = Item.parse("'''multi\nline'''")
+        assert str(doc) == "x = '''multi\nline'''\n"
+
+    def test_value_is_correct(self) -> None:
+        item = Item.parse("0xFF")
+        assert item.value == 255
+
+    def test_invalid_input_raises(self) -> None:
+        with pytest.raises(ValueError, match="TOML parse error"):
+            Item.parse("[not a value")

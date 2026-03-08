@@ -11,9 +11,12 @@ Set and remove comments in the document.
 ## Quick start
 
 ```python
+from pathlib import Path
+
 from tomledit import Document
 
-doc = Document.parse(open("pyproject.toml").read())
+text = Path("pyproject.toml").read_text(encoding="utf-8")
+doc = Document.parse(text)
 
 doc["project"]["version"].comment = "# Version 2"
 doc["project"]["version"] = "2.0.0"
@@ -21,5 +24,5 @@ doc["project"]["keywords"].append("important-keyword")
 doc["project"]["keywords"].inline_comment = "# keywords"
 del doc["project"]["optional-dependencies"]
 
-open("pyproject.toml", "w").write(str(doc))
+Path("pyproject.toml").write_text(str(doc), encoding="utf-8")
 ```

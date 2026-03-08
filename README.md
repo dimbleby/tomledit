@@ -54,18 +54,18 @@ keywords = ["python", "toml", "important-keyword"] # updated
 dev = ["pytest"]
 ```
 
-## How it works
+## Truth in advertising
 
-It is intended that using a `Document` mostly feels just like using a native
-Python dictionary, and that the `Item`s you get from it can also be treated as
-ordinary dictionaries and lists and suchlike.
+It is intended that using a `Document` feels just like using a native Python
+dictionary, and that the `Item`s you get from it can also be treated as ordinary
+dictionaries and lists and suchlike.
 
-Under the hood, though, every `Item` you get from the dictionary is really a
-_path_ back into the shared document.
+Under the hood, though, every `Item` is really a _path_ back into the shared
+document.
 
-This is mostly invisible, but there is one place the implementation leaks out:
-because items are paths, they can go stale when the document changes underneath
-them.
+This is mostly invisible, but sometimes the implementation leaks out.
+In particular: because items are paths, they can go stale when the document
+changes underneath them.
 
 ```python
 doc = Document.parse('arr = ["a", "b"]')

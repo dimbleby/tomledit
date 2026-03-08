@@ -288,3 +288,43 @@ class TestEqualityEdgeCases:
         tz = timezone(timedelta(hours=5, minutes=30))
         expected = datetime(2024, 1, 15, 10, 30, 0, tzinfo=tz)
         assert doc["dt"] == expected
+
+
+class TestNumericTowerEquality:
+    """Python's numeric tower: 1 == 1.0 == True.
+
+    TOML integer and float proxies should follow Python semantics when compared
+    to Python objects, even across numeric types.
+    """
+
+    def test_int_proxy_eq_python_float(self) -> None:
+        doc = Document.parse("x = 1\n")
+        assert doc["x"] == 1.0
+
+    def test_int_proxy_eq_python_float_zero(self) -> None:
+        doc = Document.parse("x = 0\n")
+        assert doc["x"] == 0.0
+
+    def test_float_proxy_eq_python_int(self) -> None:
+        doc = Document.parse("x = 1.0\n")
+        assert doc["x"] == 1
+
+    def test_float_proxy_neq_python_int(self) -> None:
+        doc = Document.parse("x = 1.5\n")
+        assert doc["x"] != 1
+
+    def test_float_in_int_array(self) -> None:
+        """1.0 in [1, 2, 3] is True in Python."""
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        assert 1.0 in doc["arr"]
+
+    def test_int_in_float_array(self) -> None:
+        """1 in [1.0, 2.0] is True in Python."""
+        doc = Document.parse("arr = [1.0, 2.0]\n")
+        assert 1 in doc["arr"]
+
+    def test_cross_type_proxy_eq(self) -> None:
+        """Two proxies: int 1 vs float 1.0 — structural eq stays strict."""
+        doc = Document.parse("x = 1\ny = 1.0\n")
+        # Proxy-to-proxy uses TOML structural equality (type-aware)
+        assert doc["x"] != doc["y"]

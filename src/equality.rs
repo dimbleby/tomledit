@@ -90,10 +90,13 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
             }
         }
         toml_edit::Value::Integer(i) => {
-            if other.cast::<PyBool>().is_err()
-                && let Ok(other_i) = other.extract::<i64>()
-            {
-                return Ok(*i.value() == other_i);
+            if other.cast::<PyBool>().is_err() {
+                if let Ok(other_i) = other.extract::<i64>() {
+                    return Ok(*i.value() == other_i);
+                }
+                if let Ok(other_f) = other.extract::<f64>() {
+                    return Ok((*i.value() as f64) == other_f);
+                }
             }
         }
         toml_edit::Value::Float(f) => {

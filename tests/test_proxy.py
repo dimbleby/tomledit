@@ -818,15 +818,12 @@ class TestSliceIndexing:
     def test_setitem_slice_visible_in_output(self) -> None:
         doc = Document.parse(self.TOML)
         doc["arr"][1:4] = [20, 30, 40]
-        assert "20" in str(doc)
-        assert "30" in str(doc)
-        assert "40" in str(doc)
+        assert str(doc) == "arr = [1, 20, 30, 40, 5]\n"
 
     def test_delitem_slice_visible_in_output(self) -> None:
         doc = Document.parse(self.TOML)
         del doc["arr"][0:2]
-        output = str(doc)
-        assert "1" not in output.split("=")[1]  # 1 removed
+        assert str(doc) == "arr = [ 3, 4, 5]\n"
 
     # ---- additional edge cases ----
 
@@ -1031,5 +1028,4 @@ class TestArrayOfTablesAccess:
 
     def test_str(self) -> None:
         doc = Document.parse('[[items]]\nname = "a"\n')
-        s = str(doc["items"])
-        assert "a" in s
+        assert str(doc["items"]) == "[{'name': 'a'}]"

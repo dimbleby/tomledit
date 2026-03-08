@@ -90,6 +90,7 @@ class TestWriteScalars:
         doc = make_doc()
         doc["owner"]["name"] = "Bob"
         assert 'name = "Bob"' in str(doc)
+        assert doc["owner"]["name"] == "Bob"
 
 
 # ---------------------------------------------------------------------------
@@ -238,31 +239,25 @@ class TestFormatPreservation:
         toml = "# header\na = 1\nb = 2\n"
         doc = Document.parse(toml)
         doc["a"] = 10
-        result = str(doc)
-        assert "# header" in result
-        assert "b = 2" in result
+        assert str(doc) == "# header\na = 10\nb = 2\n"
 
     def test_inline_comment_preserved_on_top_level_update(self) -> None:
         toml = 'title = "old" # important note\n'
         doc = Document.parse(toml)
         doc["title"] = "new"
-        assert "# important note" in str(doc)
+        assert str(doc) == 'title = "new" # important note\n'
 
     def test_inline_comment_preserved_on_nested_update(self) -> None:
         toml = '[owner]\nname = "Tom"  # the owner name\nage = 30\n'
         doc = Document.parse(toml)
         doc["owner"]["name"] = "Bob"
-        result = str(doc)
-        assert '"Bob"' in result
-        assert "# the owner name" in result
+        assert str(doc) == '[owner]\nname = "Bob"  # the owner name\nage = 30\n'
 
     def test_standalone_comment_preserved_on_nested_update(self) -> None:
         toml = '[owner]\n# this is the name\nname = "Tom"\n'
         doc = Document.parse(toml)
         doc["owner"]["name"] = "Bob"
-        result = str(doc)
-        assert "# this is the name" in result
-        assert '"Bob"' in result
+        assert str(doc) == '[owner]\n# this is the name\nname = "Bob"\n'
 
 
 # ---------------------------------------------------------------------------

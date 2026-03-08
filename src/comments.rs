@@ -120,6 +120,13 @@ pub(crate) fn set_key_prefix_comment(
     key: &str,
     comment: Option<&str>,
 ) -> PyResult<()> {
+    // Block comments on inline-table keys would force the table onto
+    // multiple lines, producing TOML that is invalid under TOML 1.0.
+    if comment.is_some() && parent.is_inline_table() {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "cannot set block comment on inline table key (would produce multi-line inline table)",
+        ));
+    }
     let key_mut = if let Some(table) = parent.as_table_mut() {
         table.key_mut(key)
     } else if let Some(it) = parent.as_inline_table_mut() {

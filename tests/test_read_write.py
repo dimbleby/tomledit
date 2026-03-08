@@ -190,6 +190,16 @@ class TestArrayOfTablesMutation:
         doc["d"][1]["b"] = 99
         assert doc["d"][1]["b"] == 99
 
+    def test_setitem_replaces_entry(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc["items"][0] = {"name": "z"}
+        assert doc["items"][0]["name"] == "z"
+
+    def test_setitem_negative_index(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc["items"][-1] = {"name": "last"}
+        assert doc["items"][1]["name"] == "last"
+
 
 # ---------------------------------------------------------------------------
 # Chained mutation on inline tables (dicts)
@@ -282,3 +292,48 @@ class TestMutationViaAccessors:
         assert len(vals) == 1
         vals[0]["val"] = 99
         assert doc["section"]["val"] == 99
+
+
+# ---------------------------------------------------------------------------
+# Nested array access (navigate_parent with Key::Int)
+# ---------------------------------------------------------------------------
+
+
+class TestNestedArrayNavigation:
+    """Exercise the Key::Int branch in navigate_parent / navigate_parent_mut."""
+
+    def test_comment_on_nested_array_element(self) -> None:
+        """doc["arr"][0] navigates to an array element; accessing a child
+        of that element uses navigate_parent with int key in path."""
+        doc = Document.parse("arr = [{x = 1}, {x = 2}]\n")
+        assert doc["arr"][0]["x"] == 1
+        assert doc["arr"][1]["x"] == 2
+
+    def test_setitem_through_nested_array(self) -> None:
+        doc = Document.parse("arr = [{x = 1}, {x = 2}]\n")
+        doc["arr"][0]["x"] = 99
+        assert doc["arr"][0]["x"] == 99
+
+    def test_deeply_nested_array_access(self) -> None:
+        doc = Document.parse("a = [[1, 2], [3, 4]]\n")
+        assert doc["a"][0][0] == 1
+        assert doc["a"][1][1] == 4
+
+
+# ---------------------------------------------------------------------------
+# Assigning a table (dict) to an existing key
+# ---------------------------------------------------------------------------
+
+
+class TestAssignTableToKey:
+    def test_assign_dict_to_existing_scalar(self) -> None:
+        """Assigning a dict to a key that was a scalar converts it to a table."""
+        doc = Document.parse("[section]\nx = 1\n")
+        doc["section"]["x"] = {"nested": "value"}
+        assert doc["section"]["x"]["nested"] == "value"
+
+    def test_assign_dict_to_existing_table_key(self) -> None:
+        """Assigning a dict to a key that was already a table replaces it."""
+        doc = Document.parse("[s]\n[s.inner]\na = 1\n")
+        doc["s"]["inner"] = {"b": 2}
+        assert doc["s"]["inner"]["b"] == 2

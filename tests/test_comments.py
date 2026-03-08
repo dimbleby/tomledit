@@ -291,3 +291,87 @@ class TestComment:
         doc = Document.parse("[[s]]\nname = 'a'\n[[s]]\nname = 'b'\n")
         with pytest.raises(TypeError, match="does not support"):
             doc["s"][0].comment = "# nope"
+
+    # ---- table section inline comments ----
+
+    def test_read_table_section_inline_comment(self) -> None:
+        doc = Document.parse("[section] # my note\nx = 1\n")
+        assert doc["section"].inline_comment == "# my note"
+
+    def test_set_table_section_inline_comment(self) -> None:
+        doc = Document.parse("[section]\nx = 1\n")
+        doc["section"].inline_comment = "# added"
+        assert "[section] # added" in str(doc)
+        assert doc["section"].inline_comment == "# added"
+
+    def test_clear_table_section_inline_comment(self) -> None:
+        doc = Document.parse("[section] # comment\nx = 1\n")
+        doc["section"].inline_comment = None
+        assert doc["section"].inline_comment is None
+        assert "# comment" not in str(doc)
+
+    def test_table_without_inline_comment_returns_none(self) -> None:
+        doc = Document.parse("[section]\nx = 1\n")
+        assert doc["section"].inline_comment is None
+
+    # ---- inline table key comments ----
+
+    def test_read_inline_table_key_comment_none(self) -> None:
+        doc = Document.parse("t = {x = 1, y = 2}\n")
+        assert doc["t"]["x"].comment is None
+
+    def test_set_inline_table_key_comment(self) -> None:
+        doc = Document.parse("t = {x = 1, y = 2}\n")
+        doc["t"]["x"].comment = "# note"
+        assert doc["t"]["x"].comment == "# note"
+
+    def test_clear_inline_table_key_comment(self) -> None:
+        doc = Document.parse("t = {x = 1, y = 2}\n")
+        doc["t"]["x"].comment = "# note"
+        doc["t"]["x"].comment = None
+        assert doc["t"]["x"].comment is None
+
+    # ---- array comment edge cases ----
+
+    def test_multiline_array_with_blank_line_between_comments(self) -> None:
+        """Tests split_prefix where block has multiple newlines."""
+        toml = "arr = [\n  # first\n  1,\n\n  # after blank\n  2,\n]\n"
+        doc = Document.parse(toml)
+        # blank line is preserved as part of the block comment
+        assert doc["arr"][1].comment == "\n# after blank"
+
+    def test_array_element_comment_roundtrip_multiline(self) -> None:
+        """Set a block comment on an element in a multiline array."""
+        toml = "arr = [\n  1,\n  2,\n  3,\n]\n"
+        doc = Document.parse(toml)
+        doc["arr"][1].comment = "# middle"
+        result = str(doc)
+        assert "# middle" in result
+        assert doc["arr"][1].comment == "# middle"
+
+    def test_blank_line_between_elements_no_comment(self) -> None:
+        """Blank line between elements with no comment — exercises
+        split_prefix block.is_empty() branch."""
+        doc = Document.parse("arr = [\n  1,\n\n  2,\n]\n")
+        assert doc["arr"][0].comment is None
+        assert doc["arr"][0].inline_comment is None
+
+    def test_compact_array_comment_returns_none(self) -> None:
+        """Compact single-line array — prefix has no newline at all,
+        exercises split_prefix no-newline fallback."""
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        assert doc["arr"][0].comment is None
+        assert doc["arr"][1].comment is None
+        assert doc["arr"][0].inline_comment is None
+
+    # ---- comments on AoT children ----
+
+    def test_set_inline_comment_on_aot_entry_child(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc["items"][0]["name"].inline_comment = "# first"
+        assert doc["items"][0]["name"].inline_comment == "# first"
+
+    def test_set_comment_on_aot_entry_child(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc["items"][1]["name"].comment = "# second item name"
+        assert doc["items"][1]["name"].comment == "# second item name"

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 (8 March 2026)
 
 - Allow assigning `Documents`s back into the document (e.g. `doc1["a"] = doc2["b"]`)
 

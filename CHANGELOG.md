@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (8 March 2026)
 
 - Be less aggressive about invalidating `Item`s
   - eg appending to an array cannot invalidate any existing path
+- Reject integer keys in tables
+- Allow floats and integers to be equal
+- Implement `__copy__` and `__deepcopy__` on `Document`
 
 ## 0.5.0 (8 March 2026)
 

@@ -1,16 +1,18 @@
 # Changelog
 
-# Unreleased
+## Unreleased
+
+## 0.4.0 (8 March 2026)
 
 - Allow assigning `Item`s back into the document (e.g. `doc["b"] = doc["a"]`)
 
-# 0.3.0 (8 March 2026)
+## 0.3.0 (8 March 2026)
 
 - Invalidate `Item`s when the document changes
 - Remove `TomlError`
 - Bugfix inserting into inline table
 
-# 0.2.0 (8 March 2026)
+## 0.2.0 (8 March 2026)
 
 - Add support for manipulating comments
 

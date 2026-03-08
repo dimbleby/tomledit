@@ -881,45 +881,25 @@ fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
 
 fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyResult<()> {
     match item {
-        ItemRs::Value(value_rs) => match value_rs {
-            toml_edit::Value::Array(array) => {
-                let v = value
-                    .0
-                    .into_value()
-                    .map_err(|_| PyTypeError::new_err("Item cannot be assigned to array"))?;
-                let idx = resolve_index(key.extract::<i64>()?, array.len())?;
-                array.replace(idx, v);
-                Ok(())
-            }
-            toml_edit::Value::InlineTable(inline_table) => {
-                let mut v = value
-                    .0
-                    .into_value()
-                    .map_err(|_| PyTypeError::new_err("Item cannot be assigned to inline table"))?;
-                let key: &str = key.extract()?;
-                if let Some(old) = inline_table.get(key) {
-                    let old_decor = old.decor();
-                    if let Some(prefix) = old_decor.prefix() {
-                        v.decor_mut().set_prefix(prefix.clone());
-                    }
-                    if let Some(suffix) = old_decor.suffix() {
-                        v.decor_mut().set_suffix(suffix.clone());
-                    }
-                }
-                inline_table[key] = v;
-                Ok(())
-            }
-            _ => {
-                let name = value_rs.type_name();
-                Err(PyTypeError::new_err(format!(
-                    "'{name}' is not subscriptable"
-                )))
-            }
-        },
-        ItemRs::Table(_) => {
+        ItemRs::Value(toml_edit::Value::Array(array)) => {
+            let v = value
+                .0
+                .into_value()
+                .map_err(|_| PyTypeError::new_err("Item cannot be assigned to array"))?;
+            let idx = resolve_index(key.extract::<i64>()?, array.len())?;
+            array.replace(idx, v);
+            Ok(())
+        }
+        ItemRs::Value(toml_edit::Value::InlineTable(_)) | ItemRs::Table(_) => {
             let key: &str = key.extract()?;
             set_with_decor_preservation(item, key, value);
             Ok(())
+        }
+        ItemRs::Value(value_rs) => {
+            let name = value_rs.type_name();
+            Err(PyTypeError::new_err(format!(
+                "'{name}' is not subscriptable"
+            )))
         }
         ItemRs::ArrayOfTables(aot) => {
             let idx = resolve_index(key.extract::<i64>()?, aot.len())?;

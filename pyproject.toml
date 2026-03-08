@@ -1,13 +1,11 @@
 [project]
 name = "tomledit"
-version = "0.2.0"
 description = "Format-preserving TOML parser"
 readme = "README.md"
 authors = [
   { name = "David Hotham" },
 ]
 keywords = ["encoding", "toml"]
-license = "Apache-2.0 OR MIT"
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "License :: OSI Approved :: MIT License",
@@ -15,6 +13,10 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = []
+dynamic = [
+  "license",
+  "version",
+]
 
 [project.urls]
 Repository = "https://github.com/dimbleby/tomledit"

@@ -31,11 +31,11 @@ jobs:
           VERSION="${TAG#v}"
           PKG_VERSION=$(python3 -c "
           import tomllib
-          with open('pyproject.toml', 'rb') as f:
-              print(tomllib.load(f)['project']['version'])
+          with open('Cargo.toml', 'rb') as f:
+              print(tomllib.load(f)['package']['version'])
           ")
           if [ "$VERSION" != "$PKG_VERSION" ]; then
-            echo "::error::Tag ${TAG} does not match pyproject.toml version ${PKG_VERSION}"
+            echo "::error::Tag ${TAG} does not match Cargo.toml version ${PKG_VERSION}"
             exit 1
           fi
 

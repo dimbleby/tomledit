@@ -1,13 +1,9 @@
 # Changelog
 
-# Unreleased
+# 0.3.0 (8 March 2026)
 
 - Remove `TomlError`
 - Bugfix inserting into inline table
-
-# 0.3.0 (8 March 2026)
-
-- Nothing interesting
 
 # 0.2.0 (8 March 2026)
 

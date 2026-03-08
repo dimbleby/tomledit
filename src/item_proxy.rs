@@ -22,6 +22,30 @@ pub(crate) enum Key {
     Int(usize),
 }
 
+fn navigate_path<'a>(doc: &'a DocumentRs, path: &[Key]) -> PyResult<&'a ItemRs> {
+    let mut current: &ItemRs = doc.as_item();
+    for key in path {
+        let next = match key {
+            Key::Str(s) => current.get(s.as_str()),
+            Key::Int(i) => current.get(*i),
+        };
+        current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
+    }
+    Ok(current)
+}
+
+fn navigate_path_mut<'a>(doc: &'a mut DocumentRs, path: &[Key]) -> PyResult<&'a mut ItemRs> {
+    let mut current: &mut ItemRs = doc.as_item_mut();
+    for key in path {
+        let next = match key {
+            Key::Str(s) => current.get_mut(s.as_str()),
+            Key::Int(i) => current.get_mut(*i),
+        };
+        current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
+    }
+    Ok(current)
+}
+
 /// A proxy into a Document that supports chained `__getitem__` / `__setitem__`.
 ///
 /// Instead of cloning the underlying item (which breaks `doc["d"][0] = 7`),
@@ -74,27 +98,11 @@ impl ItemProxy {
     }
 
     fn navigate<'a>(&self, doc: &'a DocumentRs) -> PyResult<&'a ItemRs> {
-        let mut current: &ItemRs = doc.as_item();
-        for key in &self.path {
-            let next = match key {
-                Key::Str(s) => current.get(s.as_str()),
-                Key::Int(i) => current.get(*i),
-            };
-            current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
-        }
-        Ok(current)
+        navigate_path(doc, &self.path)
     }
 
     fn navigate_mut<'a>(&self, doc: &'a mut DocumentRs) -> PyResult<&'a mut ItemRs> {
-        let mut current: &mut ItemRs = doc.as_item_mut();
-        for key in &self.path {
-            let next = match key {
-                Key::Str(s) => current.get_mut(s.as_str()),
-                Key::Int(i) => current.get_mut(*i),
-            };
-            current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
-        }
-        Ok(current)
+        navigate_path_mut(doc, &self.path)
     }
 
     fn child_proxy(&self, py: Python<'_>, key: Key) -> ItemProxy {
@@ -109,27 +117,11 @@ impl ItemProxy {
 
     /// Navigate to the parent item (all path segments except the last).
     fn navigate_parent<'a>(&self, doc: &'a DocumentRs) -> PyResult<&'a ItemRs> {
-        let mut current: &ItemRs = doc.as_item();
-        for key in &self.path[..self.path.len() - 1] {
-            let next = match key {
-                Key::Str(s) => current.get(s.as_str()),
-                Key::Int(i) => current.get(*i),
-            };
-            current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
-        }
-        Ok(current)
+        navigate_path(doc, &self.path[..self.path.len() - 1])
     }
 
     fn navigate_parent_mut<'a>(&self, doc: &'a mut DocumentRs) -> PyResult<&'a mut ItemRs> {
-        let mut current: &mut ItemRs = doc.as_item_mut();
-        for key in &self.path[..self.path.len() - 1] {
-            let next = match key {
-                Key::Str(s) => current.get_mut(s.as_str()),
-                Key::Int(i) => current.get_mut(*i),
-            };
-            current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
-        }
-        Ok(current)
+        navigate_path_mut(doc, &self.path[..self.path.len() - 1])
     }
 }
 
@@ -893,10 +885,7 @@ fn require_array_like_len(item: &ItemRs) -> PyResult<usize> {
     match item {
         ItemRs::Value(ValueRs::Array(arr)) => Ok(arr.len()),
         ItemRs::ArrayOfTables(aot) => Ok(aot.len()),
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item does not support slicing",
-            item.type_name()
-        ))),
+        _ => Err(unsupported_op(item, "slicing")),
     }
 }
 
@@ -920,10 +909,7 @@ fn item_delitem_slice(item: &mut ItemRs, indices: &[usize]) -> PyResult<()> {
             }
             Ok(())
         }
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item does not support slice deletion",
-            item.type_name()
-        ))),
+        _ => Err(unsupported_op(item, "slice deletion")),
     }
 }
 
@@ -954,10 +940,7 @@ fn item_setitem_slice(
 
         // Insert new elements at start position.
         for (offset, value) in values.into_iter().enumerate() {
-            let v = value
-                .0
-                .into_value()
-                .map_err(|_| PyTypeError::new_err("cannot assign non-value to array slice"))?;
+            let v = into_value(value)?;
             let idx = start_idx + offset;
             if idx >= arr.len() {
                 arr.push(v);
@@ -977,10 +960,7 @@ fn item_setitem_slice(
             )));
         }
         for (idx, value) in indices.into_iter().zip(values) {
-            let v = value
-                .0
-                .into_value()
-                .map_err(|_| PyTypeError::new_err("cannot assign non-value to array slice"))?;
+            let v = into_value(value)?;
             arr.replace(idx, v);
         }
         Ok(())
@@ -1000,6 +980,19 @@ fn bad_key_type(key: &Bound<'_, PyAny>) -> PyErr {
     PyTypeError::new_err(format!(
         "indices must be integers or strings, not {type_name}"
     ))
+}
+
+fn unsupported_op(item: &ItemRs, op: &str) -> PyErr {
+    PyTypeError::new_err(format!(
+        "TOML {} item does not support {op}",
+        item.type_name()
+    ))
+}
+
+fn into_value(item: Item) -> PyResult<ValueRs> {
+    item.0
+        .into_value()
+        .map_err(|item| PyTypeError::new_err(format!("cannot convert {} to a TOML value", item.type_name())))
 }
 
 fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
@@ -1046,10 +1039,7 @@ fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyRes
             Ok(replaced)
         }
         ItemRs::Value(ValueRs::Array(array)) => {
-            let v = value
-                .0
-                .into_value()
-                .map_err(|_| PyTypeError::new_err("Item cannot be assigned to array"))?;
+            let v = into_value(value)?;
             let idx = resolve_index(key.extract::<i64>()?, array.len())?;
             array.replace(idx, v);
             Ok(true)
@@ -1059,18 +1049,10 @@ fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyRes
             item[idx] = value.0;
             Ok(true)
         }
-        ItemRs::Value(value_rs) => {
-            let name = value_rs.type_name();
-            Err(PyTypeError::new_err(format!(
-                "'{name}' is not subscriptable"
-            )))
-        }
-        _ => {
-            let name = item.type_name();
-            Err(PyTypeError::new_err(format!(
-                "'{name}' is not subscriptable"
-            )))
-        }
+        _ => Err(PyTypeError::new_err(format!(
+            "'{}' is not subscriptable",
+            item.type_name()
+        ))),
     }
 }
 
@@ -1137,10 +1119,7 @@ fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item>
                 let idx = resolve_index(key_obj.extract::<i64>()?, arr.len())?;
                 Ok(Item(ItemRs::Value(arr.remove(idx))))
             }
-            _ => Err(PyTypeError::new_err(format!(
-                "TOML {} item does not support pop()",
-                item.type_name()
-            ))),
+            _ => Err(unsupported_op(item, "pop()")),
         },
         None => match item {
             ItemRs::Value(ValueRs::Array(arr)) => {
@@ -1174,10 +1153,7 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
 /// Apply pre-extracted update pairs to an item.
 pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) -> PyResult<()> {
     if !(item.is_table() || item.is_inline_table()) {
-        return Err(PyTypeError::new_err(format!(
-            "TOML {} item does not support update()",
-            item.type_name()
-        )));
+        return Err(unsupported_op(item, "update()"));
     }
     for (key, val) in pairs {
         set_with_decor_preservation(item, &key, val);
@@ -1191,17 +1167,11 @@ pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) 
 
 fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
-        let v = value
-            .0
-            .into_value()
-            .map_err(|_| PyTypeError::new_err("cannot append non-value to array"))?;
+        let v = into_value(value)?;
         arr.push(v);
         Ok(())
     } else {
-        Err(PyTypeError::new_err(format!(
-            "TOML {} item does not support append()",
-            item.type_name()
-        )))
+        Err(unsupported_op(item, "append()"))
     }
 }
 
@@ -1214,17 +1184,11 @@ fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResult<()> {
         } else {
             (index as usize).min(len)
         };
-        let v = value
-            .0
-            .into_value()
-            .map_err(|_| PyTypeError::new_err("cannot insert non-value into array"))?;
+        let v = into_value(value)?;
         arr.insert(resolved, v);
         Ok(())
     } else {
-        Err(PyTypeError::new_err(format!(
-            "TOML {} item does not support insert()",
-            item.type_name()
-        )))
+        Err(unsupported_op(item, "insert()"))
     }
 }
 
@@ -1240,28 +1204,19 @@ fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResult<()> {
         }
         Err(PyValueError::new_err("value not in array"))
     } else {
-        Err(PyTypeError::new_err(format!(
-            "TOML {} item does not support remove()",
-            item.type_name()
-        )))
+        Err(unsupported_op(item, "remove()"))
     }
 }
 
 fn item_extend(item: &mut ItemRs, items: Vec<Item>) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
         for new_item in items {
-            let v = new_item
-                .0
-                .into_value()
-                .map_err(|_| PyTypeError::new_err("cannot extend array with non-value"))?;
+            let v = into_value(new_item)?;
             arr.push(v);
         }
         Ok(())
     } else {
-        Err(PyTypeError::new_err(format!(
-            "TOML {} item does not support extend()",
-            item.type_name()
-        )))
+        Err(unsupported_op(item, "extend()"))
     }
 }
 
@@ -1283,10 +1238,7 @@ fn item_clear(item: &mut ItemRs) -> PyResult<()> {
             aot.clear();
             Ok(())
         }
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item does not support clear()",
-            item.type_name()
-        ))),
+        _ => Err(unsupported_op(item, "clear()")),
     }
 }
 

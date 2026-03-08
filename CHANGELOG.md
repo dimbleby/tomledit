@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Be less aggressive about invalidating `Item`s
+  - eg appending to an array cannot invalidate any existing path
+
 ## 0.5.0 (8 March 2026)
 
 - Add `Item.parse()`

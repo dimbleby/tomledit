@@ -220,8 +220,10 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_setitem(item, key, value)?;
-        self.bump_generation(&mut doc);
+        let replaced = item_setitem(item, key, value)?;
+        if replaced {
+            self.bump_generation(&mut doc);
+        }
         Ok(())
     }
 
@@ -509,7 +511,6 @@ impl ItemProxy {
 
         if !item_has_key(item, key)? {
             set_with_decor_preservation(item, key, default);
-            self.bump_generation(&mut doc);
         }
 
         Ok(self.child_proxy(py, Key::Str(key.to_owned())))
@@ -522,7 +523,6 @@ impl ItemProxy {
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
         item_append(item, value)?;
-        self.bump_generation(&mut doc);
         Ok(())
     }
 
@@ -554,7 +554,6 @@ impl ItemProxy {
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
         item_extend(item, items)?;
-        self.bump_generation(&mut doc);
         Ok(())
     }
 
@@ -699,10 +698,10 @@ fn item_bool(item: &ItemRs) -> bool {
     // Scalar truthiness: match Python semantics.
     if let ItemRs::Value(value) = item {
         match value {
-            toml_edit::Value::Boolean(b) => *b.value(),
-            toml_edit::Value::Integer(i) => *i.value() != 0,
-            toml_edit::Value::Float(f) => *f.value() != 0.0,
-            toml_edit::Value::String(s) => !s.value().is_empty(),
+            ValueRs::Boolean(b) => *b.value(),
+            ValueRs::Integer(i) => *i.value() != 0,
+            ValueRs::Float(f) => *f.value() != 0.0,
+            ValueRs::String(s) => !s.value().is_empty(),
             _ => true,
         }
     } else {
@@ -750,7 +749,7 @@ pub(crate) fn item_to_py(item: &ItemRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
     }
 }
 
-fn value_to_py(value: &toml_edit::Value, py: Python<'_>) -> PyResult<Py<PyAny>> {
+fn value_to_py(value: &ValueRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
     if let Some(s) = value.as_str() {
         return Ok(s.into_pyobject(py)?.into_any().unbind());
     }
@@ -1031,8 +1030,21 @@ fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
 // Setitem
 // ---------------------------------------------------------------------------
 
-fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyResult<()> {
+/// Returns `true` if an existing value was replaced, `false` if a new key was added.
+fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyResult<bool> {
     match item {
+        ItemRs::Table(t) => {
+            let key: &str = key.extract()?;
+            let replaced = t.contains_key(key);
+            set_with_decor_preservation(item, key, value);
+            Ok(replaced)
+        }
+        ItemRs::Value(ValueRs::InlineTable(it)) => {
+            let key: &str = key.extract()?;
+            let replaced = it.contains_key(key);
+            set_with_decor_preservation(item, key, value);
+            Ok(replaced)
+        }
         ItemRs::Value(ValueRs::Array(array)) => {
             let v = value
                 .0
@@ -1040,23 +1052,18 @@ fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyRes
                 .map_err(|_| PyTypeError::new_err("Item cannot be assigned to array"))?;
             let idx = resolve_index(key.extract::<i64>()?, array.len())?;
             array.replace(idx, v);
-            Ok(())
+            Ok(true)
         }
-        ItemRs::Value(ValueRs::InlineTable(_)) | ItemRs::Table(_) => {
-            let key: &str = key.extract()?;
-            set_with_decor_preservation(item, key, value);
-            Ok(())
+        ItemRs::ArrayOfTables(aot) => {
+            let idx = resolve_index(key.extract::<i64>()?, aot.len())?;
+            item[idx] = value.0;
+            Ok(true)
         }
         ItemRs::Value(value_rs) => {
             let name = value_rs.type_name();
             Err(PyTypeError::new_err(format!(
                 "'{name}' is not subscriptable"
             )))
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            let idx = resolve_index(key.extract::<i64>()?, aot.len())?;
-            item[idx] = value.0;
-            Ok(())
         }
         _ => {
             let name = item.type_name();

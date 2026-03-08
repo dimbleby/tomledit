@@ -213,6 +213,12 @@ class TestInlineTableMutation:
         doc["meta"]["x"] = 10
         assert doc["meta"]["x"] == 10
 
+    def test_set_new_key_in_inline_table(self) -> None:
+        doc = Document.parse("meta = {x = 1}\n")
+        doc["meta"]["y"] = 2
+        assert doc["meta"]["y"] == 2
+        assert str(doc) == "meta = {x = 1, y = 2 }\n"
+
     def test_set_new_key_in_table(self) -> None:
         doc = make_doc()
         doc["owner"]["email"] = "alice@example.com"

@@ -18,7 +18,7 @@ impl<'py> FromPyObject<'_, 'py> for Item {
             return Ok(Self(item_rs));
         }
 
-        // A Document is structurally a table — extract it as one.
+        // A Document is structurally a table - extract it as one.
         if let Ok(doc) = obj.cast::<Document>() {
             let doc = doc.borrow();
             return Ok(Self(doc.inner.as_item().clone()));

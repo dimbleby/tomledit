@@ -565,7 +565,7 @@ impl ItemProxy {
     /// Normalize formatting of this item (spacing, trailing commas, etc.).
     ///
     /// Useful after mutations that leave behind awkward whitespace.
-    /// This is shallow — it formats the item itself, not nested sub-tables.
+    /// This is shallow - it formats the item itself, not nested sub-tables.
     /// Note: any comments on the formatted item will be removed.
     pub fn fmt(&self, py: Python<'_>) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();

@@ -339,14 +339,14 @@ class TestComment:
         assert doc["arr"][1].comment == "# middle"
 
     def test_blank_line_between_elements_no_comment(self) -> None:
-        """Blank line between elements with no comment — exercises
+        """Blank line between elements with no comment - exercises
         split_prefix block.is_empty() branch."""
         doc = Document.parse("arr = [\n  1,\n\n  2,\n]\n")
         assert doc["arr"][0].comment is None
         assert doc["arr"][0].inline_comment is None
 
     def test_compact_array_comment_returns_none(self) -> None:
-        """Compact single-line array — prefix has no newline at all,
+        """Compact single-line array - prefix has no newline at all,
         exercises split_prefix no-newline fallback."""
         doc = Document.parse("arr = [1, 2, 3]\n")
         assert doc["arr"][0].comment is None

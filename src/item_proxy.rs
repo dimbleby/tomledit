@@ -147,43 +147,37 @@ impl ItemProxy {
             return Ok(proxies.into_pyobject(py)?.into_any().unbind());
         }
 
-        let new_key = if let Ok(k) = key.extract::<i64>() {
+        let new_key = {
             let doc = self.document.bind(py).borrow();
             self.check_generation(&doc)?;
             let item = self.navigate(&doc.inner)?;
 
-            // Tables use string keys; only arrays support positional indexing.
-            if item.is_table() || item.is_inline_table() {
-                return Err(PyTypeError::new_err(
-                    "TOML table keys must be strings, not integers",
-                ));
+            if let Ok(k) = key.extract::<i64>() {
+                if item.is_table() || item.is_inline_table() {
+                    return Err(PyTypeError::new_err(
+                        "TOML table keys must be strings, not integers",
+                    ));
+                }
+                let len = item_len(item).ok_or_else(|| {
+                    PyTypeError::new_err(format!(
+                        "TOML {} item is not subscriptable (use .value to get the Python object)",
+                        item.type_name()
+                    ))
+                })?;
+                let idx = resolve_index(k, len)?;
+                if item.get(idx).is_none() {
+                    return Err(PyKeyError::new_err(format!("{key}")));
+                }
+                Key::Int(idx)
+            } else if let Ok(k) = key.extract::<String>() {
+                if item.get(k.as_str()).is_none() {
+                    return Err(PyKeyError::new_err(k));
+                }
+                Key::Str(k)
+            } else {
+                return Err(bad_key_type(key));
             }
-
-            let len = item_len(item).ok_or_else(|| {
-                PyTypeError::new_err(format!(
-                    "TOML {} item is not subscriptable (use .value to get the Python object)",
-                    item.type_name()
-                ))
-            })?;
-            Key::Int(resolve_index(k, len)?)
-        } else if let Ok(k) = key.extract::<String>() {
-            Key::Str(k)
-        } else {
-            return Err(bad_key_type(key));
         };
-
-        {
-            let doc = self.document.bind(py).borrow();
-            self.check_generation(&doc)?;
-            let item = self.navigate(&doc.inner)?;
-            let exists = match &new_key {
-                Key::Str(s) => item.get(s.as_str()).is_some(),
-                Key::Int(i) => item.get(*i).is_some(),
-            };
-            if !exists {
-                return Err(PyKeyError::new_err(format!("{key}")));
-            }
-        }
 
         Ok(self
             .child_proxy(py, new_key)

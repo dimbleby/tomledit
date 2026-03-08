@@ -4,6 +4,7 @@ use pyo3::types::{PyDict, PyIterator};
 
 use toml_edit::DocumentMut as DocumentRs;
 
+use crate::equality;
 use crate::error::TomlErrorWrapper;
 use crate::item::Item;
 use crate::item_proxy::{self, ItemProxy, Key};
@@ -167,12 +168,12 @@ impl Document {
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         if let Ok(other_doc) = other.cast::<Self>() {
             let other_doc = other_doc.borrow();
-            Ok(item_proxy::items_structural_eq(
+            Ok(equality::items_structural_eq(
                 self.0.as_item(),
                 other_doc.0.as_item(),
             ))
         } else if let Ok(other_dict) = other.cast::<PyDict>() {
-            item_proxy::table_entries_eq(self.0.iter(), self.0.len(), other_dict)
+            equality::table_entries_eq(self.0.iter(), self.0.len(), other_dict)
         } else {
             Ok(false)
         }

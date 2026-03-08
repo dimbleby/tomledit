@@ -1,4 +1,6 @@
+mod comments;
 mod document;
+mod equality;
 mod error;
 mod item;
 mod item_proxy;

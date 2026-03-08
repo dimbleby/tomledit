@@ -148,10 +148,17 @@ impl ItemProxy {
         }
 
         let new_key = if let Ok(k) = key.extract::<i64>() {
-            // Resolve negative indices
             let doc = self.document.bind(py).borrow();
             self.check_generation(&doc)?;
             let item = self.navigate(&doc.inner)?;
+
+            // Tables use string keys; only arrays support positional indexing.
+            if item.is_table() || item.is_inline_table() {
+                return Err(PyTypeError::new_err(
+                    "TOML table keys must be strings, not integers",
+                ));
+            }
+
             let len = item_len(item).ok_or_else(|| {
                 PyTypeError::new_err(format!(
                     "TOML {} item is not subscriptable (use .value to get the Python object)",
@@ -365,7 +372,7 @@ impl ItemProxy {
         match last_key {
             Key::Str(key_str) => {
                 let parent = self.navigate_parent_mut(&mut doc.inner)?;
-                comments::set_key_prefix_comment(parent, &key_str, value)?;
+                comments::set_key_prefix_comment(parent, key_str, value)?;
             }
             Key::Int(_) => {
                 let item = self.navigate_mut(&mut doc.inner)?;

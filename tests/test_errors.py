@@ -40,7 +40,7 @@ class TestErrorHandling:
 
     def test_len_on_scalar_raises_type_error(self) -> None:
         doc = Document.parse("val = 42\n")
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match=r"TOML .* has no len\(\)"):
             len(doc["val"])
 
     def test_iter_on_scalar_raises_type_error(self) -> None:
@@ -50,7 +50,7 @@ class TestErrorHandling:
 
     def test_contains_on_scalar_raises_type_error(self) -> None:
         doc = Document.parse("val = 42\n")
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match=r"TOML scalar .* does not support 'in'"):
             assert 1 in doc["val"]
 
     def test_append_on_table_raises_type_error(self) -> None:
@@ -149,7 +149,7 @@ class TestWrongTypeErrors:
 
     def test_pop_noarg_on_table_raises(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
-        with pytest.raises(TypeError, match=r"pop.*array"):
+        with pytest.raises(TypeError, match=r"pop\(\) with no argument"):
             doc["t"].pop()
 
     def test_update_on_array_raises(self) -> None:
@@ -194,5 +194,5 @@ class TestWrongTypeErrors:
 
     def test_pop_noarg_on_inline_table_raises(self) -> None:
         doc = Document.parse("t = {a = 1}\n")
-        with pytest.raises(TypeError, match=r"pop.*array"):
+        with pytest.raises(TypeError, match=r"pop\(\) with no argument"):
             doc["t"].pop()

@@ -161,7 +161,10 @@ impl ItemProxy {
             self.check_generation(&doc)?;
             let item = self.navigate(&doc.inner)?;
             let len = item_len(item).ok_or_else(|| {
-                PyTypeError::new_err(format!("'{}' is not subscriptable", item.type_name()))
+                PyTypeError::new_err(format!(
+                    "TOML {} item is not subscriptable (use .value to get the Python object)",
+                    item.type_name()
+                ))
             })?;
             Key::Int(resolve_index(k, len)?)
         } else if let Ok(k) = key.extract::<String>() {
@@ -249,8 +252,12 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_len(item)
-            .ok_or_else(|| PyTypeError::new_err(format!("'{}' has no len()", item.type_name())))
+        item_len(item).ok_or_else(|| {
+            PyTypeError::new_err(format!(
+                "TOML {} item has no len() (use .value to get the Python object)",
+                item.type_name()
+            ))
+        })
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
@@ -680,7 +687,7 @@ fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
             Ok(false)
         }
         _ => Err(PyTypeError::new_err(
-            "argument of type 'scalar' is not iterable",
+            "TOML scalar item does not support 'in' (use .value to get the Python object)",
         )),
     }
 }
@@ -844,7 +851,7 @@ fn item_iter_info<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
         ItemRs::Value(ValueRs::Array(arr)) => Ok(IterKind::ArrayLen(arr.len())),
         ItemRs::ArrayOfTables(aot) => Ok(IterKind::ArrayLen(aot.len())),
         _ => Err(PyTypeError::new_err(format!(
-            "'{}' is not iterable",
+            "TOML {} item is not iterable (use .value to get the Python object)",
             item.type_name()
         ))),
     }
@@ -888,7 +895,7 @@ fn require_array_like_len(item: &ItemRs) -> PyResult<usize> {
         ItemRs::Value(ValueRs::Array(arr)) => Ok(arr.len()),
         ItemRs::ArrayOfTables(aot) => Ok(aot.len()),
         _ => Err(PyTypeError::new_err(format!(
-            "'{}' does not support slicing",
+            "TOML {} item does not support slicing",
             item.type_name()
         ))),
     }
@@ -915,7 +922,7 @@ fn item_delitem_slice(item: &mut ItemRs, indices: &[usize]) -> PyResult<()> {
             Ok(())
         }
         _ => Err(PyTypeError::new_err(format!(
-            "'{}' does not support slice deletion",
+            "TOML {} item does not support slice deletion",
             item.type_name()
         ))),
     }
@@ -1003,7 +1010,7 @@ fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
             Ok(it.iter().map(|(k, _)| k.to_owned()).collect())
         }
         _ => Err(PyTypeError::new_err(format!(
-            "'{}' has no keys()",
+            "TOML {} item has no keys()",
             item.type_name()
         ))),
     }
@@ -1014,7 +1021,7 @@ fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
         ItemRs::Table(table) => Ok(table.contains_key(key)),
         ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.contains_key(key)),
         _ => Err(PyTypeError::new_err(format!(
-            "'{}' has no get()",
+            "TOML {} item has no get()",
             item.type_name()
         ))),
     }
@@ -1086,14 +1093,16 @@ fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<()> {
                 }
                 Ok(())
             }
-            _ => Err(PyTypeError::new_err("scalar value is not subscriptable")),
+            _ => Err(PyTypeError::new_err(
+                "TOML scalar item is not subscriptable",
+            )),
         },
         ItemRs::ArrayOfTables(aot) => {
             let idx = resolve_index(key.extract::<i64>()?, aot.len())?;
             aot.remove(idx);
             Ok(())
         }
-        _ => Err(PyTypeError::new_err("item is not subscriptable")),
+        _ => Err(PyTypeError::new_err("TOML item is not subscriptable")),
     }
 }
 
@@ -1122,7 +1131,7 @@ fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item>
                 Ok(Item(ItemRs::Value(arr.remove(idx))))
             }
             _ => Err(PyTypeError::new_err(format!(
-                "'{}' does not support pop()",
+                "TOML {} item does not support pop()",
                 item.type_name()
             ))),
         },
@@ -1135,7 +1144,7 @@ fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item>
                 Ok(Item(ItemRs::Value(arr.remove(last))))
             }
             _ => Err(PyTypeError::new_err(
-                "pop() with no arguments only supported on arrays",
+                "pop() with no argument is only supported on arrays",
             )),
         },
     }
@@ -1159,7 +1168,7 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
 pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) -> PyResult<()> {
     if !(item.is_table() || item.is_inline_table()) {
         return Err(PyTypeError::new_err(format!(
-            "'{}' does not support update()",
+            "TOML {} item does not support update()",
             item.type_name()
         )));
     }
@@ -1183,7 +1192,7 @@ fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
         Ok(())
     } else {
         Err(PyTypeError::new_err(format!(
-            "'{}' does not support append()",
+            "TOML {} item does not support append()",
             item.type_name()
         )))
     }
@@ -1206,7 +1215,7 @@ fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResult<()> {
         Ok(())
     } else {
         Err(PyTypeError::new_err(format!(
-            "'{}' does not support insert()",
+            "TOML {} item does not support insert()",
             item.type_name()
         )))
     }
@@ -1225,7 +1234,7 @@ fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResult<()> {
         Err(PyValueError::new_err("value not in array"))
     } else {
         Err(PyTypeError::new_err(format!(
-            "'{}' does not support remove()",
+            "TOML {} item does not support remove()",
             item.type_name()
         )))
     }
@@ -1243,7 +1252,7 @@ fn item_extend(item: &mut ItemRs, items: Vec<Item>) -> PyResult<()> {
         Ok(())
     } else {
         Err(PyTypeError::new_err(format!(
-            "'{}' does not support extend()",
+            "TOML {} item does not support extend()",
             item.type_name()
         )))
     }
@@ -1268,7 +1277,7 @@ fn item_clear(item: &mut ItemRs) -> PyResult<()> {
             Ok(())
         }
         _ => Err(PyTypeError::new_err(format!(
-            "'{}' does not support clear()",
+            "TOML {} item does not support clear()",
             item.type_name()
         ))),
     }

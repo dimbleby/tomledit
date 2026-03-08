@@ -1,6 +1,6 @@
 //! Python → toml_edit extraction for all TOML types.
 
-use crate::error::TomlError;
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{
     PyBool, PyDateAccess, PyDateTime, PyDelta, PyDeltaAccess, PyFloat, PyInt, PyList, PyMapping,
@@ -207,6 +207,6 @@ impl<'py> FromPyObject<'_, 'py> for Value {
             "Could not convert object of type '{}' to value",
             name.to_str()?
         );
-        Err(TomlError::new_err(text))
+        Err(PyTypeError::new_err(text))
     }
 }

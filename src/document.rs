@@ -1,11 +1,10 @@
-use pyo3::exceptions::{PyKeyError, PyTypeError};
+use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyIterator};
 
 use toml_edit::DocumentMut as DocumentRs;
 
 use crate::equality;
-use crate::error::TomlErrorWrapper;
 use crate::item::Item;
 use crate::item_proxy::{self, ItemProxy, Key};
 use crate::value::Table;
@@ -42,7 +41,9 @@ impl Document {
 
     #[staticmethod]
     fn parse(text: &str) -> PyResult<Self> {
-        let document_rs = text.parse::<DocumentRs>().map_err(TomlErrorWrapper::from)?;
+        let document_rs = text
+            .parse::<DocumentRs>()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self(document_rs))
     }
 

@@ -33,6 +33,32 @@ ruff format .
 After changing Rust code, rebuild with `uv run --reinstall-package tomledit
 pytest` to pick up changes.
 
+### Rust code coverage (from Python tests)
+
+`cargo-llvm-cov`'s wrapper doesn't work with maturin, so use the manual
+approach:
+
+```sh
+# Build instrumented .so and run tests (generates .profraw)
+rm -f target/tomledit-*.profraw
+RUSTFLAGS="-Cinstrument-coverage" \
+  LLVM_PROFILE_FILE="target/tomledit-%p-%m.profraw" \
+  uv run --reinstall-package tomledit pytest -q
+
+# Merge profiles and generate report
+LLVM_TOOLS_PATH="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin"
+"$LLVM_TOOLS_PATH/llvm-profdata" merge -sparse target/tomledit-*.profraw -o target/tomledit.profdata
+"$LLVM_TOOLS_PATH/llvm-cov" report \
+  target/x86_64-unknown-linux-gnu/release/libtomledit.so \
+  --instr-profile=target/tomledit.profdata --sources src/
+
+# Per-file detail (uncovered lines)
+"$LLVM_TOOLS_PATH/llvm-cov" show \
+  target/x86_64-unknown-linux-gnu/release/libtomledit.so \
+  --instr-profile=target/tomledit.profdata \
+  --sources src/item_proxy.rs --show-line-counts-or-regions
+```
+
 ## Architecture
 
 **Rust → Python boundary** uses two PyO3 classes:

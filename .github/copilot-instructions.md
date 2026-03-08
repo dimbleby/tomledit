@@ -42,27 +42,27 @@ pytest` to pick up changes.
   `parse(text)` is the entry point.
 - **`ItemProxy`** (`item_proxy.rs`): Exported as `Item` in Python.
   Holds `Py<Document>` + `Vec<Key>` path.
-  Each `__getitem__` returns a new proxy with a longer path — mutations navigate
+  Each `__getitem__` returns a new proxy with a longer path \- mutations navigate
   the path at call-time into the shared document, so `doc["a"]["b"] = x` works
   without cloning.
 
 **Supporting modules:**
 
-- `comments.rs` — Comment get/set logic.
+- `comments.rs` \- Comment get/set logic.
   Inline comments live in decor suffix; block comments in decor prefix.
   Array element comments are stored in the _next_ element's prefix (or array
   trailing for the last).
-- `equality.rs` — Structural equality between toml_edit items and Python
+- `equality.rs` \- Structural equality between toml_edit items and Python
   objects.
-- `value.rs` — Python → toml_edit type conversion (extracts dicts, lists,
+- `value.rs` \- Python → toml_edit type conversion (extracts dicts, lists,
   datetimes, scalars).
-- `item.rs` — Thin `Item` wrapper for PyO3 `FromPyObject`.
+- `item.rs` \- Thin `Item` wrapper for PyO3 `FromPyObject`.
 
 ## Key Conventions
 
 **Comment API:** `.comment` is the block comment above an entry;
 `.inline_comment` is the trailing `# ...` on the same line.
-Both include the `#` character — users write `"# my comment"`, not `"my
+Both include the `#` character \- users write `"# my comment"`, not `"my
 comment"`.
 Non-empty lines in block comments must start with `#`; empty lines represent
 blank lines.

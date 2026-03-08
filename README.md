@@ -79,14 +79,14 @@ The item that _performs_ the mutation stays valid, so chaining works fine:
 ```python
 arr = doc["arr"]
 arr.append("c")
-arr.append("d")   # still works — arr itself did the mutating
+arr.append("d")   # still works - arr itself did the mutating
 ```
 
 If you just need the plain Python value, grab it with `.value` before the
 document changes:
 
 ```python
-first = doc["arr"][0].value   # "a" — a plain str, not a path
+first = doc["arr"][0].value   # "a" - a plain str, not a path
 doc["arr"][0] = "changed"
 print(first)                  # still "a"
 ```

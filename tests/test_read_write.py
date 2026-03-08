@@ -376,7 +376,7 @@ class TestAssignItemProxy:
         assert doc["b"] == 1
 
     def test_proxy_setitem_on_nested_key(self) -> None:
-        """doc["t"]["x"] = doc["t"]["y"] — proxy on both sides of nested setitem."""
+        """doc["t"]["x"] = doc["t"]["y"] - proxy on both sides of nested setitem."""
         doc = Document.parse("[t]\nx = 1\ny = 2\n")
         doc["t"]["x"] = doc["t"]["y"]
         assert doc["t"]["x"] == 2
@@ -424,7 +424,7 @@ class TestAssignItemProxy:
 
 
 # ---------------------------------------------------------------------------
-# Item.parse() — custom TOML representations
+# Item.parse() - custom TOML representations
 # ---------------------------------------------------------------------------
 
 

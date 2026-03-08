@@ -406,3 +406,18 @@ class TestAssignItemProxy:
         dst["s"]["bar"] = src["t"]["foo"]
         assert dst["s"]["bar"] == 42
         assert src["t"]["foo"] == 42
+
+    def test_assign_document_as_table(self) -> None:
+        """A whole Document can be assigned as a table under a key."""
+        doc = Document.parse("x = 1\n")
+        other = Document.parse("a = 10\nb = 20\n")
+        doc["foo"] = other
+        assert doc["foo"]["a"] == 10
+        assert doc["foo"]["b"] == 20
+
+    def test_assign_document_to_itself(self) -> None:
+        """doc['foo'] = doc snapshots the current contents."""
+        doc = Document.parse("a = 1\nb = 2\n")
+        doc["foo"] = doc
+        assert doc["foo"] == {"a": 1, "b": 2}
+        assert "foo" not in doc["foo"]

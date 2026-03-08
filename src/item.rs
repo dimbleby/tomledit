@@ -5,18 +5,12 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use toml_edit::Item as ItemRs;
 
-#[pyclass(module = "tomledit")]
 pub(crate) struct Item(pub(crate) ItemRs);
 
 impl<'py> FromPyObject<'_, 'py> for Item {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        // If it's already an Item pyclass, extract directly.
-        if let Ok(item) = obj.cast::<Self>() {
-            return Ok(Self(item.borrow().0.clone()));
-        }
-
         // If it's an ItemProxy (the Python-visible "Item"), resolve the path
         // and clone the underlying toml_edit item.
         if let Ok(proxy) = obj.cast::<ItemProxy>() {

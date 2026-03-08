@@ -57,7 +57,6 @@ pytest` to pick up changes.
 - `value.rs` — Python → toml_edit type conversion (extracts dicts, lists,
   datetimes, scalars).
 - `item.rs` — Thin `Item` wrapper for PyO3 `FromPyObject`.
-- `error.rs` — `TomlError` exception.
 
 ## Key Conventions
 

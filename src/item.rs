@@ -1,5 +1,5 @@
-use crate::error::TomlError;
 use crate::value::{ArrayOfTables, Table, Value};
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use toml_edit::Item as ItemRs;
 
@@ -16,7 +16,7 @@ impl<'py> FromPyObject<'_, 'py> for Item {
         }
 
         if obj.is_none() {
-            return Err(TomlError::new_err(
+            return Err(PyTypeError::new_err(
                 "None is not a valid TOML value (TOML has no null type)",
             ));
         }
@@ -39,6 +39,6 @@ impl<'py> FromPyObject<'_, 'py> for Item {
         let name = obj.get_type().name()?;
         let string = name.to_str()?;
         let text = format!("Could not convert object of type '{string}' to item");
-        Err(TomlError::new_err(text))
+        Err(PyTypeError::new_err(text))
     }
 }

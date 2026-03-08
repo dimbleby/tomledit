@@ -5,8 +5,6 @@ from typing_extensions import override
 
 _T = TypeVar("_T")
 
-class TomlError(Exception): ...
-
 class Document:
     def __init__(self, data: dict[str, Any] | None = None) -> None: ...
     @staticmethod

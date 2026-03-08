@@ -70,7 +70,7 @@ class TestErrorHandling:
 
     def test_assign_none_raises(self) -> None:
         doc = Document.parse("x = 1\n")
-        with pytest.raises(Exception, match=r"None.*not a valid TOML"):
+        with pytest.raises(TypeError, match=r"None.*not a valid TOML"):
             doc["x"] = None
 
 
@@ -80,16 +80,16 @@ class TestErrorHandling:
 
 
 class TestParseErrors:
-    def test_invalid_toml_raises_toml_error(self) -> None:
-        with pytest.raises(Exception, match="cannot be empty"):
+    def test_invalid_toml_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="cannot be empty"):
             Document.parse("[[[bad")
 
     def test_bare_value_raises(self) -> None:
-        with pytest.raises(Exception, match=r"expected|invalid"):
+        with pytest.raises(ValueError, match=r"expected|invalid"):
             Document.parse("= oops\n")
 
     def test_duplicate_key_raises(self) -> None:
-        with pytest.raises(Exception, match="duplicate"):
+        with pytest.raises(ValueError, match="duplicate"):
             Document.parse("x = 1\nx = 2\n")
 
 
@@ -102,18 +102,18 @@ class TestUnsupportedTypes:
     def test_assign_set_raises(self) -> None:
         """A set is not a valid TOML value and should raise an error."""
         doc = Document.parse("x = 1\n")
-        with pytest.raises(Exception, match=r"[Cc]ould not convert|not a valid"):
+        with pytest.raises(TypeError, match=r"[Cc]ould not convert|not a valid"):
             doc["x"] = {1, 2, 3}  # type: ignore[assignment]
 
     def test_assign_bytes_raises(self) -> None:
         """bytes has no meaningful TOML representation and should be rejected."""
         doc = Document.parse("x = 1\n")
-        with pytest.raises(Exception, match="bytes"):
+        with pytest.raises(TypeError, match="bytes"):
             doc["x"] = b"hi"  # type: ignore[assignment]
 
     def test_assign_complex_raises(self) -> None:
         doc = Document.parse("x = 1\n")
-        with pytest.raises(Exception, match=r"not a valid|convert"):
+        with pytest.raises(TypeError, match=r"not a valid|convert"):
             doc["x"] = 3 + 4j  # type: ignore[assignment]
 
 

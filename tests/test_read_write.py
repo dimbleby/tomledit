@@ -338,3 +338,71 @@ class TestAssignTableToKey:
         doc = Document.parse("[s]\n[s.inner]\na = 1\n")
         doc["s"]["inner"] = {"b": 2}
         assert doc["s"]["inner"]["b"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Assign Item (proxy) as a value
+# ---------------------------------------------------------------------------
+
+
+class TestAssignItemProxy:
+    """Assigning an Item obtained from the document to another key."""
+
+    def test_copy_array_to_new_key(self) -> None:
+        doc = Document.parse("[project]\ndynamic = ['license', 'version']\n")
+        doc["project"]["foo"] = doc["project"]["dynamic"]
+        assert str(doc) == (
+            "[project]\n"
+            "dynamic = ['license', 'version']\n"
+            "foo = ['license', 'version']\n"
+        )
+
+    def test_copy_scalar_to_new_key(self) -> None:
+        doc = Document.parse("a = 1\n")
+        doc["b"] = doc["a"]
+        assert str(doc) == "a = 1\nb = 1\n"
+
+    def test_copy_table_to_new_key(self) -> None:
+        doc = Document.parse("[src]\nx = 1\ny = 2\n")
+        doc["dst"] = doc["src"]
+        assert doc["dst"]["x"] == 1
+        assert doc["dst"]["y"] == 2
+
+    def test_copy_is_independent(self) -> None:
+        """After copying, changes to the original don't affect the copy."""
+        doc = Document.parse("a = 1\n")
+        doc["b"] = doc["a"]
+        doc["a"] = 99
+        assert doc["b"] == 1
+
+    def test_proxy_setitem_on_nested_key(self) -> None:
+        """doc["t"]["x"] = doc["t"]["y"] — proxy on both sides of nested setitem."""
+        doc = Document.parse("[t]\nx = 1\ny = 2\n")
+        doc["t"]["x"] = doc["t"]["y"]
+        assert doc["t"]["x"] == 2
+
+    def test_slice_assign_from_proxy(self) -> None:
+        """Slice assignment with proxy values from the same document."""
+        doc = Document.parse("a = [1, 2, 3]\nb = [10, 20]\n")
+        doc["a"][0:1] = list(doc["b"])
+        assert doc["a"] == [10, 20, 2, 3]
+
+    def test_update_with_proxy_values(self) -> None:
+        """update() where dict values are proxies into the same document."""
+        doc = Document.parse("[t]\nx = 1\ny = 2\n")
+        doc["t"].update({"z": doc["t"]["x"]})
+        assert doc["t"]["z"] == 1
+
+    def test_doc_update_with_proxy_values(self) -> None:
+        """Document.update() where dict values are proxies into the same document."""
+        doc = Document.parse("a = 1\nb = 2\n")
+        doc.update({"c": doc["a"]})
+        assert doc["c"] == 1
+
+    def test_copy_from_another_document(self) -> None:
+        """Proxies from a different document can be assigned too."""
+        src = Document.parse("[t]\nfoo = 42\n")
+        dst = Document.parse("[s]\nbar = 0\n")
+        dst["s"]["bar"] = src["t"]["foo"]
+        assert dst["s"]["bar"] == 42
+        assert src["t"]["foo"] == 42

@@ -1,3 +1,4 @@
+use crate::item_proxy::ItemProxy;
 use crate::value::{ArrayOfTables, Table, Value};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -13,6 +14,13 @@ impl<'py> FromPyObject<'_, 'py> for Item {
         // If it's already an Item pyclass, extract directly.
         if let Ok(item) = obj.cast::<Self>() {
             return Ok(Self(item.borrow().0.clone()));
+        }
+
+        // If it's an ItemProxy (the Python-visible "Item"), resolve the path
+        // and clone the underlying toml_edit item.
+        if let Ok(proxy) = obj.cast::<ItemProxy>() {
+            let item_rs = proxy.borrow().clone_item(obj.py())?;
+            return Ok(Self(item_rs));
         }
 
         if obj.is_none() {

@@ -127,9 +127,10 @@ impl Document {
         Ok(Self::make_proxy(slf, key))
     }
 
-    pub fn __setitem__(&mut self, key: &str, value: Item) {
-        item_proxy::set_with_decor_preservation(self.inner.as_item_mut(), key, value);
-        self.bump();
+    pub fn __setitem__(slf: &Bound<'_, Self>, key: &str, value: Item) {
+        let mut doc = slf.borrow_mut();
+        item_proxy::set_with_decor_preservation(doc.inner.as_item_mut(), key, value);
+        doc.bump();
     }
 
     pub fn __delitem__(&mut self, key: &str) -> PyResult<()> {
@@ -159,9 +160,11 @@ impl Document {
         }
     }
 
-    pub fn update(&mut self, other: &Bound<'_, PyAny>) -> PyResult<()> {
-        item_proxy::item_update(self.inner.as_item_mut(), other)?;
-        self.bump();
+    pub fn update(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<()> {
+        let pairs = item_proxy::extract_update_pairs(other)?;
+        let mut doc = slf.borrow_mut();
+        item_proxy::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
+        doc.bump();
         Ok(())
     }
 

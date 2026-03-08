@@ -1,5 +1,9 @@
 # Changelog
 
+# Unreleased
+
+- Allow assigning `Item`s back into the document (e.g. `doc["b"] = doc["a"]`)
+
 # 0.3.0 (8 March 2026)
 
 - Invalidate `Item`s when the document changes

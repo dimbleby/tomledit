@@ -65,6 +65,14 @@ impl ItemProxy {
         self.generation = doc.generation;
     }
 
+    /// Clone the toml_edit item at this proxy's path.
+    pub(crate) fn clone_item(&self, py: Python<'_>) -> PyResult<ItemRs> {
+        let doc = self.document.borrow(py);
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
+        Ok(item.clone())
+    }
+
     fn navigate<'a>(&self, doc: &'a DocumentRs) -> PyResult<&'a ItemRs> {
         let mut current: &ItemRs = doc.as_item();
         for key in &self.path {
@@ -190,15 +198,16 @@ impl ItemProxy {
         let py = key.py();
 
         if let Ok(slice) = key.cast::<PySlice>() {
+            let values: Vec<Item> = value
+                .try_iter()?
+                .map(|r| r.and_then(|v| v.extract::<Item>()))
+                .collect::<PyResult<_>>()?;
+
             let mut doc = self.document.bind(py).borrow_mut();
             self.check_generation(&doc)?;
             let item = self.navigate_mut(&mut doc.inner)?;
             let len = require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
-            let values: Vec<Item> = value
-                .try_iter()?
-                .map(|r| r.and_then(|v| v.extract::<Item>()))
-                .collect::<PyResult<_>>()?;
             item_setitem_slice(item, si.start, si.stop, si.step, values)?;
             self.bump_generation(&mut doc);
             return Ok(());
@@ -477,10 +486,11 @@ impl ItemProxy {
 
     pub fn update(&mut self, other: &Bound<'_, PyAny>) -> PyResult<()> {
         let py = other.py();
+        let pairs = extract_update_pairs(other)?;
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_update(item, other)?;
+        apply_update_pairs(item, pairs)?;
         self.bump_generation(&mut doc);
         Ok(())
     }
@@ -1102,22 +1112,30 @@ fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item>
     }
 }
 
-pub(crate) fn item_update(item: &mut ItemRs, other: &Bound<'_, PyAny>) -> PyResult<()> {
+/// Extract key-value pairs from a dict for update(), before borrowing the document.
+pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Item)>> {
     let dict = other
         .cast::<PyDict>()
         .map_err(|_| PyTypeError::new_err("update() argument must be a dict"))?;
+    let mut pairs = Vec::with_capacity(dict.len());
+    for (k, v) in dict.iter() {
+        let key: String = k.extract()?;
+        let val: Item = v.extract()?;
+        pairs.push((key, val));
+    }
+    Ok(pairs)
+}
 
+/// Apply pre-extracted update pairs to an item.
+pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) -> PyResult<()> {
     if !(item.is_table() || item.is_inline_table()) {
         return Err(PyTypeError::new_err(format!(
             "'{}' does not support update()",
             item.type_name()
         )));
     }
-
-    for (k, v) in dict.iter() {
-        let key: &str = k.extract()?;
-        let val: Item = v.extract()?;
-        set_with_decor_preservation(item, key, val);
+    for (key, val) in pairs {
+        set_with_decor_preservation(item, &key, val);
     }
     Ok(())
 }

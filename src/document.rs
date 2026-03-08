@@ -129,8 +129,11 @@ impl Document {
 
     pub fn __setitem__(slf: &Bound<'_, Self>, key: &str, value: Item) {
         let mut doc = slf.borrow_mut();
+        let replaced = doc.inner.contains_key(key);
         item_proxy::set_with_decor_preservation(doc.inner.as_item_mut(), key, value);
-        doc.bump();
+        if replaced {
+            doc.bump();
+        }
     }
 
     pub fn __delitem__(&mut self, key: &str) -> PyResult<()> {
@@ -173,7 +176,6 @@ impl Document {
             let mut doc = slf.borrow_mut();
             if !doc.inner.contains_key(key) {
                 item_proxy::set_with_decor_preservation(doc.inner.as_item_mut(), key, default);
-                doc.bump();
             }
         }
         Self::make_proxy(slf, key)

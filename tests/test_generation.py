@@ -50,12 +50,12 @@ class TestStaleProxyDetection:
         with pytest.raises(RuntimeError, match="stale"):
             _ = proxy.value
 
-    def test_stale_after_setdefault_new_key_on_doc(self) -> None:
+    def test_valid_after_setdefault_new_key_on_doc(self) -> None:
+        """setdefault with a new key doesn't replace anything — no paths break."""
         doc = Document.parse("x = 1")
         proxy = doc["x"]
         doc.setdefault("y", 2)
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = proxy.value
+        assert proxy.value == 1
 
     def test_not_stale_after_setdefault_existing_key(self) -> None:
         doc = Document.parse("x = 1")
@@ -83,13 +83,22 @@ class TestStaleProxyViaProxy:
         with pytest.raises(RuntimeError, match="stale"):
             _ = b.value
 
-    def test_stale_after_array_append(self) -> None:
+    def test_valid_after_array_append(self) -> None:
+        """append doesn't invalidate siblings — no paths break."""
         doc = Document.parse("arr = [1, 2]")
         item = doc["arr"][0]
         arr = doc["arr"]
         arr.append(3)
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = item.value
+        assert item.value == 1
+        assert arr.value == [1, 2, 3]
+
+    def test_negative_index_stable_after_append(self) -> None:
+        """Negative indices are resolved at lookup time, so append can't shift them."""
+        doc = Document.parse("arr = [1, 2, 3]")
+        last = doc["arr"][-1]
+        assert last.value == 3
+        doc["arr"].append(4)
+        assert last.value == 3  # still index 2, not shifted to 4
 
     def test_stale_after_array_insert(self) -> None:
         doc = Document.parse("arr = [1, 2]")
@@ -107,13 +116,14 @@ class TestStaleProxyViaProxy:
         with pytest.raises(RuntimeError, match="stale"):
             _ = item.value
 
-    def test_stale_after_array_extend(self) -> None:
+    def test_valid_after_array_extend(self) -> None:
+        """extend doesn't invalidate siblings — no paths break."""
         doc = Document.parse("arr = [1]")
         item = doc["arr"][0]
         arr = doc["arr"]
         arr.extend([2, 3])
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = item.value
+        assert item.value == 1
+        assert arr.value == [1, 2, 3]
 
     def test_stale_after_proxy_clear(self) -> None:
         doc = Document.parse("[t]\na = 1")
@@ -261,7 +271,7 @@ class TestReadMethodsCheckGeneration:
         doc = Document.parse("arr = [1, 2]\n\n[t]\na = 1\nb = 2")
         proxy_t = doc["t"]
         proxy_arr = doc["arr"]
-        doc["x"] = 42  # invalidate all existing proxies
+        doc["t"]["a"] = 99  # replace existing value to invalidate all other proxies
         return proxy_t, proxy_arr
 
     def test_getitem(self, stale_proxy: tuple[Item, Item]) -> None:

@@ -606,6 +606,30 @@ class TestNegativeIndexing:
 
 
 # ---------------------------------------------------------------------------
+# Integer key on table-like items
+# ---------------------------------------------------------------------------
+
+
+class TestIntKeyOnTable:
+    """Integer keys on tables should raise TypeError (TOML keys are strings)."""
+
+    def test_getitem_int_on_table(self) -> None:
+        doc = Document.parse("[t]\na = 1")
+        with pytest.raises(TypeError, match="TOML table keys must be strings"):
+            doc["t"][0]
+
+    def test_getitem_int_on_inline_table(self) -> None:
+        doc = Document.parse("t = {a = 1}")
+        with pytest.raises(TypeError, match="TOML table keys must be strings"):
+            doc["t"][0]
+
+    def test_getitem_int_on_empty_table(self) -> None:
+        doc = Document.parse("[t]")
+        with pytest.raises(TypeError, match="TOML table keys must be strings"):
+            doc["t"][0]
+
+
+# ---------------------------------------------------------------------------
 # get() with default
 # ---------------------------------------------------------------------------
 

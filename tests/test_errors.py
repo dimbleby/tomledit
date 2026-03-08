@@ -72,3 +72,127 @@ class TestErrorHandling:
         doc = Document.parse("x = 1\n")
         with pytest.raises(Exception, match=r"None.*not a valid TOML"):
             doc["x"] = None
+
+
+# ---------------------------------------------------------------------------
+# Parse errors
+# ---------------------------------------------------------------------------
+
+
+class TestParseErrors:
+    def test_invalid_toml_raises_toml_error(self) -> None:
+        with pytest.raises(Exception, match="cannot be empty"):
+            Document.parse("[[[bad")
+
+    def test_bare_value_raises(self) -> None:
+        with pytest.raises(Exception, match=r"expected|invalid"):
+            Document.parse("= oops\n")
+
+    def test_duplicate_key_raises(self) -> None:
+        with pytest.raises(Exception, match="duplicate"):
+            Document.parse("x = 1\nx = 2\n")
+
+
+# ---------------------------------------------------------------------------
+# Unsupported Python types
+# ---------------------------------------------------------------------------
+
+
+class TestUnsupportedTypes:
+    def test_assign_set_raises(self) -> None:
+        """A set is not a valid TOML value and should raise an error."""
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(Exception, match=r"[Cc]ould not convert|not a valid"):
+            doc["x"] = {1, 2, 3}  # type: ignore[assignment]
+
+    def test_assign_bytes_raises(self) -> None:
+        """bytes has no meaningful TOML representation and should be rejected."""
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(Exception, match="bytes"):
+            doc["x"] = b"hi"  # type: ignore[assignment]
+
+    def test_assign_complex_raises(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(Exception, match=r"not a valid|convert"):
+            doc["x"] = 3 + 4j  # type: ignore[assignment]
+
+
+# ---------------------------------------------------------------------------
+# get() on non-table type
+# ---------------------------------------------------------------------------
+
+
+class TestGetOnNonTable:
+    def test_get_on_array_raises(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        with pytest.raises(TypeError, match="get"):
+            doc["arr"].get("x")
+
+    def test_get_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 42\n")
+        with pytest.raises(TypeError, match="get"):
+            doc["x"].get("y")
+
+
+# ---------------------------------------------------------------------------
+# Wrong-type error branches
+# ---------------------------------------------------------------------------
+
+
+class TestWrongTypeErrors:
+    """Each method should raise TypeError when called on the wrong item type."""
+
+    def test_pop_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 42\n")
+        with pytest.raises(TypeError, match="pop"):
+            doc["x"].pop("y")
+
+    def test_pop_noarg_on_table_raises(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match=r"pop.*array"):
+            doc["t"].pop()
+
+    def test_update_on_array_raises(self) -> None:
+        doc = Document.parse("arr = [1, 2]\n")
+        with pytest.raises(TypeError, match="update"):
+            doc["arr"].update({"a": 1})
+
+    def test_insert_on_table_raises(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="insert"):
+            doc["t"].insert(0, 99)
+
+    def test_remove_on_table_raises(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="remove"):
+            doc["t"].remove(1)
+
+    def test_extend_on_table_raises(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="extend"):
+            doc["t"].extend([1, 2])
+
+    def test_del_inline_table_missing_key(self) -> None:
+        doc = Document.parse("t = {a = 1}\n")
+        with pytest.raises(KeyError):
+            del doc["t"]["nonexistent"]
+
+    def test_slice_del_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 42\n")
+        with pytest.raises(TypeError, match="slic"):
+            del doc["x"][0:1]
+
+    def test_slice_assign_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 42\n")
+        with pytest.raises(TypeError, match="slic"):
+            doc["x"][0:1] = [1]
+
+    def test_getitem_int_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 42\n")
+        with pytest.raises(TypeError, match="not subscriptable"):
+            doc["x"][0]
+
+    def test_pop_noarg_on_inline_table_raises(self) -> None:
+        doc = Document.parse("t = {a = 1}\n")
+        with pytest.raises(TypeError, match=r"pop.*array"):
+            doc["t"].pop()

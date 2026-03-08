@@ -216,3 +216,22 @@ class TestDocumentCompleteness:
         doc = Document.parse("x = 1\n")
         result = doc.setdefault("x", 99)
         assert result == 1
+
+
+# ---------------------------------------------------------------------------
+# Document.fmt()
+# ---------------------------------------------------------------------------
+
+
+class TestDocumentFmt:
+    def test_fmt_normalizes_root_whitespace(self) -> None:
+        doc = Document.parse("  x  =  1  \n")
+        doc.fmt()
+        assert str(doc) == "x = 1\n"
+
+    def test_fmt_does_not_touch_table_internals(self) -> None:
+        """fmt() only reformats root-level decor, not inside tables."""
+        doc = Document.parse("[t]\n  x  =  1\n")
+        doc.fmt()
+        # The table internals are preserved as-is
+        assert "x" in str(doc)

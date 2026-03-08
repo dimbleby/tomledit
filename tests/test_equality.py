@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from tests.conftest import SAMPLE, make_doc
 from tomledit import Document
@@ -148,3 +148,143 @@ class TestEquality:
         """Proxy-vs-proxy should preserve TOML type strictness."""
         doc = Document.parse("count = 1\nflag = true\n")
         assert doc["count"] != doc["flag"]
+
+
+# ---------------------------------------------------------------------------
+# Proxy-vs-proxy structural equality for various types
+# ---------------------------------------------------------------------------
+
+
+class TestProxyStructuralEquality:
+    """Exercise values_structural_eq for types beyond integers."""
+
+    def test_proxy_vs_proxy_bool(self) -> None:
+        doc = Document.parse("a = true\nb = true\n")
+        assert doc["a"] == doc["b"]
+
+    def test_proxy_vs_proxy_bool_different(self) -> None:
+        doc = Document.parse("a = true\nb = false\n")
+        assert doc["a"] != doc["b"]
+
+    def test_proxy_vs_proxy_float(self) -> None:
+        doc = Document.parse("a = 1.5\nb = 1.5\n")
+        assert doc["a"] == doc["b"]
+
+    def test_proxy_vs_proxy_float_different(self) -> None:
+        doc = Document.parse("a = 1.5\nb = 2.5\n")
+        assert doc["a"] != doc["b"]
+
+    def test_proxy_vs_proxy_string(self) -> None:
+        doc = Document.parse('a = "hi"\nb = "hi"\n')
+        assert doc["a"] == doc["b"]
+
+    def test_proxy_vs_proxy_string_different(self) -> None:
+        doc = Document.parse('a = "hi"\nb = "bye"\n')
+        assert doc["a"] != doc["b"]
+
+    def test_proxy_vs_proxy_datetime(self) -> None:
+        doc = Document.parse(
+            "a = 2024-01-15T10:30:00Z\nb = 2024-01-15T10:30:00+00:00\n"
+        )
+        assert doc["a"] == doc["b"]
+
+    def test_proxy_vs_proxy_datetime_different(self) -> None:
+        doc = Document.parse("a = 2024-01-15T10:30:00Z\nb = 2025-01-01T00:00:00Z\n")
+        assert doc["a"] != doc["b"]
+
+    def test_proxy_vs_proxy_array(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]\nb = [1, 2, 3]\n")
+        assert doc["a"] == doc["b"]
+
+    def test_proxy_vs_proxy_array_different(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]\nb = [1, 2, 4]\n")
+        assert doc["a"] != doc["b"]
+
+    def test_proxy_vs_proxy_inline_table(self) -> None:
+        doc = Document.parse("a = {x = 1}\nb = {x = 1}\n")
+        assert doc["a"] == doc["b"]
+
+    def test_proxy_vs_proxy_inline_table_different(self) -> None:
+        doc = Document.parse("a = {x = 1}\nb = {x = 2}\n")
+        assert doc["a"] != doc["b"]
+
+    def test_proxy_vs_proxy_array_of_tables(self) -> None:
+        toml = "[[a]]\nx = 1\n[[a]]\nx = 2\n[[b]]\nx = 1\n[[b]]\nx = 2\n"
+        doc = Document.parse(toml)
+        assert doc["a"] == doc["b"]
+
+    def test_proxy_vs_proxy_aot_different(self) -> None:
+        toml = "[[a]]\nx = 1\n[[b]]\nx = 2\n"
+        doc = Document.parse(toml)
+        assert doc["a"] != doc["b"]
+
+    def test_proxy_vs_proxy_different_types(self) -> None:
+        """Table vs ArrayOfTables should not be equal."""
+        doc = Document.parse("[a]\nx = 1\n[[b]]\nx = 1\n")
+        assert doc["a"] != doc["b"]
+
+
+# ---------------------------------------------------------------------------
+# Equality edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestEqualityEdgeCases:
+    def test_table_extra_key_not_equal(self) -> None:
+        """Table with keys {a, b} should != dict with keys {a, c}."""
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        assert doc["t"] != {"a": 1, "c": 2}
+
+    def test_table_vs_non_dict(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert doc["t"] != [1, 2]
+        assert doc["t"] != "hello"
+        assert doc["t"] != 42
+
+    def test_inline_table_length_mismatch(self) -> None:
+        doc = Document.parse("t = {a = 1, b = 2}\n")
+        assert doc["t"] != {"a": 1}
+
+    def test_inline_table_key_mismatch(self) -> None:
+        doc = Document.parse("t = {a = 1, b = 2}\n")
+        assert doc["t"] != {"a": 1, "c": 2}
+
+    def test_aot_equality_with_list_of_dicts(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\nvalue = 1\n[[items]]\nname = "b"\nvalue = 2\n'
+        )
+        expected = [{"name": "a", "value": 1}, {"name": "b", "value": 2}]
+        assert doc["items"] == expected
+
+    def test_aot_inequality_with_wrong_list(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\nvalue = 1\n[[items]]\nname = "b"\nvalue = 2\n'
+        )
+        assert doc["items"] != [{"name": "a", "value": 1}]
+
+    def test_aot_inequality_with_non_list(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\nvalue = 1\n')
+        assert doc["items"] != "not a list"
+
+    def test_float_not_equal_to_string(self) -> None:
+        doc = Document.parse("val = 1.5\n")
+        assert doc["val"] != "1.5"
+
+    def test_datetime_not_equal_to_string(self) -> None:
+        doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
+        assert doc["dt"] != "2024-01-15"
+
+    def test_array_not_equal_to_string(self) -> None:
+        doc = Document.parse("arr = [1, 2]\n")
+        assert doc["arr"] != "not a list"
+
+    def test_bool_not_equal_to_string(self) -> None:
+        doc = Document.parse("flag = true\n")
+        assert doc["flag"] != "true"
+
+    def test_datetime_equality_with_non_utc_offset(self) -> None:
+        """Proxy datetime == Python datetime with matching non-UTC offset."""
+        doc = Document.parse("dt = 2024-01-15T10:30:00+05:30\n")
+        tz = timezone(timedelta(hours=5, minutes=30))
+        expected = datetime(2024, 1, 15, 10, 30, 0, tzinfo=tz)
+        assert doc["dt"] == expected

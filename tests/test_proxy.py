@@ -36,6 +36,12 @@ class TestProxyLen:
         with pytest.raises(TypeError):
             len(doc["title"])
 
+    def test_aot_len(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        assert len(doc["items"]) == 3
+
 
 # ---------------------------------------------------------------------------
 # Item: __iter__
@@ -75,6 +81,13 @@ class TestProxyIter:
         doc = make_doc()
         with pytest.raises(TypeError):
             iter(doc["title"])
+
+    def test_aot_iter(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        names = [entry["name"].value for entry in doc["items"]]
+        assert names == ["a", "b", "c"]
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +182,22 @@ class TestProxyBool:
         key = next(iter(doc))
         assert bool(doc[key]) is expected
 
+    def test_aot_bool(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        assert bool(doc["items"]) is True
+
+    def test_datetime_truthy(self) -> None:
+        doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
+        assert bool(doc["dt"]) is True
+
+    def test_date_truthy(self) -> None:
+        doc = Document.parse("d = 2024-01-15\n")
+        assert bool(doc["d"]) is True
+
+    def test_time_truthy(self) -> None:
+        doc = Document.parse("t = 10:30:00\n")
+        assert bool(doc["t"]) is True
+
 
 # ---------------------------------------------------------------------------
 # Item: __delitem__
@@ -202,6 +231,18 @@ class TestProxyDelitem:
         with pytest.raises(IndexError):
             del doc["database"]["ports"][99]
 
+    def test_del_aot_first(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        del doc["items"][0]
+        assert len(doc["items"]) == 1
+        assert doc["items"][0]["name"] == "b"
+
+    def test_del_aot_negative(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        del doc["items"][-1]
+        assert len(doc["items"]) == 1
+        assert doc["items"][0]["name"] == "a"
+
 
 # ---------------------------------------------------------------------------
 # Item: __repr__
@@ -223,6 +264,11 @@ class TestProxyRepr:
         doc = make_doc()
         r = repr(doc["owner"]["age"])
         assert "30" in r
+
+    def test_aot_repr(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        r = repr(doc["items"])
+        assert "Item(" in r
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +386,12 @@ class TestProxyDictMethods:
         with pytest.raises(TypeError):
             doc["title"].keys()
 
+    def test_clear_inline_table(self) -> None:
+        doc = Document.parse("t = {a = 1, b = 2}\n")
+        doc["t"].clear()
+        assert len(doc["t"]) == 0
+        assert doc["t"] == {}
+
 
 # ---------------------------------------------------------------------------
 # Item: list-like methods (append, insert, pop, remove, extend, clear)
@@ -428,6 +480,16 @@ class TestProxyListMethods:
         assert len(doc["arr"]) == 2
         assert doc["arr"][0] == "a"
         assert doc["arr"][1] == "c"
+
+    def test_clear_aot(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc["items"].clear()
+        assert len(doc["items"]) == 0
+
+    def test_clear_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 42\n")
+        with pytest.raises(TypeError, match="clear"):
+            doc["x"].clear()
 
 
 # ---------------------------------------------------------------------------
@@ -766,6 +828,47 @@ class TestSliceIndexing:
         output = str(doc)
         assert "1" not in output.split("=")[1]  # 1 removed
 
+    # ---- additional edge cases ----
+
+    def test_append_via_slice_at_end(self) -> None:
+        """arr[len:len] = [...] should push new elements."""
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        doc["arr"][3:3] = [10, 20]
+        assert doc["arr"] == [1, 2, 3, 10, 20]
+
+    def test_replace_to_end_and_extend(self) -> None:
+        """arr[2:] = [10, 20, 30] replaces from index 2 and adds extra."""
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        doc["arr"][2:] = [10, 20, 30]
+        assert doc["arr"] == [1, 2, 10, 20, 30]
+
+    def test_slice_assignment_on_table_raises(self) -> None:
+        doc = Document.parse("[t]\nx = 1\n")
+        with pytest.raises(TypeError, match="does not support slic"):
+            doc["t"][0:1] = [1]
+
+    def test_slice_delete_on_table_raises(self) -> None:
+        doc = Document.parse("[t]\nx = 1\n")
+        with pytest.raises(TypeError, match="does not support slic"):
+            del doc["t"][0:1]
+
+    def test_aot_slice_read(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        first_two = doc["items"][:2]
+        assert len(first_two) == 2
+        assert first_two[0]["name"] == "a"
+        assert first_two[1]["name"] == "b"
+
+    def test_aot_del_slice(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        del doc["items"][0:2]
+        assert len(doc["items"]) == 1
+        assert doc["items"][0]["name"] == "c"
+
 
 # ---------------------------------------------------------------------------
 # .value property
@@ -876,3 +979,57 @@ y = 2
         v = doc["t"].value
         assert v == time(10, 30)
         assert type(v) is time
+
+    def test_aot_value(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\nvalue = 1\n[[items]]\nname = "b"\nvalue = 2\n'
+        )
+        v = doc["items"].value
+        assert isinstance(v, list)
+        assert len(v) == 2
+        assert v[0] == {"name": "a", "value": 1}
+
+    def test_datetime_with_offset(self) -> None:
+        doc = Document.parse("dt = 2024-01-15T10:30:00+05:30\n")
+        v = doc["dt"].value
+        assert isinstance(v, datetime)
+        assert v.utcoffset().total_seconds() == 5 * 3600 + 30 * 60
+
+    def test_datetime_naive(self) -> None:
+        """A datetime without timezone info."""
+        doc = Document.parse("dt = 2024-01-15T10:30:00\n")
+        v = doc["dt"].value
+        assert isinstance(v, datetime)
+        assert v.tzinfo is None
+        assert v.hour == 10
+        assert v.minute == 30
+
+
+# ---------------------------------------------------------------------------
+# ArrayOfTables: index access
+# ---------------------------------------------------------------------------
+
+
+class TestArrayOfTablesAccess:
+    def test_getitem_int(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        assert doc["items"][0]["name"] == "a"
+        assert doc["items"][2]["name"] == "c"
+
+    def test_getitem_negative(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        assert doc["items"][-1]["name"] == "c"
+
+    def test_getitem_out_of_range(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        with pytest.raises(IndexError):
+            doc["items"][99]
+
+    def test_str(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        s = str(doc["items"])
+        assert "a" in s

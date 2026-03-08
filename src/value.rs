@@ -3,7 +3,7 @@
 use crate::error::TomlError;
 use pyo3::prelude::*;
 use pyo3::types::{
-    PyBool, PyDateAccess, PyDateTime, PyDelta, PyDeltaAccess, PyFloat, PyInt, PyMapping,
+    PyBool, PyDateAccess, PyDateTime, PyDelta, PyDeltaAccess, PyFloat, PyInt, PyList, PyMapping,
     PySequence, PyString, PyTimeAccess, PyTuple,
 };
 use toml_edit::{
@@ -193,7 +193,11 @@ impl<'py> FromPyObject<'_, 'py> for Value {
             return Ok(Self(ValueRs::from(inline_table.0)));
         }
 
-        if let Ok(py_sequence) = obj.cast::<PySequence>() {
+        // Only accept list and tuple as TOML arrays.  Other sequence types
+        // (bytes, bytearray, memoryview, range, …) don't have obvious TOML
+        // semantics.  Users can wrap them with list() if needed.
+        if obj.is_instance_of::<PyList>() || obj.is_instance_of::<PyTuple>() {
+            let py_sequence = obj.cast::<PySequence>()?;
             let array: Array = py_sequence.extract()?;
             return Ok(Self(ValueRs::from(array.0)));
         }

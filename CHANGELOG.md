@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Allow assigning `Documents`s back into the document (e.g. `doc1["a"] = doc2["b"]`)
+
 ## 0.4.0 (8 March 2026)
 
 - Allow assigning `Item`s back into the document (e.g. `doc["b"] = doc["a"]`)

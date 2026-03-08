@@ -990,7 +990,9 @@ y = 2
         doc = Document.parse("dt = 2024-01-15T10:30:00+05:30\n")
         v = doc["dt"].value
         assert isinstance(v, datetime)
-        assert v.utcoffset().total_seconds() == 5 * 3600 + 30 * 60
+        offset = v.utcoffset()
+        assert offset is not None
+        assert offset.total_seconds() == 5 * 3600 + 30 * 60
 
     def test_datetime_naive(self) -> None:
         """A datetime without timezone info."""

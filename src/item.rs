@@ -1,3 +1,4 @@
+use crate::document::Document;
 use crate::item_proxy::ItemProxy;
 use crate::value::{ArrayOfTables, Table, Value};
 use pyo3::exceptions::PyTypeError;
@@ -21,6 +22,12 @@ impl<'py> FromPyObject<'_, 'py> for Item {
         if let Ok(proxy) = obj.cast::<ItemProxy>() {
             let item_rs = proxy.borrow().clone_item(obj.py())?;
             return Ok(Self(item_rs));
+        }
+
+        // A Document is structurally a table — extract it as one.
+        if let Ok(doc) = obj.cast::<Document>() {
+            let doc = doc.borrow();
+            return Ok(Self(doc.inner.as_item().clone()));
         }
 
         if obj.is_none() {

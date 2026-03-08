@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{
     PyDate, PyDateTime, PyDelta, PyDict, PyIterator, PyList, PySlice, PyTime, PyTzInfo,
@@ -26,15 +26,42 @@ pub(crate) enum Key {
 /// Instead of cloning the underlying item (which breaks `doc["d"][0] = 7`),
 /// ItemProxy holds a reference to the owning Document and a path of keys.
 /// Reads and writes navigate that path at call-time so mutations are visible.
+///
+/// Each proxy snapshots the document's generation counter at creation time.
+/// If the document is mutated through a different path, the proxy detects
+/// the stale generation and raises RuntimeError on the next access.
 #[pyclass(name = "Item", module = "tomledit")]
 pub(crate) struct ItemProxy {
     document: Py<Document>,
     path: Vec<Key>,
+    generation: u64,
 }
 
 impl ItemProxy {
-    pub(crate) fn new(document: Py<Document>, path: Vec<Key>) -> Self {
-        Self { document, path }
+    pub(crate) fn new(document: Py<Document>, path: Vec<Key>, generation: u64) -> Self {
+        Self {
+            document,
+            path,
+            generation,
+        }
+    }
+
+    /// Check that the document hasn't been mutated since this proxy was created.
+    fn check_generation(&self, doc: &Document) -> PyResult<()> {
+        if self.generation != doc.generation {
+            Err(PyRuntimeError::new_err(
+                "this Item is stale: the document has been modified since it was created",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Bump the document's generation and update our own snapshot,
+    /// so this proxy remains valid after its own mutation.
+    fn bump_generation(&mut self, doc: &mut Document) {
+        doc.bump();
+        self.generation = doc.generation;
     }
 
     fn navigate<'a>(&self, doc: &'a DocumentRs) -> PyResult<&'a ItemRs> {
@@ -67,6 +94,7 @@ impl ItemProxy {
         ItemProxy {
             document: self.document.clone_ref(py),
             path,
+            generation: self.generation,
         }
     }
 
@@ -106,7 +134,8 @@ impl ItemProxy {
         // Slice support: return a list of child proxies.
         if let Ok(slice) = key.cast::<PySlice>() {
             let doc = self.document.bind(py).borrow();
-            let item = self.navigate(&doc.0)?;
+            self.check_generation(&doc)?;
+            let item = self.navigate(&doc.inner)?;
             let len = require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
             let indices = collect_slice_indices(si.start, si.stop, si.step);
@@ -120,7 +149,8 @@ impl ItemProxy {
         let new_key = if let Ok(k) = key.extract::<i64>() {
             // Resolve negative indices
             let doc = self.document.bind(py).borrow();
-            let item = self.navigate(&doc.0)?;
+            self.check_generation(&doc)?;
+            let item = self.navigate(&doc.inner)?;
             let len = item_len(item).ok_or_else(|| {
                 PyTypeError::new_err(format!("'{}' is not subscriptable", item.type_name()))
             })?;
@@ -133,7 +163,8 @@ impl ItemProxy {
 
         {
             let doc = self.document.bind(py).borrow();
-            let item = self.navigate(&doc.0)?;
+            self.check_generation(&doc)?;
+            let item = self.navigate(&doc.inner)?;
             let exists = match &new_key {
                 Key::Str(s) => item.get(s.as_str()).is_some(),
                 Key::Int(i) => item.get(*i).is_some(),
@@ -150,54 +181,72 @@ impl ItemProxy {
             .unbind())
     }
 
-    pub fn __setitem__(&self, key: &Bound<'_, PyAny>, value: &Bound<'_, PyAny>) -> PyResult<()> {
+    pub fn __setitem__(
+        &mut self,
+        key: &Bound<'_, PyAny>,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let py = key.py();
 
         if let Ok(slice) = key.cast::<PySlice>() {
             let mut doc = self.document.bind(py).borrow_mut();
-            let item = self.navigate_mut(&mut doc.0)?;
+            self.check_generation(&doc)?;
+            let item = self.navigate_mut(&mut doc.inner)?;
             let len = require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
             let values: Vec<Item> = value
                 .try_iter()?
                 .map(|r| r.and_then(|v| v.extract::<Item>()))
                 .collect::<PyResult<_>>()?;
-            return item_setitem_slice(item, si.start, si.stop, si.step, values);
+            item_setitem_slice(item, si.start, si.stop, si.step, values)?;
+            self.bump_generation(&mut doc);
+            return Ok(());
         }
 
         let value: Item = value.extract()?;
         let mut doc = self.document.bind(py).borrow_mut();
-        let item = self.navigate_mut(&mut doc.0)?;
-        item_setitem(item, key, value)
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
+        item_setitem(item, key, value)?;
+        self.bump_generation(&mut doc);
+        Ok(())
     }
 
-    pub fn __delitem__(&self, key: &Bound<'_, PyAny>) -> PyResult<()> {
+    pub fn __delitem__(&mut self, key: &Bound<'_, PyAny>) -> PyResult<()> {
         let py = key.py();
 
         if let Ok(slice) = key.cast::<PySlice>() {
             let mut doc = self.document.bind(py).borrow_mut();
-            let item = self.navigate_mut(&mut doc.0)?;
+            self.check_generation(&doc)?;
+            let item = self.navigate_mut(&mut doc.inner)?;
             let len = require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
             let indices = collect_slice_indices(si.start, si.stop, si.step);
-            return item_delitem_slice(item, &indices);
+            item_delitem_slice(item, &indices)?;
+            self.bump_generation(&mut doc);
+            return Ok(());
         }
 
         let mut doc = self.document.bind(py).borrow_mut();
-        let item = self.navigate_mut(&mut doc.0)?;
-        item_delitem(item, key)
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
+        item_delitem(item, key)?;
+        self.bump_generation(&mut doc);
+        Ok(())
     }
 
     pub fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         item_len(item)
             .ok_or_else(|| PyTypeError::new_err(format!("'{}' has no len()", item.type_name())))
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
 
         match item_iter_info(item)? {
             IterKind::TableKeys(keys) => {
@@ -217,25 +266,29 @@ impl ItemProxy {
     pub fn __contains__(&self, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = value.py();
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         item_contains(item, value)
     }
 
     pub fn __bool__(&self, py: Python<'_>) -> PyResult<bool> {
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         Ok(item_bool(item))
     }
 
     pub fn __str__(&self, py: Python<'_>) -> PyResult<String> {
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         item_str(item, py)
     }
 
     pub fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         Ok(item_repr(item))
     }
 
@@ -246,14 +299,17 @@ impl ItemProxy {
         if let Ok(other_proxy) = other.cast::<Self>() {
             let other_proxy = other_proxy.borrow();
             let doc = self.document.bind(py).borrow();
-            let self_item = self.navigate(&doc.0)?;
+            self.check_generation(&doc)?;
+            let self_item = self.navigate(&doc.inner)?;
             let other_doc = other_proxy.document.bind(py).borrow();
-            let other_item = other_proxy.navigate(&other_doc.0)?;
+            other_proxy.check_generation(&other_doc)?;
+            let other_item = other_proxy.navigate(&other_doc.inner)?;
             return Ok(equality::items_structural_eq(self_item, other_item));
         }
 
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         equality::item_eq(item, other)
     }
 
@@ -261,7 +317,8 @@ impl ItemProxy {
     #[getter]
     pub fn value(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         item_to_py(item, py)
     }
 
@@ -274,14 +331,15 @@ impl ItemProxy {
             return Ok(None);
         }
         let doc = self.document.bind(py).borrow();
+        self.check_generation(&doc)?;
         let last_key = self.path.last().unwrap();
         match last_key {
             Key::Str(key_str) => {
-                let parent = self.navigate_parent(&doc.0)?;
+                let parent = self.navigate_parent(&doc.inner)?;
                 Ok(comments::get_key_prefix_comment(parent, key_str))
             }
             Key::Int(_) => {
-                let item = self.navigate(&doc.0)?;
+                let item = self.navigate(&doc.inner)?;
                 Ok(comments::get_value_prefix_comment(item))
             }
         }
@@ -294,55 +352,63 @@ impl ItemProxy {
         }
         let last_key = self.path.last().unwrap().clone();
         let mut doc = self.document.bind(py).borrow_mut();
+        self.check_generation(&doc)?;
         match last_key {
             Key::Str(key_str) => {
-                let parent = self.navigate_parent_mut(&mut doc.0)?;
-                comments::set_key_prefix_comment(parent, &key_str, value)
+                let parent = self.navigate_parent_mut(&mut doc.inner)?;
+                comments::set_key_prefix_comment(parent, &key_str, value)?;
             }
             Key::Int(_) => {
-                let item = self.navigate_mut(&mut doc.0)?;
-                comments::set_value_prefix_comment(item, value)
+                let item = self.navigate_mut(&mut doc.inner)?;
+                comments::set_value_prefix_comment(item, value)?;
             }
         }
+        Ok(())
     }
 
     /// The inline comment after this value (e.g. `key = 1 # this part`), or None.
     #[getter]
     pub fn inline_comment(&self, py: Python<'_>) -> PyResult<Option<String>> {
         let doc = self.document.bind(py).borrow();
+        self.check_generation(&doc)?;
         if let Some(Key::Int(idx)) = self.path.last() {
-            let parent = self.navigate_parent(&doc.0)?;
+            let parent = self.navigate_parent(&doc.inner)?;
             return Ok(comments::get_array_item_comment(parent, *idx));
         }
-        let item = self.navigate(&doc.0)?;
+        let item = self.navigate(&doc.inner)?;
         Ok(comments::get_suffix_comment(item))
     }
 
     #[setter]
     pub fn set_inline_comment(&self, py: Python<'_>, value: Option<&str>) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
+        self.check_generation(&doc)?;
         if let Some(Key::Int(idx)) = self.path.last() {
-            return comments::set_array_item_comment(
-                self.navigate_parent_mut(&mut doc.0)?,
+            comments::set_array_item_comment(
+                self.navigate_parent_mut(&mut doc.inner)?,
                 *idx,
                 value,
-            );
+            )?;
+            return Ok(());
         }
-        let item = self.navigate_mut(&mut doc.0)?;
-        comments::set_suffix_comment(item, value)
+        let item = self.navigate_mut(&mut doc.inner)?;
+        comments::set_suffix_comment(item, value)?;
+        Ok(())
     }
 
     // ---- dict-like methods ----
 
     pub fn keys(&self, py: Python<'_>) -> PyResult<Vec<String>> {
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         item_keys(item)
     }
 
     pub fn values(&self, py: Python<'_>) -> PyResult<Vec<ItemProxy>> {
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         let keys = item_keys(item)?;
         Ok(keys
             .into_iter()
@@ -352,7 +418,8 @@ impl ItemProxy {
 
     pub fn items(&self, py: Python<'_>) -> PyResult<Vec<(String, ItemProxy)>> {
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         let keys = item_keys(item)?;
         Ok(keys
             .into_iter()
@@ -371,7 +438,8 @@ impl ItemProxy {
         default: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         let doc = self.document.bind(py).borrow();
-        let item = self.navigate(&doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
         if item_has_key(item, key)? {
             Ok(self
                 .child_proxy(py, Key::Str(key.to_owned()))
@@ -385,15 +453,20 @@ impl ItemProxy {
 
     #[pyo3(signature = (key=None, default=None))]
     pub fn pop(
-        &self,
+        &mut self,
         py: Python<'_>,
         key: Option<&Bound<'_, PyAny>>,
         default: Option<Py<PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         let mut doc = self.document.bind(py).borrow_mut();
-        let item = self.navigate_mut(&mut doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
         match item_pop(item, key) {
-            Ok(removed) => item_to_py(&removed.0, py),
+            Ok(removed) => {
+                let result = item_to_py(&removed.0, py)?;
+                self.bump_generation(&mut doc);
+                Ok(result)
+            }
             Err(e) if default.is_some() && e.is_instance_of::<PyKeyError>(py) => {
                 Ok(default.unwrap())
             }
@@ -401,67 +474,86 @@ impl ItemProxy {
         }
     }
 
-    pub fn update(&self, other: &Bound<'_, PyAny>) -> PyResult<()> {
+    pub fn update(&mut self, other: &Bound<'_, PyAny>) -> PyResult<()> {
         let py = other.py();
         let mut doc = self.document.bind(py).borrow_mut();
-        let item = self.navigate_mut(&mut doc.0)?;
-        item_update(item, other)
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
+        item_update(item, other)?;
+        self.bump_generation(&mut doc);
+        Ok(())
     }
 
-    pub fn setdefault(&self, py: Python<'_>, key: &str, default: Item) -> PyResult<ItemProxy> {
+    pub fn setdefault(&mut self, py: Python<'_>, key: &str, default: Item) -> PyResult<ItemProxy> {
         let mut doc = self.document.bind(py).borrow_mut();
-        let item = self.navigate_mut(&mut doc.0)?;
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
 
         if !item_has_key(item, key)? {
             set_with_decor_preservation(item, key, default);
+            self.bump_generation(&mut doc);
         }
 
-        drop(doc);
         Ok(self.child_proxy(py, Key::Str(key.to_owned())))
     }
 
     // ---- list-like methods ----
 
-    pub fn append(&self, py: Python<'_>, value: Item) -> PyResult<()> {
+    pub fn append(&mut self, py: Python<'_>, value: Item) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
-        let item = self.navigate_mut(&mut doc.0)?;
-        item_append(item, value)
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
+        item_append(item, value)?;
+        self.bump_generation(&mut doc);
+        Ok(())
     }
 
-    pub fn insert(&self, py: Python<'_>, index: i64, value: Item) -> PyResult<()> {
+    pub fn insert(&mut self, py: Python<'_>, index: i64, value: Item) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
-        let item = self.navigate_mut(&mut doc.0)?;
-        item_insert(item, index, value)
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
+        item_insert(item, index, value)?;
+        self.bump_generation(&mut doc);
+        Ok(())
     }
 
-    pub fn remove(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
+    pub fn remove(&mut self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
-        let item = self.navigate_mut(&mut doc.0)?;
-        item_remove(item, value)
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
+        item_remove(item, value)?;
+        self.bump_generation(&mut doc);
+        Ok(())
     }
 
-    pub fn extend(&self, py: Python<'_>, values: &Bound<'_, PyAny>) -> PyResult<()> {
+    pub fn extend(&mut self, py: Python<'_>, values: &Bound<'_, PyAny>) -> PyResult<()> {
         let items: Vec<Item> = values
             .try_iter()?
             .map(|r| r.and_then(|v| v.extract::<Item>()))
             .collect::<PyResult<_>>()?;
 
         let mut doc = self.document.bind(py).borrow_mut();
-        let item = self.navigate_mut(&mut doc.0)?;
-        item_extend(item, items)
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
+        item_extend(item, items)?;
+        self.bump_generation(&mut doc);
+        Ok(())
     }
 
     // ---- shared methods ----
 
-    pub fn clear(&self, py: Python<'_>) -> PyResult<()> {
+    pub fn clear(&mut self, py: Python<'_>) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
-        let item = self.navigate_mut(&mut doc.0)?;
-        item_clear(item)
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
+        item_clear(item)?;
+        self.bump_generation(&mut doc);
+        Ok(())
     }
 }
 
 // ===========================================================================
-// Item operations (formerly ops.rs)
+// Item operations
 // ===========================================================================
 
 // ---------------------------------------------------------------------------

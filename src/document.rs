@@ -212,6 +212,18 @@ impl Document {
         }
     }
 
+    pub fn __copy__(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            generation: 0,
+        }
+    }
+
+    #[pyo3(signature = (_memo=None))]
+    pub fn __deepcopy__(&self, _memo: Option<&Bound<'_, PyAny>>) -> Self {
+        self.__copy__()
+    }
+
     pub fn fmt(&mut self) {
         self.inner.fmt();
     }

@@ -1029,3 +1029,49 @@ class TestArrayOfTablesAccess:
     def test_str(self) -> None:
         doc = Document.parse('[[items]]\nname = "a"\n')
         assert str(doc["items"]) == "[{'name': 'a'}]"
+
+
+# ---------------------------------------------------------------------------
+# Item: fmt
+# ---------------------------------------------------------------------------
+
+
+class TestProxyFmt:
+    def test_fmt_table(self) -> None:
+        doc = Document.parse("[t]\na   =   1\nb   =   2\n")
+        doc["t"].fmt()
+        assert str(doc) == "[t]\na = 1\nb = 2\n"
+
+    def test_fmt_inline_table(self) -> None:
+        doc = Document.parse("meta = {x = 1 }\n")
+        doc["meta"]["y"] = 2
+        doc["meta"].fmt()
+        assert str(doc) == "meta = { x = 1, y = 2 }\n"
+
+    def test_fmt_array(self) -> None:
+        doc = Document.parse("arr = [  1,  2,  3  ]\n")
+        doc["arr"].fmt()
+        assert str(doc) == "arr = [1, 2, 3]\n"
+
+    def test_fmt_array_of_tables_is_noop(self) -> None:
+        text = "[[t]]\na   =   1\n[[t]]\nb   =   2\n"
+        doc = Document.parse(text)
+        doc["t"].fmt()
+        assert str(doc) == text
+
+    def test_fmt_scalar_is_noop(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc["x"].fmt()
+        assert str(doc) == "x = 1\n"
+
+    def test_fmt_does_not_invalidate_proxies(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        t = doc["t"]
+        b = doc["t"]["b"]
+        t.fmt()
+        assert b.value == 2
+
+    def test_fmt_table_strips_comments_on_entries(self) -> None:
+        doc = Document.parse("# comment\na = 1 # inline\n")
+        doc.fmt()
+        assert str(doc) == "a = 1\n"

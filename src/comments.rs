@@ -1,6 +1,7 @@
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use toml_edit::Item as ItemRs;
+use toml_edit::Value as ValueRs;
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -104,12 +105,10 @@ pub(crate) fn set_suffix_comment(item: &mut ItemRs, comment: Option<&str>) -> Py
 
 /// Get the comment before a key from the parent table's key decor.
 pub(crate) fn get_key_prefix_comment(parent: &ItemRs, key: &str) -> Option<String> {
-    let raw = if let Some(table) = parent.as_table() {
-        table.key(key)?.leaf_decor().prefix()?.as_str()?
-    } else if let Some(it) = parent.as_inline_table() {
-        it.key(key)?.leaf_decor().prefix()?.as_str()?
-    } else {
-        return None;
+    let raw = match parent {
+        ItemRs::Table(table) => table.key(key)?.leaf_decor().prefix()?.as_str()?,
+        ItemRs::Value(ValueRs::InlineTable(it)) => it.key(key)?.leaf_decor().prefix()?.as_str()?,
+        _ => return None,
     };
     extract_block_comment(raw)
 }
@@ -127,12 +126,10 @@ pub(crate) fn set_key_prefix_comment(
             "cannot set block comment on inline table key (would produce multi-line inline table)",
         ));
     }
-    let key_mut = if let Some(table) = parent.as_table_mut() {
-        table.key_mut(key)
-    } else if let Some(it) = parent.as_inline_table_mut() {
-        it.key_mut(key)
-    } else {
-        None
+    let key_mut = match parent {
+        ItemRs::Table(table) => table.key_mut(key),
+        ItemRs::Value(ValueRs::InlineTable(it)) => it.key_mut(key),
+        _ => None,
     };
     let Some(mut km) = key_mut else {
         return Err(PyKeyError::new_err(key.to_owned()));

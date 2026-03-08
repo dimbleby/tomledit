@@ -5,6 +5,7 @@ use pyo3::types::{
 };
 use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
+use toml_edit::Value as ValueRs;
 
 use crate::comments;
 use crate::document::Document;
@@ -550,6 +551,19 @@ impl ItemProxy {
         self.bump_generation(&mut doc);
         Ok(())
     }
+
+    /// Normalize formatting of this item (spacing, trailing commas, etc.).
+    ///
+    /// Useful after mutations that leave behind awkward whitespace.
+    /// This is shallow — it formats the item itself, not nested sub-tables.
+    /// Note: any comments on the formatted item will be removed.
+    pub fn fmt(&self, py: Python<'_>) -> PyResult<()> {
+        let mut doc = self.document.bind(py).borrow_mut();
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
+        item_fmt(item);
+        Ok(())
+    }
 }
 
 // ===========================================================================
@@ -591,8 +605,8 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
 fn item_len(item: &ItemRs) -> Option<usize> {
     match item {
         ItemRs::Table(t) => Some(t.len()),
-        ItemRs::Value(toml_edit::Value::Array(a)) => Some(a.len()),
-        ItemRs::Value(toml_edit::Value::InlineTable(it)) => Some(it.len()),
+        ItemRs::Value(ValueRs::Array(a)) => Some(a.len()),
+        ItemRs::Value(ValueRs::InlineTable(it)) => Some(it.len()),
         ItemRs::ArrayOfTables(aot) => Some(aot.len()),
         _ => None,
     }
@@ -604,11 +618,11 @@ fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
             let key: &str = value.extract()?;
             Ok(table.contains_key(key))
         }
-        ItemRs::Value(toml_edit::Value::InlineTable(it)) => {
+        ItemRs::Value(ValueRs::InlineTable(it)) => {
             let key: &str = value.extract()?;
             Ok(it.contains_key(key))
         }
-        ItemRs::Value(toml_edit::Value::Array(arr)) => {
+        ItemRs::Value(ValueRs::Array(arr)) => {
             for v in arr.iter() {
                 if equality::value_eq(v, value)? {
                     return Ok(true);
@@ -785,10 +799,10 @@ enum IterKind<'a> {
 fn item_iter_info<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
     match item {
         ItemRs::Table(table) => Ok(IterKind::TableKeys(table.iter().map(|(k, _)| k).collect())),
-        ItemRs::Value(toml_edit::Value::InlineTable(it)) => {
+        ItemRs::Value(ValueRs::InlineTable(it)) => {
             Ok(IterKind::TableKeys(it.iter().map(|(k, _)| k).collect()))
         }
-        ItemRs::Value(toml_edit::Value::Array(arr)) => Ok(IterKind::ArrayLen(arr.len())),
+        ItemRs::Value(ValueRs::Array(arr)) => Ok(IterKind::ArrayLen(arr.len())),
         ItemRs::ArrayOfTables(aot) => Ok(IterKind::ArrayLen(aot.len())),
         _ => Err(PyTypeError::new_err(format!(
             "'{}' is not iterable",
@@ -831,15 +845,13 @@ fn collect_slice_indices(start: isize, stop: isize, step: isize) -> Vec<usize> {
 
 /// Get the length of an array-like item, or error for non-sliceable types.
 fn require_array_like_len(item: &ItemRs) -> PyResult<usize> {
-    if let Some(arr) = item.as_array() {
-        Ok(arr.len())
-    } else if let Some(aot) = item.as_array_of_tables() {
-        Ok(aot.len())
-    } else {
-        Err(PyTypeError::new_err(format!(
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => Ok(arr.len()),
+        ItemRs::ArrayOfTables(aot) => Ok(aot.len()),
+        _ => Err(PyTypeError::new_err(format!(
             "'{}' does not support slicing",
             item.type_name()
-        )))
+        ))),
     }
 }
 
@@ -850,21 +862,23 @@ fn item_delitem_slice(item: &mut ItemRs, indices: &[usize]) -> PyResult<()> {
     sorted.dedup();
     sorted.reverse();
 
-    if let Some(arr) = item.as_array_mut() {
-        for idx in sorted {
-            arr.remove(idx);
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => {
+            for idx in sorted {
+                arr.remove(idx);
+            }
+            Ok(())
         }
-        Ok(())
-    } else if let Some(aot) = item.as_array_of_tables_mut() {
-        for idx in sorted {
-            aot.remove(idx);
+        ItemRs::ArrayOfTables(aot) => {
+            for idx in sorted {
+                aot.remove(idx);
+            }
+            Ok(())
         }
-        Ok(())
-    } else {
-        Err(PyTypeError::new_err(format!(
+        _ => Err(PyTypeError::new_err(format!(
             "'{}' does not support slice deletion",
             item.type_name()
-        )))
+        ))),
     }
 }
 
@@ -946,7 +960,7 @@ fn bad_key_type(key: &Bound<'_, PyAny>) -> PyErr {
 fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
     match item {
         ItemRs::Table(table) => Ok(table.iter().map(|(k, _)| k.to_owned()).collect()),
-        ItemRs::Value(toml_edit::Value::InlineTable(it)) => {
+        ItemRs::Value(ValueRs::InlineTable(it)) => {
             Ok(it.iter().map(|(k, _)| k.to_owned()).collect())
         }
         _ => Err(PyTypeError::new_err(format!(
@@ -959,7 +973,7 @@ fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
 fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
     match item {
         ItemRs::Table(table) => Ok(table.contains_key(key)),
-        ItemRs::Value(toml_edit::Value::InlineTable(it)) => Ok(it.contains_key(key)),
+        ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.contains_key(key)),
         _ => Err(PyTypeError::new_err(format!(
             "'{}' has no get()",
             item.type_name()
@@ -973,7 +987,7 @@ fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
 
 fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyResult<()> {
     match item {
-        ItemRs::Value(toml_edit::Value::Array(array)) => {
+        ItemRs::Value(ValueRs::Array(array)) => {
             let v = value
                 .0
                 .into_value()
@@ -982,7 +996,7 @@ fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyRes
             array.replace(idx, v);
             Ok(())
         }
-        ItemRs::Value(toml_edit::Value::InlineTable(_)) | ItemRs::Table(_) => {
+        ItemRs::Value(ValueRs::InlineTable(_)) | ItemRs::Table(_) => {
             let key: &str = key.extract()?;
             set_with_decor_preservation(item, key, value);
             Ok(())
@@ -1021,12 +1035,12 @@ fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<()> {
             Ok(())
         }
         ItemRs::Value(value_rs) => match value_rs {
-            toml_edit::Value::Array(array) => {
+            ValueRs::Array(array) => {
                 let idx = resolve_index(key.extract::<i64>()?, array.len())?;
                 array.remove(idx);
                 Ok(())
             }
-            toml_edit::Value::InlineTable(inline_table) => {
+            ValueRs::InlineTable(inline_table) => {
                 let key: &str = key.extract()?;
                 if inline_table.remove(key).is_none() {
                     return Err(PyKeyError::new_err(key.to_owned()));
@@ -1058,13 +1072,13 @@ fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item>
                     .map(Item)
                     .ok_or_else(|| PyKeyError::new_err(key.to_owned()))
             }
-            ItemRs::Value(toml_edit::Value::InlineTable(it)) => {
+            ItemRs::Value(ValueRs::InlineTable(it)) => {
                 let key: &str = key_obj.extract()?;
                 it.remove(key)
                     .map(|v| Item(ItemRs::Value(v)))
                     .ok_or_else(|| PyKeyError::new_err(key.to_owned()))
             }
-            ItemRs::Value(toml_edit::Value::Array(arr)) => {
+            ItemRs::Value(ValueRs::Array(arr)) => {
                 let idx = resolve_index(key_obj.extract::<i64>()?, arr.len())?;
                 Ok(Item(ItemRs::Value(arr.remove(idx))))
             }
@@ -1074,7 +1088,7 @@ fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item>
             ))),
         },
         None => match item {
-            ItemRs::Value(toml_edit::Value::Array(arr)) => {
+            ItemRs::Value(ValueRs::Array(arr)) => {
                 if arr.is_empty() {
                     return Err(PyIndexError::new_err("pop from empty array"));
                 }
@@ -1189,22 +1203,36 @@ fn item_extend(item: &mut ItemRs, items: Vec<Item>) -> PyResult<()> {
 }
 
 fn item_clear(item: &mut ItemRs) -> PyResult<()> {
-    if let Some(table) = item.as_table_mut() {
-        table.clear();
-        Ok(())
-    } else if let Some(it) = item.as_inline_table_mut() {
-        it.clear();
-        Ok(())
-    } else if let Some(arr) = item.as_array_mut() {
-        arr.clear();
-        Ok(())
-    } else if let Some(aot) = item.as_array_of_tables_mut() {
-        aot.clear();
-        Ok(())
-    } else {
-        Err(PyTypeError::new_err(format!(
+    match item {
+        ItemRs::Table(table) => {
+            table.clear();
+            Ok(())
+        }
+        ItemRs::Value(ValueRs::InlineTable(it)) => {
+            it.clear();
+            Ok(())
+        }
+        ItemRs::Value(ValueRs::Array(arr)) => {
+            arr.clear();
+            Ok(())
+        }
+        ItemRs::ArrayOfTables(aot) => {
+            aot.clear();
+            Ok(())
+        }
+        _ => Err(PyTypeError::new_err(format!(
             "'{}' does not support clear()",
             item.type_name()
-        )))
+        ))),
+    }
+}
+
+/// Normalize formatting of a single item (shallow).
+fn item_fmt(item: &mut ItemRs) {
+    match item {
+        ItemRs::Table(table) => table.fmt(),
+        ItemRs::Value(ValueRs::InlineTable(it)) => it.fmt(),
+        ItemRs::Value(ValueRs::Array(arr)) => arr.fmt(),
+        _ => {} // ArrayOfTables, scalars: no-op
     }
 }

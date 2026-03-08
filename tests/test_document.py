@@ -233,5 +233,4 @@ class TestDocumentFmt:
         """fmt() only reformats root-level decor, not inside tables."""
         doc = Document.parse("[t]\n  x  =  1\n")
         doc.fmt()
-        # The table internals are preserved as-is
-        assert "x" in str(doc)
+        assert str(doc) == "[t]\n  x  =  1\n"

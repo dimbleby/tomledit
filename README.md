@@ -74,12 +74,12 @@ doc["arr"][0] = "changed"   # mutates the document
 print(first)                # RuntimeError: this Item is stale
 ```
 
-The item that _performs_ the mutation stays valid, so chaining works fine:
+The item that performs the mutation stays valid:
 
 ```python
 arr = doc["arr"]
-arr.append("c")
-arr.append("d")   # still works - arr itself did the mutating
+arr[0] = "changed"
+print(arr)                  # still works - arr itself did the mutating
 ```
 
 If you just need the plain Python value, grab it with `.value` before the

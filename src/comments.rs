@@ -241,12 +241,8 @@ pub(crate) fn set_array_item_comment(
         None => String::new(),
     };
     let new_prefix = join_prefix(&parts);
-    if idx + 1 < len {
-        array
-            .get_mut(idx + 1)
-            .unwrap()
-            .decor_mut()
-            .set_prefix(new_prefix);
+    if let Some(elem) = array.get_mut(idx + 1) {
+        elem.decor_mut().set_prefix(new_prefix);
     } else {
         array.set_trailing(new_prefix);
     }

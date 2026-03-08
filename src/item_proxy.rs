@@ -338,12 +338,11 @@ impl ItemProxy {
     /// The comment lines before this entry, or None.
     #[getter]
     pub fn comment(&self, py: Python<'_>) -> PyResult<Option<String>> {
-        if self.path.is_empty() {
+        let Some(last_key) = self.path.last() else {
             return Ok(None);
-        }
+        };
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
-        let last_key = self.path.last().unwrap();
         match last_key {
             Key::Str(key_str) => {
                 let parent = self.navigate_parent(&doc.inner)?;
@@ -358,10 +357,9 @@ impl ItemProxy {
 
     #[setter]
     pub fn set_comment(&self, py: Python<'_>, value: Option<&str>) -> PyResult<()> {
-        if self.path.is_empty() {
+        let Some(last_key) = self.path.last() else {
             return Err(PyTypeError::new_err("cannot set comment on root"));
-        }
-        let last_key = self.path.last().unwrap().clone();
+        };
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         match last_key {
@@ -990,9 +988,12 @@ fn unsupported_op(item: &ItemRs, op: &str) -> PyErr {
 }
 
 fn into_value(item: Item) -> PyResult<ValueRs> {
-    item.0
-        .into_value()
-        .map_err(|item| PyTypeError::new_err(format!("cannot convert {} to a TOML value", item.type_name())))
+    item.0.into_value().map_err(|item| {
+        PyTypeError::new_err(format!(
+            "cannot convert {} to a TOML value",
+            item.type_name()
+        ))
+    })
 }
 
 fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {

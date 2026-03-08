@@ -497,44 +497,46 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
 // ---------------------------------------------------------------------------
 
 fn item_len(item: &ItemRs) -> Option<usize> {
-    if let Some(t) = item.as_table() {
-        Some(t.len())
-    } else if let Some(a) = item.as_array() {
-        Some(a.len())
-    } else if let Some(it) = item.as_inline_table() {
-        Some(it.len())
-    } else {
-        item.as_array_of_tables().map(|aot| aot.len())
+    match item {
+        ItemRs::Table(t) => Some(t.len()),
+        ItemRs::Value(toml_edit::Value::Array(a)) => Some(a.len()),
+        ItemRs::Value(toml_edit::Value::InlineTable(it)) => Some(it.len()),
+        ItemRs::ArrayOfTables(aot) => Some(aot.len()),
+        _ => None,
     }
 }
 
 fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
-    if let Some(table) = item.as_table() {
-        let key: &str = value.extract()?;
-        Ok(table.contains_key(key))
-    } else if let Some(it) = item.as_inline_table() {
-        let key: &str = value.extract()?;
-        Ok(it.contains_key(key))
-    } else if let Some(arr) = item.as_array() {
-        for v in arr.iter() {
-            if equality::value_eq(v, value)? {
-                return Ok(true);
-            }
+    match item {
+        ItemRs::Table(table) => {
+            let key: &str = value.extract()?;
+            Ok(table.contains_key(key))
         }
-        Ok(false)
-    } else if let Some(aot) = item.as_array_of_tables() {
-        if let Ok(other_dict) = value.cast::<PyDict>() {
-            for table in aot.iter() {
-                if equality::table_entries_eq(table.iter(), table.len(), other_dict)? {
+        ItemRs::Value(toml_edit::Value::InlineTable(it)) => {
+            let key: &str = value.extract()?;
+            Ok(it.contains_key(key))
+        }
+        ItemRs::Value(toml_edit::Value::Array(arr)) => {
+            for v in arr.iter() {
+                if equality::value_eq(v, value)? {
                     return Ok(true);
                 }
             }
+            Ok(false)
         }
-        Ok(false)
-    } else {
-        Err(PyTypeError::new_err(
+        ItemRs::ArrayOfTables(aot) => {
+            if let Ok(other_dict) = value.cast::<PyDict>() {
+                for table in aot.iter() {
+                    if equality::table_entries_eq(table.iter(), table.len(), other_dict)? {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(false)
+        }
+        _ => Err(PyTypeError::new_err(
             "argument of type 'scalar' is not iterable",
-        ))
+        )),
     }
 }
 
@@ -543,21 +545,17 @@ fn item_bool(item: &ItemRs) -> bool {
         return len > 0;
     }
     // Scalar truthiness: match Python semantics.
-    if let Some(value) = item.as_value() {
-        if let Some(b) = value.as_bool() {
-            return b;
+    if let ItemRs::Value(value) = item {
+        match value {
+            toml_edit::Value::Boolean(b) => *b.value(),
+            toml_edit::Value::Integer(i) => *i.value() != 0,
+            toml_edit::Value::Float(f) => *f.value() != 0.0,
+            toml_edit::Value::String(s) => !s.value().is_empty(),
+            _ => true,
         }
-        if let Some(i) = value.as_integer() {
-            return i != 0;
-        }
-        if let Some(f) = value.as_float() {
-            return f != 0.0;
-        }
-        if let Some(s) = value.as_str() {
-            return !s.is_empty();
-        }
+    } else {
+        true
     }
-    true
 }
 
 fn item_repr(item: &ItemRs) -> String {
@@ -693,19 +691,17 @@ enum IterKind<'a> {
 }
 
 fn item_iter_info<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
-    if let Some(table) = item.as_table() {
-        Ok(IterKind::TableKeys(table.iter().map(|(k, _)| k).collect()))
-    } else if let Some(it) = item.as_inline_table() {
-        Ok(IterKind::TableKeys(it.iter().map(|(k, _)| k).collect()))
-    } else if let Some(arr) = item.as_array() {
-        Ok(IterKind::ArrayLen(arr.len()))
-    } else if let Some(aot) = item.as_array_of_tables() {
-        Ok(IterKind::ArrayLen(aot.len()))
-    } else {
-        Err(PyTypeError::new_err(format!(
+    match item {
+        ItemRs::Table(table) => Ok(IterKind::TableKeys(table.iter().map(|(k, _)| k).collect())),
+        ItemRs::Value(toml_edit::Value::InlineTable(it)) => {
+            Ok(IterKind::TableKeys(it.iter().map(|(k, _)| k).collect()))
+        }
+        ItemRs::Value(toml_edit::Value::Array(arr)) => Ok(IterKind::ArrayLen(arr.len())),
+        ItemRs::ArrayOfTables(aot) => Ok(IterKind::ArrayLen(aot.len())),
+        _ => Err(PyTypeError::new_err(format!(
             "'{}' is not iterable",
             item.type_name()
-        )))
+        ))),
     }
 }
 
@@ -856,28 +852,26 @@ fn bad_key_type(key: &Bound<'_, PyAny>) -> PyErr {
 }
 
 fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
-    if let Some(table) = item.as_table() {
-        Ok(table.iter().map(|(k, _)| k.to_owned()).collect())
-    } else if let Some(it) = item.as_inline_table() {
-        Ok(it.iter().map(|(k, _)| k.to_owned()).collect())
-    } else {
-        Err(PyTypeError::new_err(format!(
+    match item {
+        ItemRs::Table(table) => Ok(table.iter().map(|(k, _)| k.to_owned()).collect()),
+        ItemRs::Value(toml_edit::Value::InlineTable(it)) => {
+            Ok(it.iter().map(|(k, _)| k.to_owned()).collect())
+        }
+        _ => Err(PyTypeError::new_err(format!(
             "'{}' has no keys()",
             item.type_name()
-        )))
+        ))),
     }
 }
 
 fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
-    if let Some(table) = item.as_table() {
-        Ok(table.contains_key(key))
-    } else if let Some(it) = item.as_inline_table() {
-        Ok(it.contains_key(key))
-    } else {
-        Err(PyTypeError::new_err(format!(
+    match item {
+        ItemRs::Table(table) => Ok(table.contains_key(key)),
+        ItemRs::Value(toml_edit::Value::InlineTable(it)) => Ok(it.contains_key(key)),
+        _ => Err(PyTypeError::new_err(format!(
             "'{}' has no get()",
             item.type_name()
-        )))
+        ))),
     }
 }
 
@@ -984,41 +978,41 @@ fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<()> {
 
 fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item> {
     match key {
-        Some(key_obj) => {
-            if let Some(table) = item.as_table_mut() {
+        Some(key_obj) => match item {
+            ItemRs::Table(table) => {
                 let key: &str = key_obj.extract()?;
                 table
                     .remove(key)
                     .map(Item)
                     .ok_or_else(|| PyKeyError::new_err(key.to_owned()))
-            } else if let Some(it) = item.as_inline_table_mut() {
+            }
+            ItemRs::Value(toml_edit::Value::InlineTable(it)) => {
                 let key: &str = key_obj.extract()?;
                 it.remove(key)
                     .map(|v| Item(ItemRs::Value(v)))
                     .ok_or_else(|| PyKeyError::new_err(key.to_owned()))
-            } else if let Some(arr) = item.as_array_mut() {
+            }
+            ItemRs::Value(toml_edit::Value::Array(arr)) => {
                 let idx = resolve_index(key_obj.extract::<i64>()?, arr.len())?;
                 Ok(Item(ItemRs::Value(arr.remove(idx))))
-            } else {
-                Err(PyTypeError::new_err(format!(
-                    "'{}' does not support pop()",
-                    item.type_name()
-                )))
             }
-        }
-        None => {
-            if let Some(arr) = item.as_array_mut() {
+            _ => Err(PyTypeError::new_err(format!(
+                "'{}' does not support pop()",
+                item.type_name()
+            ))),
+        },
+        None => match item {
+            ItemRs::Value(toml_edit::Value::Array(arr)) => {
                 if arr.is_empty() {
                     return Err(PyIndexError::new_err("pop from empty array"));
                 }
                 let last = arr.len() - 1;
                 Ok(Item(ItemRs::Value(arr.remove(last))))
-            } else {
-                Err(PyTypeError::new_err(
-                    "pop() with no arguments only supported on arrays",
-                ))
             }
-        }
+            _ => Err(PyTypeError::new_err(
+                "pop() with no arguments only supported on arrays",
+            )),
+        },
     }
 }
 

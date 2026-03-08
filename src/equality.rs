@@ -37,33 +37,27 @@ fn datetime_eq(a: &toml_edit::Datetime, b: &toml_edit::Datetime) -> bool {
 
 /// Compare two toml_edit Values structurally (pure Rust, no Python allocation).
 fn values_structural_eq(a: &toml_edit::Value, b: &toml_edit::Value) -> bool {
-    if let (Some(a), Some(b)) = (a.as_bool(), b.as_bool()) {
-        return a == b;
+    match (a, b) {
+        (toml_edit::Value::String(a), toml_edit::Value::String(b)) => a.value() == b.value(),
+        (toml_edit::Value::Integer(a), toml_edit::Value::Integer(b)) => a.value() == b.value(),
+        (toml_edit::Value::Float(a), toml_edit::Value::Float(b)) => a.value() == b.value(),
+        (toml_edit::Value::Boolean(a), toml_edit::Value::Boolean(b)) => a.value() == b.value(),
+        (toml_edit::Value::Datetime(a), toml_edit::Value::Datetime(b)) => {
+            datetime_eq(a.value(), b.value())
+        }
+        (toml_edit::Value::Array(a), toml_edit::Value::Array(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .zip(b.iter())
+                    .all(|(va, vb)| values_structural_eq(va, vb))
+        }
+        (toml_edit::Value::InlineTable(a), toml_edit::Value::InlineTable(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(k, v)| b.get(k).is_some_and(|bv| values_structural_eq(v, bv)))
+        }
+        _ => false,
     }
-    if let (Some(a), Some(b)) = (a.as_integer(), b.as_integer()) {
-        return a == b;
-    }
-    if let (Some(a), Some(b)) = (a.as_float(), b.as_float()) {
-        return a == b;
-    }
-    if let (Some(a), Some(b)) = (a.as_str(), b.as_str()) {
-        return a == b;
-    }
-    if let (Some(a), Some(b)) = (a.as_datetime(), b.as_datetime()) {
-        return datetime_eq(a, b);
-    }
-    if let (Some(a), Some(b)) = (a.as_array(), b.as_array()) {
-        return a.len() == b.len()
-            && a.iter()
-                .zip(b.iter())
-                .all(|(va, vb)| values_structural_eq(va, vb));
-    }
-    if let (Some(a), Some(b)) = (a.as_inline_table(), b.as_inline_table()) {
-        return a.len() == b.len()
-            && a.iter()
-                .all(|(k, v)| b.get(k).is_some_and(|bv| values_structural_eq(v, bv)));
-    }
-    false
 }
 
 fn tables_structural_eq(a: &toml_edit::Table, b: &toml_edit::Table) -> bool {
@@ -89,66 +83,67 @@ pub(crate) fn items_structural_eq(a: &ItemRs, b: &ItemRs) -> bool {
 
 /// Compare a toml_edit Value to a Python object for equality.
 pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-    // Check bool before int (Python bool is subclass of int)
-    if let Some(b) = value.as_bool()
-        && let Ok(other_b) = other.extract::<bool>()
-    {
-        return Ok(b == other_b);
-    }
-    if let Some(i) = value.as_integer()
-        && other.cast::<PyBool>().is_err()
-        && let Ok(other_i) = other.extract::<i64>()
-    {
-        return Ok(i == other_i);
-    }
-    if let Some(f) = value.as_float()
-        && other.cast::<PyBool>().is_err()
-        && let Ok(other_f) = other.extract::<f64>()
-    {
-        return Ok(f == other_f);
-    }
-    if let Some(s) = value.as_str()
-        && let Ok(other_s) = other.cast::<PyString>()
-    {
-        return Ok(other_s.to_str().is_ok_and(|o| s == o));
-    }
-    if let Some(dt) = value.as_datetime()
-        && let Ok(py_dt) = other.cast::<PyDateTime>()
-    {
-        let other_dt: Datetime = py_dt.extract()?;
-        return Ok(datetime_eq(dt, &other_dt.0));
-    }
-    // Array == list
-    if let Some(arr) = value.as_array()
-        && let Ok(other_list) = other.cast::<PyList>()
-    {
-        if arr.len() != other_list.len() {
-            return Ok(false);
-        }
-        for (i, v) in arr.iter().enumerate() {
-            let other_elem = other_list.get_item(i)?;
-            if !value_eq(v, &other_elem)? {
-                return Ok(false);
+    match value {
+        toml_edit::Value::Boolean(b) => {
+            if let Ok(other_b) = other.extract::<bool>() {
+                return Ok(*b.value() == other_b);
             }
         }
-        return Ok(true);
-    }
-    // InlineTable == dict
-    if let Some(it) = value.as_inline_table()
-        && let Ok(other_dict) = other.cast::<PyDict>()
-    {
-        if it.len() != other_dict.len() {
-            return Ok(false);
-        }
-        for (k, v) in it.iter() {
-            let Some(other_v) = other_dict.get_item(k)? else {
-                return Ok(false);
-            };
-            if !value_eq(v, &other_v)? {
-                return Ok(false);
+        toml_edit::Value::Integer(i) => {
+            if other.cast::<PyBool>().is_err() {
+                if let Ok(other_i) = other.extract::<i64>() {
+                    return Ok(*i.value() == other_i);
+                }
             }
         }
-        return Ok(true);
+        toml_edit::Value::Float(f) => {
+            if other.cast::<PyBool>().is_err() {
+                if let Ok(other_f) = other.extract::<f64>() {
+                    return Ok(*f.value() == other_f);
+                }
+            }
+        }
+        toml_edit::Value::String(s) => {
+            if let Ok(other_s) = other.cast::<PyString>() {
+                return Ok(other_s.to_str().is_ok_and(|o| s.value() == o));
+            }
+        }
+        toml_edit::Value::Datetime(dt) => {
+            if let Ok(py_dt) = other.cast::<PyDateTime>() {
+                let other_dt: Datetime = py_dt.extract()?;
+                return Ok(datetime_eq(dt.value(), &other_dt.0));
+            }
+        }
+        toml_edit::Value::Array(arr) => {
+            if let Ok(other_list) = other.cast::<PyList>() {
+                if arr.len() != other_list.len() {
+                    return Ok(false);
+                }
+                for (i, v) in arr.iter().enumerate() {
+                    let other_elem = other_list.get_item(i)?;
+                    if !value_eq(v, &other_elem)? {
+                        return Ok(false);
+                    }
+                }
+                return Ok(true);
+            }
+        }
+        toml_edit::Value::InlineTable(it) => {
+            if let Ok(other_dict) = other.cast::<PyDict>() {
+                if it.len() != other_dict.len() {
+                    return Ok(false);
+                }
+                for (k, v) in it.iter() {
+                    let Some(other_v) = other_dict.get_item(k)? else {
+                        return Ok(false);
+                    };
+                    if !value_eq(v, &other_v)? {
+                        return Ok(false);
+                    }
+                }
+                return Ok(true);
+            }
+        }
     }
     Ok(false)
 }

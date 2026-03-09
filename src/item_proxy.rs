@@ -151,40 +151,7 @@ impl ItemProxy {
             let doc = self.document.bind(py).borrow();
             self.check_generation(&doc)?;
             let item = self.navigate(&doc.inner)?;
-
-            if let Ok(k) = key.extract::<i64>() {
-                if item.is_table() || item.is_inline_table() {
-                    return Err(PyTypeError::new_err(
-                        "TOML table keys must be strings, not integers",
-                    ));
-                }
-                let len = item_len(item).ok_or_else(|| {
-                    PyTypeError::new_err(format!(
-                        "TOML {} item is not subscriptable (use .value to get the Python object)",
-                        item.type_name()
-                    ))
-                })?;
-                let idx = resolve_index(k, len)?;
-                if item.get(idx).is_none() {
-                    return Err(PyKeyError::new_err(format!("{key}")));
-                }
-                Key::Int(idx)
-            } else if let Ok(k) = key.extract::<String>() {
-                if matches!(
-                    item,
-                    ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_)
-                ) {
-                    return Err(PyTypeError::new_err(
-                        "TOML array indices must be integers, not strings",
-                    ));
-                }
-                if item.get(k.as_str()).is_none() {
-                    return Err(PyKeyError::new_err(k));
-                }
-                Key::Str(k)
-            } else {
-                return Err(bad_key_type(key));
-            }
+            item_getitem(item, key)?
         };
 
         Ok(self
@@ -881,6 +848,21 @@ fn require_array_like_len(item: &ItemRs) -> PyResult<usize> {
     }
 }
 
+/// Resolve an integer index against an array-like item.
+fn require_array_index(item: &ItemRs, index: i64) -> PyResult<usize> {
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => resolve_index(index, arr.len()),
+        ItemRs::ArrayOfTables(aot) => resolve_index(index, aot.len()),
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => Err(PyTypeError::new_err(
+            "TOML table keys must be strings, not integers",
+        )),
+        _ => Err(PyTypeError::new_err(format!(
+            "TOML {} item is not subscriptable (use .value to get the Python object)",
+            item.type_name()
+        ))),
+    }
+}
+
 /// Delete elements at the given indices (sorted in reverse internally).
 fn item_delitem_slice(item: &mut ItemRs, indices: &[usize]) -> PyResult<()> {
     let mut sorted = indices.to_vec();
@@ -974,6 +956,26 @@ fn bad_key_type(key: &Bound<'_, PyAny>) -> PyErr {
     ))
 }
 
+fn require_str_key(key: &Bound<'_, PyAny>) -> PyResult<String> {
+    key.extract().map_err(|_| {
+        if key.extract::<i64>().is_ok() {
+            PyTypeError::new_err("TOML table keys must be strings, not integers")
+        } else {
+            bad_key_type(key)
+        }
+    })
+}
+
+fn require_int_key(key: &Bound<'_, PyAny>) -> PyResult<i64> {
+    key.extract().map_err(|_| {
+        if key.extract::<String>().is_ok() {
+            PyTypeError::new_err("TOML array indices must be integers, not strings")
+        } else {
+            bad_key_type(key)
+        }
+    })
+}
+
 fn unsupported_op(item: &ItemRs, op: &str) -> PyErr {
     PyTypeError::new_err(format!(
         "TOML {} item does not support {op}",
@@ -1007,10 +1009,30 @@ fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
     match item {
         ItemRs::Table(table) => Ok(table.contains_key(key)),
         ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.contains_key(key)),
+        ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => Err(PyTypeError::new_err(
+            "TOML array indices must be integers, not strings",
+        )),
         _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item has no get()",
+            "TOML {} item is not subscriptable (use .value to get the Python object)",
             item.type_name()
         ))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Getitem
+// ---------------------------------------------------------------------------
+
+fn item_getitem(item: &ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Key> {
+    if let Ok(k) = key.extract::<String>() {
+        if !item_has_key(item, &k)? {
+            return Err(PyKeyError::new_err(k));
+        }
+        Ok(Key::Str(k))
+    } else if let Ok(k) = key.extract::<i64>() {
+        Ok(Key::Int(require_array_index(item, k)?))
+    } else {
+        Err(bad_key_type(key))
     }
 }
 
@@ -1021,26 +1043,19 @@ fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
 /// Returns `true` if an existing value was replaced, `false` if a new key was added.
 fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyResult<bool> {
     match item {
-        ItemRs::Table(t) => {
-            let key: &str = key.extract()?;
-            let replaced = t.contains_key(key);
-            set_with_decor_preservation(item, key, value);
-            Ok(replaced)
-        }
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            let key: &str = key.extract()?;
-            let replaced = it.contains_key(key);
-            set_with_decor_preservation(item, key, value);
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
+            let k = require_str_key(key)?;
+            let replaced = item.get(k.as_str()).is_some();
+            set_with_decor_preservation(item, &k, value);
             Ok(replaced)
         }
         ItemRs::Value(ValueRs::Array(array)) => {
-            let v = into_value(value)?;
-            let idx = resolve_index(key.extract::<i64>()?, array.len())?;
-            array.replace(idx, v);
+            let idx = resolve_index(require_int_key(key)?, array.len())?;
+            array.replace(idx, into_value(value)?);
             Ok(true)
         }
         ItemRs::ArrayOfTables(aot) => {
-            let idx = resolve_index(key.extract::<i64>()?, aot.len())?;
+            let idx = resolve_index(require_int_key(key)?, aot.len())?;
             item[idx] = value.0;
             Ok(true)
         }
@@ -1058,35 +1073,33 @@ fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyRes
 fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<()> {
     match item {
         ItemRs::Table(table) => {
-            let key: &str = key.extract()?;
-            if table.remove(key).is_none() {
-                return Err(PyKeyError::new_err(key.to_owned()));
+            let k = require_str_key(key)?;
+            if table.remove(&k).is_none() {
+                return Err(PyKeyError::new_err(k));
             }
             Ok(())
         }
-        ItemRs::Value(value_rs) => match value_rs {
-            ValueRs::Array(array) => {
-                let idx = resolve_index(key.extract::<i64>()?, array.len())?;
-                array.remove(idx);
-                Ok(())
+        ItemRs::Value(ValueRs::InlineTable(it)) => {
+            let k = require_str_key(key)?;
+            if it.remove(&k).is_none() {
+                return Err(PyKeyError::new_err(k));
             }
-            ValueRs::InlineTable(inline_table) => {
-                let key: &str = key.extract()?;
-                if inline_table.remove(key).is_none() {
-                    return Err(PyKeyError::new_err(key.to_owned()));
-                }
-                Ok(())
-            }
-            _ => Err(PyTypeError::new_err(
-                "TOML scalar item is not subscriptable",
-            )),
-        },
+            Ok(())
+        }
+        ItemRs::Value(ValueRs::Array(array)) => {
+            let idx = resolve_index(require_int_key(key)?, array.len())?;
+            array.remove(idx);
+            Ok(())
+        }
         ItemRs::ArrayOfTables(aot) => {
-            let idx = resolve_index(key.extract::<i64>()?, aot.len())?;
+            let idx = resolve_index(require_int_key(key)?, aot.len())?;
             aot.remove(idx);
             Ok(())
         }
-        _ => Err(PyTypeError::new_err("TOML item is not subscriptable")),
+        _ => Err(PyTypeError::new_err(format!(
+            "TOML {} item is not subscriptable",
+            item.type_name()
+        ))),
     }
 }
 

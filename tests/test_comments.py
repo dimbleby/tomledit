@@ -369,3 +369,15 @@ class TestComment:
             str(doc)
             == '[[items]]\nname = "a"\n[[items]]\n# second item name\nname = "b"\n'
         )
+
+    # ---- comment edge cases ----
+
+    def test_inline_comment_on_aot_itself_is_none(self) -> None:
+        """AoT item has no decor suffix — inline_comment returns None."""
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        assert doc["items"].inline_comment is None
+
+    def test_comment_on_aot_itself_is_none(self) -> None:
+        """AoT has no key prefix — comment returns None."""
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        assert doc["items"].comment is None

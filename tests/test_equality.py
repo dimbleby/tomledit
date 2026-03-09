@@ -192,6 +192,14 @@ class TestProxyStructuralEquality:
         doc = Document.parse("a = 2024-01-15T10:30:00Z\nb = 2025-01-01T00:00:00Z\n")
         assert doc["a"] != doc["b"]
 
+    def test_proxy_vs_proxy_date_only(self) -> None:
+        doc = Document.parse("a = 2024-01-15\nb = 2024-01-15\n")
+        assert doc["a"] == doc["b"]
+
+    def test_proxy_vs_proxy_date_only_different(self) -> None:
+        doc = Document.parse("a = 2024-01-15\nb = 2025-06-01\n")
+        assert doc["a"] != doc["b"]
+
     def test_proxy_vs_proxy_array(self) -> None:
         doc = Document.parse("a = [1, 2, 3]\nb = [1, 2, 3]\n")
         assert doc["a"] == doc["b"]
@@ -249,6 +257,14 @@ class TestEqualityEdgeCases:
         doc = Document.parse("t = {a = 1, b = 2}\n")
         assert doc["t"] != {"a": 1, "c": 2}
 
+    def test_inline_table_value_mismatch(self) -> None:
+        doc = Document.parse("t = {a = 1, b = 2}\n")
+        assert doc["t"] != {"a": 1, "b": 99}
+
+    def test_inline_table_vs_non_dict(self) -> None:
+        doc = Document.parse("t = {a = 1}\n")
+        assert doc["t"] != [1]
+
     def test_aot_equality_with_list_of_dicts(self) -> None:
         doc = Document.parse(
             '[[items]]\nname = "a"\nvalue = 1\n[[items]]\nname = "b"\nvalue = 2\n'
@@ -266,6 +282,14 @@ class TestEqualityEdgeCases:
         doc = Document.parse('[[items]]\nname = "a"\nvalue = 1\n')
         assert doc["items"] != "not a list"
 
+    def test_aot_entry_value_mismatch(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        assert doc["items"] != [{"name": "a"}, {"name": "WRONG"}]
+
+    def test_aot_entry_non_dict_in_list(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        assert doc["items"] != ["not a dict"]
+
     def test_float_not_equal_to_string(self) -> None:
         doc = Document.parse("val = 1.5\n")
         assert doc["val"] != "1.5"
@@ -273,6 +297,14 @@ class TestEqualityEdgeCases:
     def test_datetime_not_equal_to_string(self) -> None:
         doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
         assert doc["dt"] != "2024-01-15"
+
+    def test_date_only_not_equal_to_string(self) -> None:
+        doc = Document.parse("d = 2024-01-15\n")
+        assert doc["d"] != "2024-01-15"
+
+    def test_time_only_not_equal_to_int(self) -> None:
+        doc = Document.parse("t = 10:30:00\n")
+        assert doc["t"] != 1030
 
     def test_array_not_equal_to_string(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")

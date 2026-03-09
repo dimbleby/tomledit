@@ -1,21 +1,129 @@
-name: Publish to PyPI
+name: Build and publish wheels
 
 on:
-  workflow_run:
-    workflows: ["Build wheels"]
-    types:
-      - completed
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  sdist:
+    name: Source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1.50.1
+        with:
+          command: sdist
+          args: --out dist
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  wheels:
+    name: "${{ matrix.platform.target }} (${{ matrix.platform.os }})"
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: auto
+          # Linux aarch64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            manylinux: auto
+          # Linux i686
+          - os: ubuntu-latest
+            target: i686-unknown-linux-gnu
+            manylinux: auto
+          # Linux armv7
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            manylinux: auto
+          # Linux s390x
+          - os: ubuntu-latest
+            target: s390x-unknown-linux-gnu
+            manylinux: auto
+          # Linux ppc64le
+          - os: ubuntu-latest
+            target: powerpc64le-unknown-linux-gnu
+            manylinux: auto
+          # musllinux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            manylinux: musllinux_1_1
+          # musllinux aarch64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            manylinux: musllinux_1_1
+          # macOS x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          # macOS aarch64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          # Windows x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          # Windows i686
+          - os: windows-latest
+            target: i686-pc-windows-msvc
+          # Windows aarch64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1.50.1
+        with:
+          target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux || 'auto' }}
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14
+          before-script-linux: |
+            # Install OpenSSL development headers if needed
+            if command -v apt-get &> /dev/null; then
+              apt-get update && apt-get install -y libssl-dev
+            elif command -v apk &> /dev/null; then
+              apk add --no-cache openssl-dev
+            fi
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: wheels-${{ matrix.platform.target }}
+          path: dist/*.whl
+
   publish:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+    needs: [sdist, wheels]
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       id-token: write
     environment: pypi
@@ -23,11 +131,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-          ref: ${{ github.event.workflow_run.head_branch }}
 
       - name: Verify tag matches package version
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          TAG="${{ github.event.workflow_run.head_branch }}"
           VERSION="${TAG#v}"
           PKG_VERSION=$(python3 -c "
           import tomllib
@@ -39,13 +147,11 @@ jobs:
             exit 1
           fi
 
-      - name: Download artifacts from build workflow
+      - name: Download artifacts
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
           path: dist
           merge-multiple: true
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0

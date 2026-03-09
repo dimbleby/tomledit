@@ -658,20 +658,19 @@ fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
 }
 
 fn item_bool(item: &ItemRs) -> bool {
-    if let Some(len) = item_len(item) {
-        return len > 0;
-    }
-    // Scalar truthiness: match Python semantics.
-    if let ItemRs::Value(value) = item {
-        match value {
+    match item {
+        ItemRs::Table(t) => !t.is_empty(),
+        ItemRs::ArrayOfTables(aot) => !aot.is_empty(),
+        ItemRs::Value(value) => match value {
             ValueRs::Boolean(b) => *b.value(),
             ValueRs::Integer(i) => *i.value() != 0,
             ValueRs::Float(f) => *f.value() != 0.0,
             ValueRs::String(s) => !s.value().is_empty(),
-            _ => true,
-        }
-    } else {
-        true
+            ValueRs::Array(a) => !a.is_empty(),
+            ValueRs::InlineTable(it) => !it.is_empty(),
+            ValueRs::Datetime(_) => true,
+        },
+        ItemRs::None => false,
     }
 }
 

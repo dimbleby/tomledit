@@ -61,6 +61,9 @@ jobs:
       - name: pytest
         run: uv run pytest
 
+      - name: mypy
+        run: uv run mypy
+
   rust:
     name: Rust
     runs-on: ubuntu-latest

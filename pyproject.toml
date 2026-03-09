@@ -23,6 +23,7 @@ Repository = "https://github.com/dimbleby/tomledit"
 
 [dependency-groups]
 dev = [
+  "mypy>=1.19.1",
   "pytest>=8.4.2",
 ]
 
@@ -32,6 +33,20 @@ build-backend = "maturin"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+
+[tool.mypy]
+files = "."
+strict = true
+enable_error_code = [
+  "deprecated",
+  "explicit-override",
+  "ignore-without-code",
+  "redundant-expr",
+  "truthy-bool",
+  "truthy-iterable",
+  "unused-awaitable",
+]
+warn_unreachable = true
 
 [tool.ruff.lint]
 select = ["ALL"]

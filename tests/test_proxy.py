@@ -629,6 +629,25 @@ class TestIntKeyOnTable:
             doc["t"][0]
 
 
+class TestStrKeyOnArray:
+    """String keys on arrays should raise TypeError (array indices are integers)."""
+
+    def test_getitem_str_on_array(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]")
+        with pytest.raises(TypeError, match="TOML array indices must be integers"):
+            doc["a"]["x"]
+
+    def test_getitem_str_on_aot(self) -> None:
+        doc = Document.parse("[[items]]\nname = 'a'\n")
+        with pytest.raises(TypeError, match="TOML array indices must be integers"):
+            doc["items"]["name"]
+
+    def test_getitem_str_on_empty_array(self) -> None:
+        doc = Document.parse("a = []")
+        with pytest.raises(TypeError, match="TOML array indices must be integers"):
+            doc["a"]["x"]
+
+
 # ---------------------------------------------------------------------------
 # get() with default
 # ---------------------------------------------------------------------------

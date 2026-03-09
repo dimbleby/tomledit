@@ -749,42 +749,27 @@ pub(crate) fn item_to_py(item: &ItemRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
 }
 
 fn value_to_py(value: &ValueRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
-    if let Some(s) = value.as_str() {
-        return Ok(s.into_pyobject(py)?.into_any().unbind());
-    }
-    if let Some(i) = value.as_integer() {
-        return Ok(i.into_pyobject(py)?.into_any().unbind());
-    }
-    if let Some(f) = value.as_float() {
-        return Ok(f.into_pyobject(py)?.into_any().unbind());
-    }
-    if let Some(b) = value.as_bool() {
-        return Ok(b.into_pyobject(py)?.to_owned().into_any().unbind());
-    }
-    if let Some(arr) = value.as_array() {
-        let list = PyList::empty(py);
-        for v in arr.iter() {
-            list.append(value_to_py(v, py)?)?;
+    match value {
+        ValueRs::String(s) => Ok(s.value().into_pyobject(py)?.into_any().unbind()),
+        ValueRs::Integer(i) => Ok(i.value().into_pyobject(py)?.into_any().unbind()),
+        ValueRs::Float(f) => Ok(f.value().into_pyobject(py)?.into_any().unbind()),
+        ValueRs::Boolean(b) => Ok(b.value().into_pyobject(py)?.to_owned().into_any().unbind()),
+        ValueRs::Array(arr) => {
+            let list = PyList::empty(py);
+            for v in arr.iter() {
+                list.append(value_to_py(v, py)?)?;
+            }
+            Ok(list.into_any().unbind())
         }
-        return Ok(list.into_any().unbind());
-    }
-    if let Some(it) = value.as_inline_table() {
-        let dict = PyDict::new(py);
-        for (k, v) in it.iter() {
-            dict.set_item(k, value_to_py(v, py)?)?;
+        ValueRs::InlineTable(it) => {
+            let dict = PyDict::new(py);
+            for (k, v) in it.iter() {
+                dict.set_item(k, value_to_py(v, py)?)?;
+            }
+            Ok(dict.into_any().unbind())
         }
-        return Ok(dict.into_any().unbind());
+        ValueRs::Datetime(dt) => datetime_to_py(dt.value(), py),
     }
-    if let Some(dt) = value.as_datetime() {
-        return datetime_to_py(dt, py);
-    }
-    // Unreachable for valid TOML, but fall back to string representation.
-    Ok(value
-        .to_string()
-        .trim()
-        .into_pyobject(py)?
-        .into_any()
-        .unbind())
 }
 
 /// Convert a toml_edit Datetime to a Python datetime.datetime, date, or time.

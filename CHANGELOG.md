@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0 (9 March 2026)
+
+- Improved error reporting for wrong keys and wrong types of keys
+
 ## 0.6.0 (8 March 2026)
 
 - Be less aggressive about invalidating `Item`s

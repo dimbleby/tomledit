@@ -126,6 +126,10 @@ class TestProxyContains:
         doc = Document.parse("[[items]]\nx = 1\ny = 2\n")
         assert {"x": 1} not in doc["items"]
 
+    def test_array_of_tables_not_contains_non_dict(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        assert "not a dict" not in doc["items"]
+
 
 # ---------------------------------------------------------------------------
 # Item: __bool__

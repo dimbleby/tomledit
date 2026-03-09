@@ -33,6 +33,11 @@ class TestErrorHandling:
         with pytest.raises(TypeError, match="not subscriptable"):
             doc["name"]["x"]
 
+    def test_getitem_missing_nested_key_raises(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(KeyError, match="nonexistent"):
+            doc["t"]["nonexistent"]
+
     def test_delitem_on_scalar_raises_type_error(self) -> None:
         doc = Document.parse("val = 42\n")
         with pytest.raises(TypeError):
@@ -179,12 +184,12 @@ class TestWrongTypeErrors:
 
     def test_slice_del_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError, match="slic"):
+        with pytest.raises(TypeError, match="does not support slicing"):
             del doc["x"][0:1]
 
     def test_slice_assign_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError, match="slic"):
+        with pytest.raises(TypeError, match="does not support slicing"):
             doc["x"][0:1] = [1]
 
     def test_getitem_int_on_scalar_raises(self) -> None:
@@ -196,3 +201,48 @@ class TestWrongTypeErrors:
         doc = Document.parse("t = {a = 1}\n")
         with pytest.raises(TypeError, match=r"pop\(\) with no argument"):
             doc["t"].pop()
+
+    def test_setitem_int_key_on_table(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="strings, not integers"):
+            doc["t"][0] = 99
+
+    def test_setitem_str_key_on_array(self) -> None:
+        doc = Document.parse("arr = [1, 2]\n")
+        with pytest.raises(TypeError, match="integers, not strings"):
+            doc["arr"]["x"] = 99
+
+    def test_delitem_int_key_on_table(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="strings, not integers"):
+            del doc["t"][0]
+
+    def test_delitem_str_key_on_array(self) -> None:
+        doc = Document.parse("arr = [1, 2]\n")
+        with pytest.raises(TypeError, match="integers, not strings"):
+            del doc["arr"]["x"]
+
+    def test_setitem_float_key_on_table(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="indices must be integers or strings"):
+            doc["t"][1.5] = 99  # type: ignore[call-overload]
+
+    def test_delitem_float_key_on_array(self) -> None:
+        doc = Document.parse("arr = [1, 2]\n")
+        with pytest.raises(TypeError, match="indices must be integers or strings"):
+            del doc["arr"][1.5]  # type: ignore[call-overload]
+
+    def test_slice_del_on_table_raises(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="does not support slicing"):
+            del doc["t"][0:1]
+
+    def test_slice_assign_on_table_raises(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="does not support slicing"):
+            doc["t"][0:1] = [1]
+
+    def test_getitem_on_scalar_str_key_raises_type_error(self) -> None:
+        doc = Document.parse("x = 42\n")
+        with pytest.raises(TypeError, match="not subscriptable"):
+            doc["x"]["y"]

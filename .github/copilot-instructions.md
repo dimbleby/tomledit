@@ -57,6 +57,10 @@ LLVM_TOOLS_PATH="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/b
   target/x86_64-unknown-linux-gnu/release/libtomledit.so \
   --instr-profile=target/tomledit.profdata \
   --sources src/item_proxy.rs --show-line-counts-or-regions
+
+# IMPORTANT: rebuild without instrumentation when done, otherwise
+# every subsequent `uv run` will produce .profraw files.
+uv sync --reinstall-package tomledit
 ```
 
 ## Architecture

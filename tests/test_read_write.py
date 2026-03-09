@@ -384,7 +384,7 @@ class TestAssignItemProxy:
     def test_slice_assign_from_proxy(self) -> None:
         """Slice assignment with proxy values from the same document."""
         doc = Document.parse("a = [1, 2, 3]\nb = [10, 20]\n")
-        doc["a"][0:1] = list(doc["b"])
+        doc["a"][0:1] = doc["b"]
         assert doc["a"] == [10, 20, 2, 3]
 
     def test_update_with_proxy_values(self) -> None:

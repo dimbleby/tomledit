@@ -225,12 +225,12 @@ class TestWrongTypeErrors:
     def test_setitem_float_key_on_table(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
         with pytest.raises(TypeError, match="indices must be integers or strings"):
-            doc["t"][1.5] = 99  # type: ignore[call-overload]
+            doc["t"][1.5] = 99  # type: ignore[index]
 
     def test_delitem_float_key_on_array(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")
         with pytest.raises(TypeError, match="indices must be integers or strings"):
-            del doc["arr"][1.5]  # type: ignore[call-overload]
+            del doc["arr"][1.5]  # type: ignore[arg-type]
 
     def test_slice_del_on_table_raises(self) -> None:
         doc = Document.parse("[t]\na = 1\n")

@@ -28,9 +28,9 @@ class TestErrorHandling:
         with pytest.raises(TypeError, match="not subscriptable"):
             doc["val"][0] = 2
 
-    def test_getitem_on_scalar_raises_key_error(self) -> None:
+    def test_getitem_on_scalar_raises_type_error(self) -> None:
         doc = Document.parse('name = "hello"\n')
-        with pytest.raises(KeyError):
+        with pytest.raises(TypeError, match="not subscriptable"):
             doc["name"]["x"]
 
     def test_delitem_on_scalar_raises_type_error(self) -> None:
@@ -125,7 +125,7 @@ class TestUnsupportedTypes:
 class TestGetOnNonTable:
     def test_get_on_array_raises(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
-        with pytest.raises(TypeError, match="get"):
+        with pytest.raises(TypeError, match="integers, not strings"):
             doc["arr"].get("x")
 
     def test_get_on_scalar_raises(self) -> None:

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1 (9 March 2026)
+
+- Fix type stubs: reinstate `__eq__`
+
 ## 0.7.0 (9 March 2026)
 
 - Improved error reporting for wrong keys and wrong types of keys

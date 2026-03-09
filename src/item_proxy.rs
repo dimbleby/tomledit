@@ -170,6 +170,14 @@ impl ItemProxy {
                 }
                 Key::Int(idx)
             } else if let Ok(k) = key.extract::<String>() {
+                if matches!(
+                    item,
+                    ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_)
+                ) {
+                    return Err(PyTypeError::new_err(
+                        "TOML array indices must be integers, not strings",
+                    ));
+                }
                 if item.get(k.as_str()).is_none() {
                     return Err(PyKeyError::new_err(k));
                 }

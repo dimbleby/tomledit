@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2 (10 March 2026)
+
+- Better docstrings
+
 ## 0.7.1 (9 March 2026)
 
 - Fix type stubs: reinstate `__eq__`

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from types import MappingProxyType
 
 import pytest
 
@@ -205,6 +206,35 @@ class TestDocumentCompleteness:
     def test_update(self) -> None:
         doc = Document.parse("x = 1\n")
         doc.update({"x": 10, "y": 20})
+        assert doc["x"] == 10
+        assert doc["y"] == 20
+
+    def test_update_kwargs(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc.update(x=10, y=20)
+        assert doc["x"] == 10
+        assert doc["y"] == 20
+
+    def test_update_dict_and_kwargs(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc.update({"x": 10}, y=20)
+        assert doc["x"] == 10
+        assert doc["y"] == 20
+
+    def test_update_iterable_of_pairs(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc.update([("x", 10), ("y", 20)])
+        assert doc["x"] == 10
+        assert doc["y"] == 20
+
+    def test_update_no_args(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc.update()
+        assert doc["x"] == 1
+
+    def test_update_mapping_with_keys(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc.update(MappingProxyType({"x": 10, "y": 20}))
         assert doc["x"] == 10
         assert doc["y"] == 20
 

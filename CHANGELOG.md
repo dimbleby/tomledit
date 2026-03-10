@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Make our dictionary-like methods even more dictionary-like
+
 ## 0.7.2 (10 March 2026)
 
 - Better docstrings

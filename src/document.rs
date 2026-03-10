@@ -109,7 +109,7 @@ impl Document {
         self.inner.len()
     }
 
-    #[pyo3(signature = (key, default=None))]
+    #[pyo3(signature = (key, default=None, /))]
     pub fn get(
         slf: &Bound<'_, Self>,
         key: &str,
@@ -154,7 +154,7 @@ impl Document {
         Ok(())
     }
 
-    #[pyo3(signature = (key, default=None))]
+    #[pyo3(signature = (key, default=None, /))]
     pub fn pop(
         &mut self,
         py: Python<'_>,
@@ -173,14 +173,30 @@ impl Document {
         }
     }
 
-    pub fn update(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<()> {
-        let pairs = item_proxy::extract_update_pairs(other)?;
+    #[pyo3(signature = (other=None, /, **kwargs))]
+    pub fn update(
+        slf: &Bound<'_, Self>,
+        other: Option<&Bound<'_, PyAny>>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let mut pairs = match other {
+            Some(obj) => item_proxy::extract_update_pairs(obj)?,
+            None => Vec::new(),
+        };
+        if let Some(kw) = kwargs {
+            for (k, v) in kw.iter() {
+                let key: String = k.extract()?;
+                let val: Item = v.extract()?;
+                pairs.push((key, val));
+            }
+        }
         let mut doc = slf.borrow_mut();
         item_proxy::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
         doc.bump();
         Ok(())
     }
 
+    #[pyo3(signature = (key, default, /))]
     pub fn setdefault(slf: &Bound<'_, Self>, key: &str, default: Item) -> ItemProxy {
         {
             let mut doc = slf.borrow_mut();

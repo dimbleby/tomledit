@@ -46,15 +46,15 @@ fn navigate_path_mut<'a>(doc: &'a mut DocumentRs, path: &[Key]) -> PyResult<&'a 
     Ok(current)
 }
 
-/// A proxy into a Document that supports chained `__getitem__` / `__setitem__`.
+/// A reference to a value inside a Document (table, array, or scalar).
 ///
-/// Instead of cloning the underlying item (which breaks `doc["d"][0] = 7`),
-/// ItemProxy holds a reference to the owning Document and a path of keys.
-/// Reads and writes navigate that path at call-time so mutations are visible.
+/// Items are obtained by indexing a Document or another Item — they are
+/// live views, so ``doc["server"]["port"] = 8080`` modifies the document
+/// in place.  Use ``.value`` to get a plain Python object, or dict/list
+/// methods like ``keys()``, ``append()``, etc. to edit in place.
 ///
-/// Each proxy snapshots the document's generation counter at creation time.
-/// If the document is mutated through a different path, the proxy detects
-/// the stale generation and raises RuntimeError on the next access.
+/// An Item becomes stale if the document is modified through a different
+/// reference; using a stale Item raises ``RuntimeError``.
 #[pyclass(name = "Item", module = "tomledit")]
 pub(crate) struct ItemProxy {
     document: Py<Document>,
@@ -331,6 +331,11 @@ impl ItemProxy {
         }
     }
 
+    /// Set or clear the block comment above this entry.
+    ///
+    /// Each non-empty line must start with ``#``.  Pass ``None`` to remove
+    /// the comment.  Empty lines in the string produce blank lines above
+    /// the entry.
     #[setter]
     pub fn set_comment(&self, py: Python<'_>, value: Option<&str>) -> PyResult<()> {
         let Some(last_key) = self.path.last() else {
@@ -364,6 +369,10 @@ impl ItemProxy {
         Ok(comments::get_suffix_comment(item))
     }
 
+    /// Set or clear the inline comment on this entry.
+    ///
+    /// The value must start with ``#`` (e.g. ``"# my note"``).
+    /// Pass ``None`` to remove the comment.
     #[setter]
     pub fn set_inline_comment(&self, py: Python<'_>, value: Option<&str>) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();

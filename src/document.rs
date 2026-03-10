@@ -9,6 +9,11 @@ use crate::item::Item;
 use crate::item_proxy::{self, ItemProxy, Key};
 use crate::value::Table;
 
+/// A TOML document that preserves formatting when edited.
+///
+/// Create an empty document with ``Document()``, or from a dict with
+/// ``Document({"key": "value"})``.  To round-trip an existing TOML file
+/// use ``Document.parse(text)`` which retains comments and whitespace.
 #[pyclass(mapping, module = "tomledit")]
 pub(crate) struct Document {
     pub(crate) inner: DocumentRs,
@@ -54,6 +59,11 @@ impl Document {
         }
     }
 
+    /// Parse a TOML string into a Document, preserving formatting.
+    ///
+    /// This is the main entry point for editing existing TOML files:
+    /// comments, whitespace, and style are retained so that only the
+    /// values you change are affected when you call ``str(doc)``.
     #[staticmethod]
     fn parse(text: &str) -> PyResult<Self> {
         let document_rs = text
@@ -224,6 +234,11 @@ impl Document {
         self.__copy__()
     }
 
+    /// Normalize the formatting of the entire document.
+    ///
+    /// Re-applies standard TOML whitespace and trailing-comma rules.
+    /// Useful after a series of mutations that may leave inconsistent
+    /// spacing. Note: this removes comments.
     pub fn fmt(&mut self) {
         self.inner.fmt();
     }

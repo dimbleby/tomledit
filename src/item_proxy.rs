@@ -424,7 +424,7 @@ impl ItemProxy {
             .collect())
     }
 
-    #[pyo3(signature = (key, default=None))]
+    #[pyo3(signature = (key, default=None, /))]
     pub fn get(
         &self,
         py: Python<'_>,
@@ -445,7 +445,7 @@ impl ItemProxy {
         }
     }
 
-    #[pyo3(signature = (key=None, default=None))]
+    #[pyo3(signature = (key=None, default=None, /))]
     pub fn pop(
         &mut self,
         py: Python<'_>,
@@ -468,9 +468,24 @@ impl ItemProxy {
         }
     }
 
-    pub fn update(&mut self, other: &Bound<'_, PyAny>) -> PyResult<()> {
-        let py = other.py();
-        let pairs = extract_update_pairs(other)?;
+    #[pyo3(signature = (other=None, /, **kwargs))]
+    pub fn update(
+        &mut self,
+        py: Python<'_>,
+        other: Option<&Bound<'_, PyAny>>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let mut pairs = match other {
+            Some(obj) => extract_update_pairs(obj)?,
+            None => Vec::new(),
+        };
+        if let Some(kw) = kwargs {
+            for (k, v) in kw.iter() {
+                let key: String = k.extract()?;
+                let val: Item = v.extract()?;
+                pairs.push((key, val));
+            }
+        }
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
@@ -479,6 +494,7 @@ impl ItemProxy {
         Ok(())
     }
 
+    #[pyo3(signature = (key, default, /))]
     pub fn setdefault(&mut self, py: Python<'_>, key: &str, default: Item) -> PyResult<ItemProxy> {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
@@ -493,6 +509,7 @@ impl ItemProxy {
 
     // ---- list-like methods ----
 
+    #[pyo3(signature = (value, /))]
     pub fn append(&mut self, py: Python<'_>, value: Item) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
@@ -501,6 +518,7 @@ impl ItemProxy {
         Ok(())
     }
 
+    #[pyo3(signature = (index, value, /))]
     pub fn insert(&mut self, py: Python<'_>, index: i64, value: Item) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
@@ -510,6 +528,7 @@ impl ItemProxy {
         Ok(())
     }
 
+    #[pyo3(signature = (value, /))]
     pub fn remove(&mut self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
@@ -519,6 +538,7 @@ impl ItemProxy {
         Ok(())
     }
 
+    #[pyo3(signature = (values, /))]
     pub fn extend(&mut self, py: Python<'_>, values: &Bound<'_, PyAny>) -> PyResult<()> {
         let items: Vec<Item> = values
             .try_iter()?
@@ -1152,15 +1172,44 @@ fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item>
     }
 }
 
-/// Extract key-value pairs from a dict for update(), before borrowing the document.
+/// Extract key-value pairs from a Python object for update().
+///
+/// Follows the same protocol as dict.update:
+/// - If the object is a dict, iterate its entries directly.
+/// - If the object has a `.keys()` method, iterate keys and index for values.
+/// - Otherwise, iterate as (key, value) pairs.
+///
+/// All paths pre-collect into a Vec because values may be ItemProxy objects
+/// referencing the same document, and extracting them borrows the document.
 pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Item)>> {
-    let dict = other
-        .cast::<PyDict>()
-        .map_err(|_| PyTypeError::new_err("update() argument must be a dict"))?;
-    let mut pairs = Vec::with_capacity(dict.len());
-    for (k, v) in dict.iter() {
-        let key: String = k.extract()?;
-        let val: Item = v.extract()?;
+    if let Ok(dict) = other.cast::<PyDict>() {
+        let mut pairs = Vec::with_capacity(dict.len());
+        for (k, v) in dict.iter() {
+            let key: String = k.extract()?;
+            let val: Item = v.extract()?;
+            pairs.push((key, val));
+        }
+        return Ok(pairs);
+    }
+
+    // Mapping with .keys()
+    if let Ok(keys_method) = other.getattr("keys") {
+        let keys = keys_method.call0()?;
+        let mut pairs = Vec::new();
+        for key_obj in keys.try_iter()? {
+            let key_obj = key_obj?;
+            let key: String = key_obj.extract()?;
+            let val: Item = other.get_item(&key_obj)?.extract()?;
+            pairs.push((key, val));
+        }
+        return Ok(pairs);
+    }
+
+    // Iterable of (key, value) pairs
+    let mut pairs = Vec::new();
+    for item in other.try_iter()? {
+        let item = item?;
+        let (key, val): (String, Item) = item.extract()?;
         pairs.push((key, val));
     }
     Ok(pairs)

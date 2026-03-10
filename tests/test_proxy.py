@@ -350,6 +350,18 @@ class TestProxyDictMethods:
         assert doc["owner"]["name"] == "Bob"
         assert doc["owner"]["email"] == "bob@example.com"
 
+    def test_update_kwargs(self) -> None:
+        doc = make_doc()
+        doc["owner"].update(name="Bob", email="bob@example.com")
+        assert doc["owner"]["name"] == "Bob"
+        assert doc["owner"]["email"] == "bob@example.com"
+
+    def test_update_iterable_of_pairs(self) -> None:
+        doc = make_doc()
+        doc["owner"].update([("name", "Bob"), ("email", "bob@example.com")])
+        assert doc["owner"]["name"] == "Bob"
+        assert doc["owner"]["email"] == "bob@example.com"
+
     def test_setdefault_missing(self) -> None:
         doc = make_doc()
         result = doc["owner"].setdefault("email", "default@example.com")

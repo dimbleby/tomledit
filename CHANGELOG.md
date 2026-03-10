@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 (10 March 2026)
 
 - Make our dictionary-like methods even more dictionary-like
 

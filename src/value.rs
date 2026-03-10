@@ -113,14 +113,6 @@ impl<'py> FromPyObject<'_, 'py> for InlineTable {
 
 pub(crate) struct Table(pub(crate) TableRs);
 
-impl Table {
-    pub(crate) fn extract_from_dict(dict: &Bound<'_, pyo3::types::PyDict>) -> PyResult<Self> {
-        let py_mapping = dict.cast::<PyMapping>()?;
-        let pairs = extract_mapping_pairs(py_mapping)?;
-        Ok(Self(TableRs::from_iter(pairs)))
-    }
-}
-
 impl<'py> FromPyObject<'_, 'py> for Table {
     type Error = PyErr;
 

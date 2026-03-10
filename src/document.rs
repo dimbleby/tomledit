@@ -45,7 +45,7 @@ impl Document {
             }),
             Some(obj) => {
                 if let Ok(dict) = obj.cast::<PyDict>() {
-                    let table = Table::extract_from_dict(dict)?;
+                    let table: Table = dict.extract()?;
                     Ok(Self {
                         inner: DocumentRs::from(table.0),
                         generation: 0,

@@ -11,14 +11,11 @@ impl<'py> FromPyObject<'_, 'py> for Item {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        // If it's an ItemProxy (the Python-visible "Item"), resolve the path
-        // and clone the underlying toml_edit item.
         if let Ok(proxy) = obj.cast::<ItemProxy>() {
             let item_rs = proxy.borrow().clone_item(obj.py())?;
             return Ok(Self(item_rs));
         }
 
-        // A Document is structurally a table - extract it as one.
         if let Ok(doc) = obj.cast::<Document>() {
             let doc = doc.borrow();
             return Ok(Self(doc.inner.as_item().clone()));

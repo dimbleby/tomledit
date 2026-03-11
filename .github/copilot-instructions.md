@@ -60,7 +60,11 @@ LLVM_TOOLS_PATH="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/b
 
 # IMPORTANT: rebuild without instrumentation when done, otherwise
 # every subsequent `uv run` will produce .profraw files.
-uv sync --reinstall-package tomledit
+# Set LLVM_PROFILE_FILE so the old instrumented .so (still loaded
+# by the build process) writes into target/ instead of the repo root.
+LLVM_PROFILE_FILE="target/tomledit-%p-%m.profraw" \
+  uv sync --reinstall-package tomledit
+rm -f target/tomledit-*.profraw
 ```
 
 ## Architecture

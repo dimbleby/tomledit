@@ -300,6 +300,19 @@ impl ItemProxy {
         equality::item_eq(item, other)
     }
 
+    pub fn __iadd__(&mut self, values: &Bound<'_, PyAny>) -> PyResult<()> {
+        let py = values.py();
+        let items: Vec<Item> = values
+            .try_iter()?
+            .map(|r| r.and_then(|v| v.extract::<Item>()))
+            .collect::<PyResult<_>>()?;
+
+        let mut doc = self.document.bind(py).borrow_mut();
+        self.check_generation(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
+        item_extend(item, items, "+=")
+    }
+
     /// The underlying data as a native Python object (int, str, list, dict, etc).
     #[getter]
     pub fn value(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -548,8 +561,30 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_extend(item, items)?;
+        item_extend(item, items, "extend()")?;
         Ok(())
+    }
+
+    #[pyo3(signature = (value, /))]
+    pub fn count(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<usize> {
+        let doc = self.document.bind(py).borrow();
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
+        item_count(item, value)
+    }
+
+    #[pyo3(signature = (value, start=None, stop=None, /))]
+    pub fn index(
+        &self,
+        py: Python<'_>,
+        value: &Bound<'_, PyAny>,
+        start: Option<i64>,
+        stop: Option<i64>,
+    ) -> PyResult<usize> {
+        let doc = self.document.bind(py).borrow();
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
+        item_index(item, value, start, stop)
     }
 
     // ---- shared methods ----
@@ -1242,13 +1277,7 @@ fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
 
 fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
-        let len = arr.len();
-        // Clamp like Python's list.insert: negative wraps, out-of-range clamps.
-        let resolved = if index < 0 {
-            (len as i64 + index).max(0) as usize
-        } else {
-            (index as usize).min(len)
-        };
+        let resolved = clamp_index(index, arr.len());
         let v = into_value(value)?;
         arr.insert(resolved, v);
         Ok(())
@@ -1273,7 +1302,7 @@ fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResult<()> {
     }
 }
 
-fn item_extend(item: &mut ItemRs, items: Vec<Item>) -> PyResult<()> {
+fn item_extend(item: &mut ItemRs, items: Vec<Item>, op: &str) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
         for new_item in items {
             let v = into_value(new_item)?;
@@ -1281,8 +1310,85 @@ fn item_extend(item: &mut ItemRs, items: Vec<Item>) -> PyResult<()> {
         }
         Ok(())
     } else {
-        Err(unsupported_op(item, "extend()"))
+        Err(unsupported_op(item, op))
     }
+}
+
+fn item_count(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<usize> {
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => {
+            let mut count = 0;
+            for v in arr.iter() {
+                if equality::value_eq(v, value)? {
+                    count += 1;
+                }
+            }
+            Ok(count)
+        }
+        ItemRs::ArrayOfTables(aot) => {
+            if let Ok(other_dict) = value.cast::<PyDict>() {
+                let mut count = 0;
+                for table in aot.iter() {
+                    if equality::table_entries_eq(table.iter(), table.len(), other_dict)? {
+                        count += 1;
+                    }
+                }
+                Ok(count)
+            } else {
+                Ok(0)
+            }
+        }
+        _ => Err(unsupported_op(item, "count()")),
+    }
+}
+
+fn item_index(
+    item: &ItemRs,
+    value: &Bound<'_, PyAny>,
+    start: Option<i64>,
+    stop: Option<i64>,
+) -> PyResult<usize> {
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => {
+            let len = arr.len();
+            let start = clamp_index(start.unwrap_or(0), len);
+            let stop = clamp_index(stop.unwrap_or(len as i64), len);
+            for i in start..stop {
+                if let Some(v) = arr.get(i)
+                    && equality::value_eq(v, value)?
+                {
+                    return Ok(i);
+                }
+            }
+            Err(PyValueError::new_err("value not in array"))
+        }
+        ItemRs::ArrayOfTables(aot) => {
+            let len = aot.len();
+            let start = clamp_index(start.unwrap_or(0), len);
+            let stop = clamp_index(stop.unwrap_or(len as i64), len);
+            if let Ok(other_dict) = value.cast::<PyDict>() {
+                for i in start..stop {
+                    if let Some(table) = aot.get(i)
+                        && equality::table_entries_eq(table.iter(), table.len(), other_dict)?
+                    {
+                        return Ok(i);
+                    }
+                }
+            }
+            Err(PyValueError::new_err("value not in array"))
+        }
+        _ => Err(unsupported_op(item, "index()")),
+    }
+}
+
+/// Clamp a signed index to `0..len` (negative counts from end, out-of-range clamps).
+fn clamp_index(index: i64, len: usize) -> usize {
+    let resolved = if index < 0 {
+        (len as i64 + index).max(0)
+    } else {
+        index.min(len as i64)
+    };
+    resolved as usize
 }
 
 fn item_clear(item: &mut ItemRs) -> PyResult<()> {

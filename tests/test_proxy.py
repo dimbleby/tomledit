@@ -509,6 +509,159 @@ class TestProxyListMethods:
 
 
 # ---------------------------------------------------------------------------
+# __iadd__ (+=)
+# ---------------------------------------------------------------------------
+
+
+class TestIadd:
+    def test_iadd_extends_array(self) -> None:
+        doc = Document.parse("arr = [1, 2]\n")
+        doc["arr"] += [3, 4]
+        assert doc["arr"] == [1, 2, 3, 4]
+
+    def test_iadd_empty_iterable(self) -> None:
+        doc = Document.parse("arr = [1]\n")
+        doc["arr"] += []
+        assert doc["arr"] == [1]
+
+    def test_iadd_returns_same_proxy(self) -> None:
+        doc = Document.parse("arr = [1]\n")
+        proxy = doc["arr"]
+        proxy += [2]
+        assert proxy == [1, 2]
+        assert doc["arr"] == [1, 2]
+
+    def test_iadd_strings(self) -> None:
+        doc = Document.parse('arr = ["a"]\n')
+        doc["arr"] += ["b", "c"]
+        assert doc["arr"] == ["a", "b", "c"]
+
+    def test_iadd_on_table_raises(self) -> None:
+        doc = make_doc()
+        with pytest.raises(TypeError):
+            doc["owner"] += [1]
+
+    def test_iadd_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 42\n")
+        with pytest.raises(TypeError, match=r"\+="):
+            doc["x"] += [1]
+
+
+# ---------------------------------------------------------------------------
+# count() and index()
+# ---------------------------------------------------------------------------
+
+
+class TestCount:
+    def test_count_integers(self) -> None:
+        doc = Document.parse("arr = [1, 2, 2, 3, 2]\n")
+        assert doc["arr"].count(2) == 3
+
+    def test_count_zero_when_absent(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        assert doc["arr"].count(99) == 0
+
+    def test_count_empty_array(self) -> None:
+        doc = Document.parse("arr = []\n")
+        assert doc["arr"].count(1) == 0
+
+    def test_count_strings(self) -> None:
+        doc = Document.parse('arr = ["a", "b", "a", "c"]\n')
+        assert doc["arr"].count("a") == 2
+
+    def test_count_mixed_types(self) -> None:
+        doc = Document.parse('arr = [1, "a", true, 1]\n')
+        assert doc["arr"].count(1) == 2
+        assert doc["arr"].count("a") == 1
+        assert doc["arr"].count(True) == 1
+
+    def test_count_on_table_raises(self) -> None:
+        doc = make_doc()
+        with pytest.raises(TypeError):
+            doc["owner"].count("name")
+
+    def test_count_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 42\n")
+        with pytest.raises(TypeError):
+            doc["x"].count(42)
+
+    def test_count_aot(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "a"\n'
+        )
+        assert doc["items"].count({"name": "a"}) == 2
+        assert doc["items"].count({"name": "c"}) == 0
+
+    def test_count_aot_non_dict_returns_zero(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        assert doc["items"].count("not a dict") == 0
+
+
+class TestIndex:
+    def test_index_found(self) -> None:
+        doc = Document.parse("arr = [10, 20, 30]\n")
+        assert doc["arr"].index(20) == 1
+
+    def test_index_first_occurrence(self) -> None:
+        doc = Document.parse("arr = [1, 2, 2, 3]\n")
+        assert doc["arr"].index(2) == 1
+
+    def test_index_missing_raises(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        with pytest.raises(ValueError, match="not in array"):
+            doc["arr"].index(99)
+
+    def test_index_empty_raises(self) -> None:
+        doc = Document.parse("arr = []\n")
+        with pytest.raises(ValueError, match="not in array"):
+            doc["arr"].index(1)
+
+    def test_index_with_start(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 2, 5]\n")
+        assert doc["arr"].index(2, 2) == 3
+
+    def test_index_with_start_and_stop(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 2, 5]\n")
+        with pytest.raises(ValueError, match="not in array"):
+            doc["arr"].index(2, 2, 3)
+
+    def test_index_negative_start(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 2, 5]\n")
+        assert doc["arr"].index(2, -3) == 3
+
+    def test_index_negative_stop(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 2, 5]\n")
+        assert doc["arr"].index(2, 0, -3) == 1
+
+    def test_index_strings(self) -> None:
+        doc = Document.parse('arr = ["x", "y", "z"]\n')
+        assert doc["arr"].index("z") == 2
+
+    def test_index_on_table_raises(self) -> None:
+        doc = make_doc()
+        with pytest.raises(TypeError):
+            doc["owner"].index("name")
+
+    def test_index_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 42\n")
+        with pytest.raises(TypeError):
+            doc["x"].index(42)
+
+    def test_index_aot(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "a"\n'
+        )
+        assert doc["items"].index({"name": "b"}) == 1
+        assert doc["items"].index({"name": "a"}) == 0
+        assert doc["items"].index({"name": "a"}, 1) == 2
+
+    def test_index_aot_non_dict_raises(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        with pytest.raises(ValueError, match="not in array"):
+            doc["items"].index("not a dict")
+
+
+# ---------------------------------------------------------------------------
 # pop() returns native Python values
 # ---------------------------------------------------------------------------
 

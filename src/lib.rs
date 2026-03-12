@@ -2,6 +2,7 @@ mod comments;
 mod document;
 mod equality;
 mod item;
+mod item_ops;
 mod item_proxy;
 mod value;
 

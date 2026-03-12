@@ -81,3 +81,38 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
+
+  coverage:
+    name: Rust coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install llvm-tools
+        run: rustup component add llvm-tools
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a # v7.4.0
+
+      - name: Build with coverage instrumentation and run tests
+        run: |
+          RUSTFLAGS="-Cinstrument-coverage" \
+            LLVM_PROFILE_FILE="target/tomledit-%p-%m.profraw" \
+            uv run --reinstall-package tomledit pytest -q
+
+      - name: Generate coverage report
+        run: |
+          LLVM_TOOLS_PATH="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin"
+          "$LLVM_TOOLS_PATH/llvm-profdata" merge -sparse target/tomledit-*.profraw -o target/tomledit.profdata
+          LIB_PATH=$(find target -name 'libtomledit.so' -path '*/release/*' | head -1)
+          "$LLVM_TOOLS_PATH/llvm-cov" report \
+            "$LIB_PATH" \
+            --instr-profile=target/tomledit.profdata --sources src/

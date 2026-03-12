@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import zoneinfo
-from datetime import datetime
+from datetime import date, datetime, time
 
 import pytest
 
@@ -433,3 +433,41 @@ class TestItemParse:
     def test_invalid_input_raises(self) -> None:
         with pytest.raises(ValueError, match="TOML parse error"):
             Item.parse("[not a value")
+
+    def test_inline_table(self) -> None:
+        item = Item.parse('{a = 1, b = "hi"}')
+        assert item.value == {"a": 1, "b": "hi"}
+
+    def test_array(self) -> None:
+        item = Item.parse("[1, 2, 3]")
+        assert item.value == [1, 2, 3]
+
+    def test_date(self) -> None:
+        item = Item.parse("2024-01-15")
+        assert item.value == date(2024, 1, 15)
+
+    def test_time(self) -> None:
+        item = Item.parse("10:30:00")
+        assert item.value == time(10, 30, 0)
+
+
+# ---------------------------------------------------------------------------
+# Tuple-to-array conversion
+# ---------------------------------------------------------------------------
+
+
+class TestTupleToArray:
+    def test_tuple_assigned_as_array(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc["x"] = (1, 2, 3)
+        assert doc["x"] == [1, 2, 3]
+
+    def test_nested_tuples(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc["x"] = ((1, 2), (3, 4))
+        assert doc["x"] == [[1, 2], [3, 4]]
+
+    def test_mixed_tuple_and_list(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc["x"] = (1, [2, 3])
+        assert doc["x"] == [1, [2, 3]]

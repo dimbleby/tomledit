@@ -349,6 +349,21 @@ class TestReadMethodsCheckGeneration:
         with pytest.raises(RuntimeError, match="stale"):
             t.get("a")
 
+    def test_count(self, stale_proxy: tuple[Item, Item]) -> None:
+        _, arr = stale_proxy
+        with pytest.raises(RuntimeError, match="stale"):
+            arr.count(1)
+
+    def test_index(self, stale_proxy: tuple[Item, Item]) -> None:
+        _, arr = stale_proxy
+        with pytest.raises(RuntimeError, match="stale"):
+            arr.index(1)
+
+    def test_fmt(self, stale_proxy: tuple[Item, Item]) -> None:
+        t, _ = stale_proxy
+        with pytest.raises(RuntimeError, match="stale"):
+            t.fmt()
+
 
 class TestDocumentFmtPreservesProxies:
     """Document.fmt() only changes whitespace, so proxies stay valid."""

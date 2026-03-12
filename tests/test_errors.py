@@ -246,3 +246,32 @@ class TestWrongTypeErrors:
         doc = Document.parse("x = 42\n")
         with pytest.raises(TypeError, match="not subscriptable"):
             doc["x"]["y"]
+
+
+class TestUnsupportedValueTypes:
+    """Python types without obvious TOML semantics should be rejected."""
+
+    def test_bytes_rejected(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError):
+            doc["x"] = b"hello"
+
+    def test_bytearray_rejected(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError):
+            doc["x"] = bytearray(b"hello")
+
+    def test_range_rejected(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError):
+            doc["x"] = range(5)
+
+    def test_set_rejected(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError):
+            doc["x"] = {1, 2, 3}
+
+    def test_none_rejected(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError, match="None is not a valid TOML value"):
+            doc["x"] = None

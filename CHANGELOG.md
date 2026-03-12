@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Support more list-like methods: `index()`, `count()`, `__iadd__()`.
+- Fix equality comparisons for `datetime.date` and `datetime.time` values.
+- Faster `str()` conversion for scalar items (strings, ints, floats, bools).
+
 ## 0.8.0 (10 March 2026)
 
 - Make our dictionary-like methods even more dictionary-like

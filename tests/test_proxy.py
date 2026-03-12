@@ -939,8 +939,10 @@ class TestSliceIndexing:
     def test_slice_returns_proxies(self) -> None:
         """Each element of the returned list is still a live proxy."""
         doc = Document.parse(self.TOML)
-        doc["arr"][1:3]
+        proxies = doc["arr"][1:3]
+        assert len(proxies) == 2
         doc["arr"][1] = 20
+        # Re-fetch: the mutation is visible through the document.
         assert doc["arr"][1] == 20
 
     # ---- __setitem__ slices ----
@@ -1286,6 +1288,6 @@ class TestProxyFmt:
         assert b.value == 2
 
     def test_fmt_table_strips_comments_on_entries(self) -> None:
-        doc = Document.parse("# comment\na = 1 # inline\n")
-        doc.fmt()
-        assert str(doc) == "a = 1\n"
+        doc = Document.parse("[t]\n# comment\na = 1 # inline\n")
+        doc["t"].fmt()
+        assert str(doc) == "[t]\na = 1\n"

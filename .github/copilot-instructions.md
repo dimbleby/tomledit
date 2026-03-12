@@ -36,13 +36,17 @@ pytest` to pick up changes.
 ### Rust code coverage (from Python tests)
 
 `cargo-llvm-cov`'s wrapper doesn't work with maturin, so use the manual
-approach:
+approach.  **Always export `LLVM_PROFILE_FILE` first** — this ensures every
+process that loads the instrumented `.so` writes `.profraw` files into
+`target/` rather than the repo root.
 
 ```sh
-# Build instrumented .so and run tests (generates .profraw)
+# Set for the entire shell session — do this first!
+export LLVM_PROFILE_FILE="target/tomledit-%p-%m.profraw"
+
+# Build instrumented .so and run tests (generates .profraw in target/)
 rm -f target/tomledit-*.profraw
 RUSTFLAGS="-Cinstrument-coverage" \
-  LLVM_PROFILE_FILE="target/tomledit-%p-%m.profraw" \
   uv run --reinstall-package tomledit pytest -q
 
 # Merge profiles and generate report
@@ -60,11 +64,9 @@ LLVM_TOOLS_PATH="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/b
 
 # IMPORTANT: rebuild without instrumentation when done, otherwise
 # every subsequent `uv run` will produce .profraw files.
-# Set LLVM_PROFILE_FILE so the old instrumented .so (still loaded
-# by the build process) writes into target/ instead of the repo root.
-LLVM_PROFILE_FILE="target/tomledit-%p-%m.profraw" \
-  uv sync --reinstall-package tomledit
+uv sync --reinstall-package tomledit
 rm -f target/tomledit-*.profraw
+unset LLVM_PROFILE_FILE
 ```
 
 ## Architecture

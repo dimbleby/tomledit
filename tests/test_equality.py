@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 
-from tests.conftest import SAMPLE, make_doc
+from tests.conftest import SAMPLE
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -25,12 +25,10 @@ class TestStr:
         doc = Document.parse('name = "hello"\n')
         assert str(doc["name"]) == "hello"
 
-    def test_proxy_str_int(self) -> None:
-        doc = make_doc()
+    def test_proxy_str_int(self, doc: Document) -> None:
         assert str(doc["owner"]["age"]) == "30"
 
-    def test_proxy_str_after_mutation(self) -> None:
-        doc = make_doc()
+    def test_proxy_str_after_mutation(self, doc: Document) -> None:
         doc["owner"]["age"] = 99
         assert str(doc["owner"]["age"]) == "99"
 
@@ -41,18 +39,15 @@ class TestStr:
 
 
 class TestEquality:
-    def test_int_eq(self) -> None:
-        doc = make_doc()
+    def test_int_eq(self, doc: Document) -> None:
         assert doc["owner"]["age"] == 30
         assert doc["owner"]["age"] != 31
 
-    def test_str_eq(self) -> None:
-        doc = make_doc()
+    def test_str_eq(self, doc: Document) -> None:
         assert doc["owner"]["name"] == "Alice"
         assert doc["owner"]["name"] != "Bob"
 
-    def test_bool_eq(self) -> None:
-        doc = make_doc()
+    def test_bool_eq(self, doc: Document) -> None:
         assert doc["owner"]["active"] == True  # noqa: E712
         assert doc["owner"]["active"] != False  # noqa: E712
 
@@ -60,8 +55,7 @@ class TestEquality:
         doc = Document.parse("val = 2.5\n")
         assert doc["val"] == 2.5
 
-    def test_type_mismatch_not_equal(self) -> None:
-        doc = make_doc()
+    def test_type_mismatch_not_equal(self, doc: Document) -> None:
         assert doc["owner"]["age"] != "30"
         assert doc["owner"]["name"] != 42
 
@@ -111,9 +105,8 @@ class TestEquality:
         doc = Document.parse('arr = ["a", "b"]\n')
         assert doc["arr"] == ["a", "b"]
 
-    def test_reverse_equality(self) -> None:
+    def test_reverse_equality(self, doc: Document) -> None:
         """Python falls back to proxy's __eq__ in both directions."""
-        doc = make_doc()
         assert 30 == doc["owner"]["age"]  # noqa: SIM300
         assert [8001, 8001, 8002] == doc["database"]["ports"]  # noqa: SIM300
 

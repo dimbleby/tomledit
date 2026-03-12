@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import make_doc
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -13,8 +12,7 @@ from tomledit import Document
 
 
 class TestProxyListMethods:
-    def test_append(self) -> None:
-        doc = make_doc()
+    def test_append(self, doc: Document) -> None:
         doc["database"]["ports"].append(9999)
         assert len(doc["database"]["ports"]) == 4
         assert doc["database"]["ports"][3] == 9999
@@ -83,8 +81,7 @@ class TestProxyListMethods:
         doc["arr"].clear()
         assert len(doc["arr"]) == 0
 
-    def test_append_on_table_raises(self) -> None:
-        doc = make_doc()
+    def test_append_on_table_raises(self, doc: Document) -> None:
         with pytest.raises(TypeError):
             doc["owner"].append(1)
 
@@ -139,8 +136,7 @@ class TestIadd:
         doc["arr"] += ["b", "c"]
         assert doc["arr"] == ["a", "b", "c"]
 
-    def test_iadd_on_table_raises(self) -> None:
-        doc = make_doc()
+    def test_iadd_on_table_raises(self, doc: Document) -> None:
         with pytest.raises(TypeError):
             doc["owner"] += [1]
 
@@ -183,8 +179,7 @@ class TestCount:
         assert doc["arr"].count("a") == 1
         assert doc["arr"].count(True) == 1
 
-    def test_count_on_table_raises(self) -> None:
-        doc = make_doc()
+    def test_count_on_table_raises(self, doc: Document) -> None:
         with pytest.raises(TypeError):
             doc["owner"].count("name")
 
@@ -245,8 +240,7 @@ class TestIndex:
         doc = Document.parse('arr = ["x", "y", "z"]\n')
         assert doc["arr"].index("z") == 2
 
-    def test_index_on_table_raises(self) -> None:
-        doc = make_doc()
+    def test_index_on_table_raises(self, doc: Document) -> None:
         with pytest.raises(TypeError):
             doc["owner"].index("name")
 

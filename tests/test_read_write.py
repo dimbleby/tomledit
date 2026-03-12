@@ -7,7 +7,6 @@ from datetime import datetime
 
 import pytest
 
-from tests.conftest import make_doc
 from tomledit import Document, Item
 
 # ---------------------------------------------------------------------------
@@ -16,24 +15,19 @@ from tomledit import Document, Item
 
 
 class TestReadScalars:
-    def test_top_level_string(self) -> None:
-        doc = make_doc()
+    def test_top_level_string(self, doc: Document) -> None:
         assert doc["title"] == "Example"
 
-    def test_nested_string(self) -> None:
-        doc = make_doc()
+    def test_nested_string(self, doc: Document) -> None:
         assert doc["owner"]["name"] == "Alice"
 
-    def test_nested_int(self) -> None:
-        doc = make_doc()
+    def test_nested_int(self, doc: Document) -> None:
         assert doc["owner"]["age"] == 30
 
-    def test_nested_bool(self) -> None:
-        doc = make_doc()
+    def test_nested_bool(self, doc: Document) -> None:
         assert doc["owner"]["active"] == True  # noqa: E712
 
-    def test_deeply_nested(self) -> None:
-        doc = make_doc()
+    def test_deeply_nested(self, doc: Document) -> None:
         assert doc["servers"]["alpha"]["ip"] == "10.0.0.1"
         assert doc["servers"]["beta"]["role"] == "backend"
 
@@ -44,13 +38,11 @@ class TestReadScalars:
 
 
 class TestReadArrays:
-    def test_array_element_by_index(self) -> None:
-        doc = make_doc()
+    def test_array_element_by_index(self, doc: Document) -> None:
         assert doc["database"]["ports"][0] == 8001
         assert doc["database"]["ports"][2] == 8002
 
-    def test_array_out_of_bounds(self) -> None:
-        doc = make_doc()
+    def test_array_out_of_bounds(self, doc: Document) -> None:
         with pytest.raises(IndexError):
             doc["database"]["ports"][99]
 
@@ -61,33 +53,27 @@ class TestReadArrays:
 
 
 class TestWriteScalars:
-    def test_set_top_level_string(self) -> None:
-        doc = make_doc()
+    def test_set_top_level_string(self, doc: Document) -> None:
         doc["title"] = "Changed"
         assert doc["title"] == "Changed"
 
-    def test_set_nested_int(self) -> None:
-        doc = make_doc()
+    def test_set_nested_int(self, doc: Document) -> None:
         doc["owner"]["age"] = 31
         assert doc["owner"]["age"] == 31
 
-    def test_set_nested_bool(self) -> None:
-        doc = make_doc()
+    def test_set_nested_bool(self, doc: Document) -> None:
         doc["owner"]["active"] = False
         assert doc["owner"]["active"] == False  # noqa: E712
 
-    def test_set_nested_float(self) -> None:
-        doc = make_doc()
+    def test_set_nested_float(self, doc: Document) -> None:
         doc["database"]["connection_max"] = 9.81
         assert doc["database"]["connection_max"] == 9.81
 
-    def test_set_deeply_nested_string(self) -> None:
-        doc = make_doc()
+    def test_set_deeply_nested_string(self, doc: Document) -> None:
         doc["servers"]["alpha"]["ip"] = "192.168.1.1"
         assert doc["servers"]["alpha"]["ip"] == "192.168.1.1"
 
-    def test_mutation_persists_in_str(self) -> None:
-        doc = make_doc()
+    def test_mutation_persists_in_str(self, doc: Document) -> None:
         doc["owner"]["name"] = "Bob"
         assert 'name = "Bob"' in str(doc)
         assert doc["owner"]["name"] == "Bob"
@@ -99,13 +85,11 @@ class TestWriteScalars:
 
 
 class TestWriteArrayElements:
-    def test_replace_array_element(self) -> None:
-        doc = make_doc()
+    def test_replace_array_element(self, doc: Document) -> None:
         doc["database"]["ports"][0] = 9999
         assert doc["database"]["ports"][0] == 9999
 
-    def test_replace_does_not_affect_others(self) -> None:
-        doc = make_doc()
+    def test_replace_does_not_affect_others(self, doc: Document) -> None:
         doc["database"]["ports"][0] = 9999
         assert doc["database"]["ports"][2] == 8002
 
@@ -219,8 +203,7 @@ class TestInlineTableMutation:
         assert doc["meta"]["y"] == 2
         assert str(doc) == "meta = {x = 1, y = 2 }\n"
 
-    def test_set_new_key_in_table(self) -> None:
-        doc = make_doc()
+    def test_set_new_key_in_table(self, doc: Document) -> None:
         doc["owner"]["email"] = "alice@example.com"
         assert doc["owner"]["email"] == "alice@example.com"
 
@@ -272,15 +255,13 @@ class TestFormatPreservation:
 
 
 class TestMutationViaAccessors:
-    def test_get_returns_live_proxy(self) -> None:
-        doc = make_doc()
+    def test_get_returns_live_proxy(self, doc: Document) -> None:
         owner = doc.get("owner")
         assert owner is not None
         owner["name"] = "Bob"
         assert doc["owner"]["name"] == "Bob"
 
-    def test_items_returns_live_proxies(self) -> None:
-        doc = make_doc()
+    def test_items_returns_live_proxies(self, doc: Document) -> None:
         for key, proxy in doc.items():
             if key == "owner":
                 proxy["name"] = "Charlie"

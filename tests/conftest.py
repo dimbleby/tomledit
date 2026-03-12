@@ -1,6 +1,8 @@
-"""Shared helpers for tomledit tests."""
+"""Shared fixtures for tomledit tests."""
 
 from __future__ import annotations
+
+import pytest
 
 from tomledit import Document
 
@@ -29,5 +31,6 @@ role = "backend"
 """
 
 
-def make_doc() -> Document:
+@pytest.fixture
+def doc() -> Document:
     return Document.parse(SAMPLE)

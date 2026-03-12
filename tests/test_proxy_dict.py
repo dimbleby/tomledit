@@ -6,7 +6,6 @@ from datetime import datetime
 
 import pytest
 
-from tests.conftest import make_doc
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -15,8 +14,7 @@ from tomledit import Document
 
 
 class TestProxyDictMethods:
-    def test_keys(self) -> None:
-        doc = make_doc()
+    def test_keys(self, doc: Document) -> None:
         assert set(doc["owner"].keys()) == {"name", "age", "active"}
 
     def test_values(self) -> None:
@@ -43,12 +41,10 @@ class TestProxyDictMethods:
                 proxy["val"] = 99
         assert doc["t"]["inner"]["val"] == 99
 
-    def test_get_existing(self) -> None:
-        doc = make_doc()
+    def test_get_existing(self, doc: Document) -> None:
         assert doc["owner"].get("name") == "Alice"
 
-    def test_get_missing(self) -> None:
-        doc = make_doc()
+    def test_get_missing(self, doc: Document) -> None:
         assert doc["owner"].get("email") is None
 
     def test_get_returns_live_proxy(self) -> None:
@@ -58,57 +54,47 @@ class TestProxyDictMethods:
         inner["val"] = 42
         assert doc["t"]["inner"]["val"] == 42
 
-    def test_pop_table_key(self) -> None:
-        doc = make_doc()
+    def test_pop_table_key(self, doc: Document) -> None:
         doc["owner"].pop("active")
         assert "active" not in doc["owner"]
 
-    def test_pop_missing_raises(self) -> None:
-        doc = make_doc()
+    def test_pop_missing_raises(self, doc: Document) -> None:
         with pytest.raises(KeyError):
             doc["owner"].pop("nonexistent")
 
-    def test_pop_missing_with_default(self) -> None:
-        doc = make_doc()
+    def test_pop_missing_with_default(self, doc: Document) -> None:
         assert doc["owner"].pop("nonexistent", 42) == 42
 
-    def test_pop_existing_ignores_default(self) -> None:
-        doc = make_doc()
+    def test_pop_existing_ignores_default(self, doc: Document) -> None:
         val = doc["owner"].pop("age", 99)
         assert val == 30
         assert "age" not in doc["owner"]
 
-    def test_update(self) -> None:
-        doc = make_doc()
+    def test_update(self, doc: Document) -> None:
         doc["owner"].update({"name": "Bob", "email": "bob@example.com"})
         assert doc["owner"]["name"] == "Bob"
         assert doc["owner"]["email"] == "bob@example.com"
 
-    def test_update_kwargs(self) -> None:
-        doc = make_doc()
+    def test_update_kwargs(self, doc: Document) -> None:
         doc["owner"].update(name="Bob", email="bob@example.com")
         assert doc["owner"]["name"] == "Bob"
         assert doc["owner"]["email"] == "bob@example.com"
 
-    def test_update_iterable_of_pairs(self) -> None:
-        doc = make_doc()
+    def test_update_iterable_of_pairs(self, doc: Document) -> None:
         doc["owner"].update([("name", "Bob"), ("email", "bob@example.com")])
         assert doc["owner"]["name"] == "Bob"
         assert doc["owner"]["email"] == "bob@example.com"
 
-    def test_setdefault_missing(self) -> None:
-        doc = make_doc()
+    def test_setdefault_missing(self, doc: Document) -> None:
         result = doc["owner"].setdefault("email", "default@example.com")
         assert result == "default@example.com"
         assert doc["owner"]["email"] == "default@example.com"
 
-    def test_setdefault_existing(self) -> None:
-        doc = make_doc()
+    def test_setdefault_existing(self, doc: Document) -> None:
         result = doc["owner"].setdefault("name", "fallback")
         assert result == "Alice"  # not overwritten
 
-    def test_clear_table(self) -> None:
-        doc = make_doc()
+    def test_clear_table(self, doc: Document) -> None:
         doc["owner"].clear()
         assert len(doc["owner"]) == 0
 
@@ -131,8 +117,7 @@ class TestProxyDictMethods:
         doc["meta"].update({"y": 2})
         assert doc["meta"]["y"] == 2
 
-    def test_keys_on_scalar_raises(self) -> None:
-        doc = make_doc()
+    def test_keys_on_scalar_raises(self, doc: Document) -> None:
         with pytest.raises(TypeError):
             doc["title"].keys()
 
@@ -225,8 +210,7 @@ class TestPopWithDefault:
 class TestPopReturnsNative:
     """pop() should return native Python objects, not internal Item wrappers."""
 
-    def test_pop_table_returns_dict(self) -> None:
-        doc = make_doc()
+    def test_pop_table_returns_dict(self, doc: Document) -> None:
         owner = doc.pop("owner")
         assert isinstance(owner, dict)
         assert owner == {"name": "Alice", "age": 30, "active": True}
@@ -273,8 +257,7 @@ class TestPopReturnsNative:
         doc = Document.parse("x = 1\n")
         assert doc.pop("nope", 42) == 42
 
-    def test_pop_removes_key(self) -> None:
-        doc = make_doc()
+    def test_pop_removes_key(self, doc: Document) -> None:
         doc.pop("owner")
         assert "owner" not in doc
 

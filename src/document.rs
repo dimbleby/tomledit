@@ -6,7 +6,8 @@ use toml_edit::DocumentMut as DocumentRs;
 
 use crate::equality;
 use crate::item::Item;
-use crate::item_proxy::{self, ItemProxy, Key};
+use crate::item_ops::{self, Key};
+use crate::item_proxy::ItemProxy;
 use crate::value::Table;
 
 /// A TOML document that preserves formatting when edited.
@@ -140,7 +141,7 @@ impl Document {
     pub fn __setitem__(slf: &Bound<'_, Self>, key: &str, value: Item) {
         let mut doc = slf.borrow_mut();
         let replaced = doc.inner.contains_key(key);
-        item_proxy::set_with_decor_preservation(doc.inner.as_item_mut(), key, value);
+        item_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, value);
         if replaced {
             doc.bump();
         }
@@ -164,7 +165,7 @@ impl Document {
         match self.inner.remove(key) {
             Some(item) => {
                 self.bump();
-                item_proxy::item_to_py(&item, py)
+                item_ops::item_to_py(&item, py)
             }
             None => match default {
                 Some(d) => Ok(d),
@@ -180,7 +181,7 @@ impl Document {
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let mut pairs = match other {
-            Some(obj) => item_proxy::extract_update_pairs(obj)?,
+            Some(obj) => item_ops::extract_update_pairs(obj)?,
             None => Vec::new(),
         };
         if let Some(kw) = kwargs {
@@ -191,7 +192,7 @@ impl Document {
             }
         }
         let mut doc = slf.borrow_mut();
-        item_proxy::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
+        item_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
         doc.bump();
         Ok(())
     }
@@ -201,7 +202,7 @@ impl Document {
         {
             let mut doc = slf.borrow_mut();
             if !doc.inner.contains_key(key) {
-                item_proxy::set_with_decor_preservation(doc.inner.as_item_mut(), key, default);
+                item_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, default);
             }
         }
         Self::make_proxy(slf, key)
@@ -264,7 +265,7 @@ impl Document {
     pub fn value(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (k, v) in self.inner.iter() {
-            dict.set_item(k, item_proxy::item_to_py(v, py)?)?;
+            dict.set_item(k, item_ops::item_to_py(v, py)?)?;
         }
         Ok(dict.into_any().unbind())
     }

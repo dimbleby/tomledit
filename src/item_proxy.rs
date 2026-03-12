@@ -1,8 +1,6 @@
-use pyo3::exceptions::{PyIndexError, PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{
-    PyDate, PyDateTime, PyDelta, PyDict, PyIterator, PyList, PySlice, PyTime, PyTzInfo,
-};
+use pyo3::types::{PyDict, PyIterator, PySlice};
 use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
@@ -11,16 +9,7 @@ use crate::comments;
 use crate::document::Document;
 use crate::equality;
 use crate::item::Item;
-
-// ---------------------------------------------------------------------------
-// Key / proxy types
-// ---------------------------------------------------------------------------
-
-#[derive(Clone)]
-pub(crate) enum Key {
-    Str(String),
-    Int(usize),
-}
+use crate::item_ops::{self, Key};
 
 fn navigate_path<'a>(doc: &'a DocumentRs, path: &[Key]) -> PyResult<&'a ItemRs> {
     let mut current: &ItemRs = doc.as_item();
@@ -137,9 +126,9 @@ impl ItemProxy {
             let doc = self.document.bind(py).borrow();
             self.check_generation(&doc)?;
             let item = self.navigate(&doc.inner)?;
-            let len = require_array_like_len(item)?;
+            let len = item_ops::require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
-            let indices = collect_slice_indices(si.start, si.stop, si.step);
+            let indices = item_ops::collect_slice_indices(si.start, si.stop, si.step);
             let proxies: Vec<ItemProxy> = indices
                 .into_iter()
                 .map(|i| self.child_proxy(py, Key::Int(i)))
@@ -151,7 +140,7 @@ impl ItemProxy {
             let doc = self.document.bind(py).borrow();
             self.check_generation(&doc)?;
             let item = self.navigate(&doc.inner)?;
-            item_getitem(item, key)?
+            item_ops::item_getitem(item, key)?
         };
 
         Ok(self
@@ -177,9 +166,9 @@ impl ItemProxy {
             let mut doc = self.document.bind(py).borrow_mut();
             self.check_generation(&doc)?;
             let item = self.navigate_mut(&mut doc.inner)?;
-            let len = require_array_like_len(item)?;
+            let len = item_ops::require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
-            item_setitem_slice(item, si.start, si.stop, si.step, values)?;
+            item_ops::item_setitem_slice(item, si.start, si.stop, si.step, values)?;
             self.bump_generation(&mut doc);
             return Ok(());
         }
@@ -188,7 +177,7 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        let replaced = item_setitem(item, key, value)?;
+        let replaced = item_ops::item_setitem(item, key, value)?;
         if replaced {
             self.bump_generation(&mut doc);
         }
@@ -202,10 +191,10 @@ impl ItemProxy {
             let mut doc = self.document.bind(py).borrow_mut();
             self.check_generation(&doc)?;
             let item = self.navigate_mut(&mut doc.inner)?;
-            let len = require_array_like_len(item)?;
+            let len = item_ops::require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
-            let indices = collect_slice_indices(si.start, si.stop, si.step);
-            item_delitem_slice(item, &indices)?;
+            let indices = item_ops::collect_slice_indices(si.start, si.stop, si.step);
+            item_ops::item_delitem_slice(item, &indices)?;
             self.bump_generation(&mut doc);
             return Ok(());
         }
@@ -213,7 +202,7 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_delitem(item, key)?;
+        item_ops::item_delitem(item, key)?;
         self.bump_generation(&mut doc);
         Ok(())
     }
@@ -222,7 +211,7 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_len(item).ok_or_else(|| {
+        item_ops::item_len(item).ok_or_else(|| {
             PyTypeError::new_err(format!(
                 "TOML {} item has no len() (use .value to get the Python object)",
                 item.type_name()
@@ -235,12 +224,12 @@ impl ItemProxy {
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
 
-        match item_iter_info(item)? {
-            IterKind::TableKeys(keys) => {
+        match item_ops::item_iter_info(item)? {
+            item_ops::IterKind::TableKeys(keys) => {
                 let list = keys.into_pyobject(py)?;
                 Ok(list.try_iter()?.unbind())
             }
-            IterKind::ArrayLen(len) => {
+            item_ops::IterKind::ArrayLen(len) => {
                 let proxies: Vec<ItemProxy> = (0..len)
                     .map(|i| self.child_proxy(py, Key::Int(i)))
                     .collect();
@@ -255,28 +244,28 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_contains(item, value)
+        item_ops::item_contains(item, value)
     }
 
     pub fn __bool__(&self, py: Python<'_>) -> PyResult<bool> {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        Ok(item_bool(item))
+        Ok(item_ops::item_bool(item))
     }
 
     pub fn __str__(&self, py: Python<'_>) -> PyResult<String> {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_str(item, py)
+        item_ops::item_str(item, py)
     }
 
     pub fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        Ok(item_repr(item))
+        Ok(item_ops::item_repr(item))
     }
 
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
@@ -310,7 +299,7 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_extend(item, items, "+=")
+        item_ops::item_extend(item, items, "+=")
     }
 
     /// The underlying data as a native Python object (int, str, list, dict, etc).
@@ -319,7 +308,7 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_to_py(item, py)
+        item_ops::item_to_py(item, py)
     }
 
     // ---- comment access ----
@@ -409,14 +398,14 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_keys(item)
+        item_ops::item_keys(item)
     }
 
     pub fn values(&self, py: Python<'_>) -> PyResult<Vec<ItemProxy>> {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        let keys = item_keys(item)?;
+        let keys = item_ops::item_keys(item)?;
         Ok(keys
             .into_iter()
             .map(|k| self.child_proxy(py, Key::Str(k)))
@@ -427,7 +416,7 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        let keys = item_keys(item)?;
+        let keys = item_ops::item_keys(item)?;
         Ok(keys
             .into_iter()
             .map(|k| {
@@ -447,7 +436,7 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        if item_has_key(item, key)? {
+        if item_ops::item_has_key(item, key)? {
             Ok(self
                 .child_proxy(py, Key::Str(key.to_owned()))
                 .into_pyobject(py)?
@@ -468,9 +457,9 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        match item_pop(item, key) {
+        match item_ops::item_pop(item, key) {
             Ok(removed) => {
-                let result = item_to_py(&removed.0, py)?;
+                let result = item_ops::item_to_py(&removed.0, py)?;
                 self.bump_generation(&mut doc);
                 Ok(result)
             }
@@ -489,7 +478,7 @@ impl ItemProxy {
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let mut pairs = match other {
-            Some(obj) => extract_update_pairs(obj)?,
+            Some(obj) => item_ops::extract_update_pairs(obj)?,
             None => Vec::new(),
         };
         if let Some(kw) = kwargs {
@@ -502,7 +491,7 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        apply_update_pairs(item, pairs)?;
+        item_ops::apply_update_pairs(item, pairs)?;
         self.bump_generation(&mut doc);
         Ok(())
     }
@@ -513,8 +502,8 @@ impl ItemProxy {
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
 
-        if !item_has_key(item, key)? {
-            set_with_decor_preservation(item, key, default);
+        if !item_ops::item_has_key(item, key)? {
+            item_ops::set_with_decor_preservation(item, key, default);
         }
 
         Ok(self.child_proxy(py, Key::Str(key.to_owned())))
@@ -527,7 +516,7 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_append(item, value)?;
+        item_ops::item_append(item, value)?;
         Ok(())
     }
 
@@ -536,7 +525,7 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_insert(item, index, value)?;
+        item_ops::item_insert(item, index, value)?;
         self.bump_generation(&mut doc);
         Ok(())
     }
@@ -546,7 +535,7 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_remove(item, value)?;
+        item_ops::item_remove(item, value)?;
         self.bump_generation(&mut doc);
         Ok(())
     }
@@ -561,7 +550,7 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_extend(item, items, "extend()")?;
+        item_ops::item_extend(item, items, "extend()")?;
         Ok(())
     }
 
@@ -570,7 +559,7 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_count(item, value)
+        item_ops::item_count(item, value)
     }
 
     #[pyo3(signature = (value, start=None, stop=None, /))]
@@ -584,7 +573,7 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_index(item, value, start, stop)
+        item_ops::item_index(item, value, start, stop)
     }
 
     // ---- shared methods ----
@@ -593,7 +582,7 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_clear(item)?;
+        item_ops::item_clear(item)?;
         self.bump_generation(&mut doc);
         Ok(())
     }
@@ -607,7 +596,7 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_fmt(item);
+        item_ops::item_fmt(item);
         Ok(())
     }
 
@@ -638,798 +627,5 @@ impl ItemProxy {
             path: vec![Key::Str("_".to_owned())],
             generation,
         })
-    }
-}
-
-// ===========================================================================
-// Item operations
-// ===========================================================================
-
-// ---------------------------------------------------------------------------
-// Decor preservation
-// ---------------------------------------------------------------------------
-
-pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: Item) {
-    let old_decor = item
-        .get(key)
-        .and_then(|e| e.as_value())
-        .map(|v| v.decor().clone());
-    match (old_decor, value.0.into_value()) {
-        (Some(decor), Ok(mut new_value)) => {
-            if let Some(prefix) = decor.prefix() {
-                new_value.decor_mut().set_prefix(prefix.clone());
-            }
-            if let Some(suffix) = decor.suffix() {
-                new_value.decor_mut().set_suffix(suffix.clone());
-            }
-            item[key] = ItemRs::Value(new_value);
-        }
-        (_, Ok(new_value)) => {
-            item[key] = ItemRs::Value(new_value);
-        }
-        (_, Err(new_item)) => {
-            item[key] = new_item;
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Read operations
-// ---------------------------------------------------------------------------
-
-fn item_len(item: &ItemRs) -> Option<usize> {
-    match item {
-        ItemRs::Table(t) => Some(t.len()),
-        ItemRs::Value(ValueRs::Array(a)) => Some(a.len()),
-        ItemRs::Value(ValueRs::InlineTable(it)) => Some(it.len()),
-        ItemRs::ArrayOfTables(aot) => Some(aot.len()),
-        _ => None,
-    }
-}
-
-fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
-    match item {
-        ItemRs::Table(table) => {
-            let key: &str = value.extract()?;
-            Ok(table.contains_key(key))
-        }
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            let key: &str = value.extract()?;
-            Ok(it.contains_key(key))
-        }
-        ItemRs::Value(ValueRs::Array(arr)) => {
-            for v in arr.iter() {
-                if equality::value_eq(v, value)? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            if let Ok(other_dict) = value.cast::<PyDict>() {
-                for table in aot.iter() {
-                    if equality::table_entries_eq(table.iter(), table.len(), other_dict)? {
-                        return Ok(true);
-                    }
-                }
-            }
-            Ok(false)
-        }
-        _ => Err(PyTypeError::new_err(
-            "TOML scalar item does not support 'in' (use .value to get the Python object)",
-        )),
-    }
-}
-
-fn item_bool(item: &ItemRs) -> bool {
-    match item {
-        ItemRs::Table(t) => !t.is_empty(),
-        ItemRs::ArrayOfTables(aot) => !aot.is_empty(),
-        ItemRs::Value(value) => match value {
-            ValueRs::Boolean(b) => *b.value(),
-            ValueRs::Integer(i) => *i.value() != 0,
-            ValueRs::Float(f) => *f.value() != 0.0,
-            ValueRs::String(s) => !s.value().is_empty(),
-            ValueRs::Array(a) => !a.is_empty(),
-            ValueRs::InlineTable(it) => !it.is_empty(),
-            ValueRs::Datetime(_) => true,
-        },
-        ItemRs::None => false,
-    }
-}
-
-fn item_repr(item: &ItemRs) -> String {
-    let type_name = item.type_name();
-    let content = item.to_string();
-    let trimmed = content.trim();
-    format!("Item({type_name}, {trimmed})")
-}
-
-fn item_str(item: &ItemRs, py: Python<'_>) -> PyResult<String> {
-    // Fast path for scalars: avoid Python object allocation + __str__ call.
-    if let ItemRs::Value(v) = item {
-        match v {
-            ValueRs::String(s) => return Ok(s.value().to_owned()),
-            ValueRs::Integer(i) => return Ok(i.value().to_string()),
-            ValueRs::Float(f) => return Ok(f.value().to_string()),
-            ValueRs::Boolean(b) => return Ok(if *b.value() { "True" } else { "False" }.to_owned()),
-            _ => {}
-        }
-    }
-    // Complex types (datetime, table, array, AoT): fall through to Python.
-    let obj = item_to_py(item, py)?;
-    obj.call_method0(py, "__str__")?.extract::<String>(py)
-}
-
-/// Convert a toml_edit table's entries to a Python dict.
-fn table_to_pydict<'a>(
-    iter: impl Iterator<Item = (&'a str, &'a ItemRs)>,
-    py: Python<'_>,
-) -> PyResult<Bound<'_, PyDict>> {
-    let dict = PyDict::new(py);
-    for (k, v) in iter {
-        dict.set_item(k, item_to_py(v, py)?)?;
-    }
-    Ok(dict)
-}
-
-/// Convert a toml_edit Item to a native Python object (dict/list/str/int/etc).
-pub(crate) fn item_to_py(item: &ItemRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
-    match item {
-        ItemRs::Value(v) => value_to_py(v, py),
-        ItemRs::Table(table) => Ok(table_to_pydict(table.iter(), py)?.into_any().unbind()),
-        ItemRs::ArrayOfTables(aot) => {
-            let list = PyList::empty(py);
-            for table in aot.iter() {
-                list.append(table_to_pydict(table.iter(), py)?)?;
-            }
-            Ok(list.into_any().unbind())
-        }
-        _ => Ok(py.None()),
-    }
-}
-
-fn value_to_py(value: &ValueRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
-    match value {
-        ValueRs::String(s) => Ok(s.value().into_pyobject(py)?.into_any().unbind()),
-        ValueRs::Integer(i) => Ok(i.value().into_pyobject(py)?.into_any().unbind()),
-        ValueRs::Float(f) => Ok(f.value().into_pyobject(py)?.into_any().unbind()),
-        ValueRs::Boolean(b) => Ok(b.value().into_pyobject(py)?.to_owned().into_any().unbind()),
-        ValueRs::Array(arr) => {
-            let list = PyList::empty(py);
-            for v in arr.iter() {
-                list.append(value_to_py(v, py)?)?;
-            }
-            Ok(list.into_any().unbind())
-        }
-        ValueRs::InlineTable(it) => {
-            let dict = PyDict::new(py);
-            for (k, v) in it.iter() {
-                dict.set_item(k, value_to_py(v, py)?)?;
-            }
-            Ok(dict.into_any().unbind())
-        }
-        ValueRs::Datetime(dt) => datetime_to_py(dt.value(), py),
-    }
-}
-
-/// Convert a toml_edit Datetime to a Python datetime.datetime, date, or time.
-fn datetime_to_py(dt: &toml_edit::Datetime, py: Python<'_>) -> PyResult<Py<PyAny>> {
-    let make_tz = |offset: &toml_edit::Offset| -> PyResult<Bound<'_, PyTzInfo>> {
-        let minutes: i32 = match offset {
-            toml_edit::Offset::Z => 0,
-            toml_edit::Offset::Custom { minutes } => *minutes as i32,
-        };
-        let td = PyDelta::new(py, 0, minutes * 60, 0, true)?;
-        let datetime_mod = py.import("datetime")?;
-        let tz = datetime_mod.getattr("timezone")?.call1((&td,))?;
-        Ok(tz.cast::<PyTzInfo>()?.to_owned())
-    };
-
-    match (&dt.date, &dt.time) {
-        (Some(date), Some(time)) => {
-            let tzinfo = dt.offset.as_ref().map(make_tz).transpose()?;
-            Ok(PyDateTime::new(
-                py,
-                date.year.into(),
-                date.month,
-                date.day,
-                time.hour,
-                time.minute,
-                time.second.unwrap_or(0),
-                time.nanosecond.unwrap_or(0) / 1000,
-                tzinfo.as_ref(),
-            )?
-            .into_any()
-            .unbind())
-        }
-        (Some(date), None) => Ok(PyDate::new(py, date.year.into(), date.month, date.day)?
-            .into_any()
-            .unbind()),
-        (None, Some(time)) => Ok(PyTime::new(
-            py,
-            time.hour,
-            time.minute,
-            time.second.unwrap_or(0),
-            time.nanosecond.unwrap_or(0) / 1000,
-            None,
-        )?
-        .into_any()
-        .unbind()),
-        (None, None) => Ok(dt.to_string().into_pyobject(py)?.into_any().unbind()),
-    }
-}
-
-/// Return the number of iterable children, or a TypeError for scalars.
-enum IterKind<'a> {
-    TableKeys(Vec<&'a str>),
-    ArrayLen(usize),
-}
-
-fn item_iter_info<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
-    match item {
-        ItemRs::Table(table) => Ok(IterKind::TableKeys(table.iter().map(|(k, _)| k).collect())),
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            Ok(IterKind::TableKeys(it.iter().map(|(k, _)| k).collect()))
-        }
-        ItemRs::Value(ValueRs::Array(arr)) => Ok(IterKind::ArrayLen(arr.len())),
-        ItemRs::ArrayOfTables(aot) => Ok(IterKind::ArrayLen(aot.len())),
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item is not iterable (use .value to get the Python object)",
-            item.type_name()
-        ))),
-    }
-}
-
-/// Resolve a Python index (possibly negative) against a known length.
-fn resolve_index(index: i64, len: usize) -> PyResult<usize> {
-    let resolved = if index < 0 { len as i64 + index } else { index };
-    if resolved < 0 || resolved as usize >= len {
-        Err(PyIndexError::new_err("index out of range"))
-    } else {
-        Ok(resolved as usize)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Slice support
-// ---------------------------------------------------------------------------
-
-/// Collect concrete indices from resolved slice parameters.
-fn collect_slice_indices(start: isize, stop: isize, step: isize) -> Vec<usize> {
-    let mut indices = Vec::new();
-    let mut i = start;
-    if step > 0 {
-        while i < stop {
-            indices.push(i as usize);
-            i += step;
-        }
-    } else if step < 0 {
-        while i > stop {
-            indices.push(i as usize);
-            i += step;
-        }
-    }
-    indices
-}
-
-/// Get the length of an array-like item, or error for non-sliceable types.
-fn require_array_like_len(item: &ItemRs) -> PyResult<usize> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => Ok(arr.len()),
-        ItemRs::ArrayOfTables(aot) => Ok(aot.len()),
-        _ => Err(unsupported_op(item, "slicing")),
-    }
-}
-
-/// Resolve an integer index against an array-like item.
-fn require_array_index(item: &ItemRs, index: i64) -> PyResult<usize> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => resolve_index(index, arr.len()),
-        ItemRs::ArrayOfTables(aot) => resolve_index(index, aot.len()),
-        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => Err(PyTypeError::new_err(
-            "TOML table keys must be strings, not integers",
-        )),
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item is not subscriptable (use .value to get the Python object)",
-            item.type_name()
-        ))),
-    }
-}
-
-/// Delete elements at the given indices (sorted in reverse internally).
-fn item_delitem_slice(item: &mut ItemRs, indices: &[usize]) -> PyResult<()> {
-    let mut sorted = indices.to_vec();
-    sorted.sort_unstable();
-    sorted.dedup();
-    sorted.reverse();
-
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
-            for idx in sorted {
-                arr.remove(idx);
-            }
-            Ok(())
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            for idx in sorted {
-                aot.remove(idx);
-            }
-            Ok(())
-        }
-        _ => Err(unsupported_op(item, "slice deletion")),
-    }
-}
-
-/// Assign to a slice of an array.
-fn item_setitem_slice(
-    item: &mut ItemRs,
-    start: isize,
-    stop: isize,
-    step: isize,
-    values: Vec<Item>,
-) -> PyResult<()> {
-    let Some(arr) = item.as_array_mut() else {
-        return Err(PyTypeError::new_err(format!(
-            "'{}' does not support slice assignment",
-            item.type_name()
-        )));
-    };
-
-    if step == 1 {
-        // Contiguous slice: replacement can be a different length.
-        let start_idx = start as usize;
-        let stop_idx = stop as usize;
-
-        // Remove old elements from back to front.
-        for i in (start_idx..stop_idx).rev() {
-            arr.remove(i);
-        }
-
-        // Insert new elements at start position.
-        for (offset, value) in values.into_iter().enumerate() {
-            let v = into_value(value)?;
-            let idx = start_idx + offset;
-            if idx >= arr.len() {
-                arr.push(v);
-            } else {
-                arr.insert(idx, v);
-            }
-        }
-        Ok(())
-    } else {
-        // Extended slice: replacement must match the slice length.
-        let indices = collect_slice_indices(start, stop, step);
-        if indices.len() != values.len() {
-            return Err(PyValueError::new_err(format!(
-                "attempt to assign sequence of size {} to extended slice of size {}",
-                values.len(),
-                indices.len()
-            )));
-        }
-        for (idx, value) in indices.into_iter().zip(values) {
-            let v = into_value(value)?;
-            arr.replace(idx, v);
-        }
-        Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Misc helpers
-// ---------------------------------------------------------------------------
-
-fn bad_key_type(key: &Bound<'_, PyAny>) -> PyErr {
-    let type_name = key
-        .get_type()
-        .name()
-        .map(|n| n.to_string())
-        .unwrap_or_else(|_| "?".to_owned());
-    PyTypeError::new_err(format!(
-        "indices must be integers or strings, not {type_name}"
-    ))
-}
-
-fn require_str_key(key: &Bound<'_, PyAny>) -> PyResult<String> {
-    key.extract().map_err(|_| {
-        if key.extract::<i64>().is_ok() {
-            PyTypeError::new_err("TOML table keys must be strings, not integers")
-        } else {
-            bad_key_type(key)
-        }
-    })
-}
-
-fn require_int_key(key: &Bound<'_, PyAny>) -> PyResult<i64> {
-    key.extract().map_err(|_| {
-        if key.extract::<String>().is_ok() {
-            PyTypeError::new_err("TOML array indices must be integers, not strings")
-        } else {
-            bad_key_type(key)
-        }
-    })
-}
-
-fn unsupported_op(item: &ItemRs, op: &str) -> PyErr {
-    PyTypeError::new_err(format!(
-        "TOML {} item does not support {op}",
-        item.type_name()
-    ))
-}
-
-fn into_value(item: Item) -> PyResult<ValueRs> {
-    item.0.into_value().map_err(|item| {
-        PyTypeError::new_err(format!(
-            "cannot convert {} to a TOML value",
-            item.type_name()
-        ))
-    })
-}
-
-fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
-    match item {
-        ItemRs::Table(table) => Ok(table.iter().map(|(k, _)| k.to_owned()).collect()),
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            Ok(it.iter().map(|(k, _)| k.to_owned()).collect())
-        }
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item has no keys()",
-            item.type_name()
-        ))),
-    }
-}
-
-fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
-    match item {
-        ItemRs::Table(table) => Ok(table.contains_key(key)),
-        ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.contains_key(key)),
-        ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => Err(PyTypeError::new_err(
-            "TOML array indices must be integers, not strings",
-        )),
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item is not subscriptable (use .value to get the Python object)",
-            item.type_name()
-        ))),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Getitem
-// ---------------------------------------------------------------------------
-
-fn item_getitem(item: &ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Key> {
-    if let Ok(k) = key.extract::<String>() {
-        if !item_has_key(item, &k)? {
-            return Err(PyKeyError::new_err(k));
-        }
-        Ok(Key::Str(k))
-    } else if let Ok(k) = key.extract::<i64>() {
-        Ok(Key::Int(require_array_index(item, k)?))
-    } else {
-        Err(bad_key_type(key))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Setitem
-// ---------------------------------------------------------------------------
-
-/// Returns `true` if an existing value was replaced, `false` if a new key was added.
-fn item_setitem(item: &mut ItemRs, key: &Bound<'_, PyAny>, value: Item) -> PyResult<bool> {
-    match item {
-        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
-            let k = require_str_key(key)?;
-            let replaced = item.get(k.as_str()).is_some();
-            set_with_decor_preservation(item, &k, value);
-            Ok(replaced)
-        }
-        ItemRs::Value(ValueRs::Array(array)) => {
-            let idx = resolve_index(require_int_key(key)?, array.len())?;
-            array.replace(idx, into_value(value)?);
-            Ok(true)
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            let idx = resolve_index(require_int_key(key)?, aot.len())?;
-            item[idx] = value.0;
-            Ok(true)
-        }
-        _ => Err(PyTypeError::new_err(format!(
-            "'{}' is not subscriptable",
-            item.type_name()
-        ))),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Delitem
-// ---------------------------------------------------------------------------
-
-fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<()> {
-    match item {
-        ItemRs::Table(table) => {
-            let k = require_str_key(key)?;
-            if table.remove(&k).is_none() {
-                return Err(PyKeyError::new_err(k));
-            }
-            Ok(())
-        }
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            let k = require_str_key(key)?;
-            if it.remove(&k).is_none() {
-                return Err(PyKeyError::new_err(k));
-            }
-            Ok(())
-        }
-        ItemRs::Value(ValueRs::Array(array)) => {
-            let idx = resolve_index(require_int_key(key)?, array.len())?;
-            array.remove(idx);
-            Ok(())
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            let idx = resolve_index(require_int_key(key)?, aot.len())?;
-            aot.remove(idx);
-            Ok(())
-        }
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item is not subscriptable",
-            item.type_name()
-        ))),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Mutation: dict-like
-// ---------------------------------------------------------------------------
-
-fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item> {
-    match key {
-        Some(key_obj) => match item {
-            ItemRs::Table(table) => {
-                let key: &str = key_obj.extract()?;
-                table
-                    .remove(key)
-                    .map(Item)
-                    .ok_or_else(|| PyKeyError::new_err(key.to_owned()))
-            }
-            ItemRs::Value(ValueRs::InlineTable(it)) => {
-                let key: &str = key_obj.extract()?;
-                it.remove(key)
-                    .map(|v| Item(ItemRs::Value(v)))
-                    .ok_or_else(|| PyKeyError::new_err(key.to_owned()))
-            }
-            ItemRs::Value(ValueRs::Array(arr)) => {
-                let idx = resolve_index(key_obj.extract::<i64>()?, arr.len())?;
-                Ok(Item(ItemRs::Value(arr.remove(idx))))
-            }
-            _ => Err(unsupported_op(item, "pop()")),
-        },
-        None => match item {
-            ItemRs::Value(ValueRs::Array(arr)) => {
-                if arr.is_empty() {
-                    return Err(PyIndexError::new_err("pop from empty array"));
-                }
-                let last = arr.len() - 1;
-                Ok(Item(ItemRs::Value(arr.remove(last))))
-            }
-            _ => Err(PyTypeError::new_err(
-                "pop() with no argument is only supported on arrays",
-            )),
-        },
-    }
-}
-
-/// Extract key-value pairs from a Python object for update().
-///
-/// Follows the same protocol as dict.update:
-/// - If the object is a dict, iterate its entries directly.
-/// - If the object has a `.keys()` method, iterate keys and index for values.
-/// - Otherwise, iterate as (key, value) pairs.
-///
-/// All paths pre-collect into a Vec because values may be ItemProxy objects
-/// referencing the same document, and extracting them borrows the document.
-pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Item)>> {
-    if let Ok(dict) = other.cast::<PyDict>() {
-        let mut pairs = Vec::with_capacity(dict.len());
-        for (k, v) in dict.iter() {
-            let key: String = k.extract()?;
-            let val: Item = v.extract()?;
-            pairs.push((key, val));
-        }
-        return Ok(pairs);
-    }
-
-    // Mapping with .keys()
-    if let Ok(keys_method) = other.getattr("keys") {
-        let keys = keys_method.call0()?;
-        let mut pairs = Vec::new();
-        for key_obj in keys.try_iter()? {
-            let key_obj = key_obj?;
-            let key: String = key_obj.extract()?;
-            let val: Item = other.get_item(&key_obj)?.extract()?;
-            pairs.push((key, val));
-        }
-        return Ok(pairs);
-    }
-
-    // Iterable of (key, value) pairs
-    let mut pairs = Vec::new();
-    for item in other.try_iter()? {
-        let item = item?;
-        let (key, val): (String, Item) = item.extract()?;
-        pairs.push((key, val));
-    }
-    Ok(pairs)
-}
-
-/// Apply pre-extracted update pairs to an item.
-pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) -> PyResult<()> {
-    if !(item.is_table() || item.is_inline_table()) {
-        return Err(unsupported_op(item, "update()"));
-    }
-    for (key, val) in pairs {
-        set_with_decor_preservation(item, &key, val);
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Mutation: list-like
-// ---------------------------------------------------------------------------
-
-fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        let v = into_value(value)?;
-        arr.push(v);
-        Ok(())
-    } else {
-        Err(unsupported_op(item, "append()"))
-    }
-}
-
-fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        let resolved = clamp_index(index, arr.len());
-        let v = into_value(value)?;
-        arr.insert(resolved, v);
-        Ok(())
-    } else {
-        Err(unsupported_op(item, "insert()"))
-    }
-}
-
-fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        for i in 0..arr.len() {
-            if let Some(v) = arr.get(i)
-                && equality::value_eq(v, value)?
-            {
-                arr.remove(i);
-                return Ok(());
-            }
-        }
-        Err(PyValueError::new_err("value not in array"))
-    } else {
-        Err(unsupported_op(item, "remove()"))
-    }
-}
-
-fn item_extend(item: &mut ItemRs, items: Vec<Item>, op: &str) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        for new_item in items {
-            let v = into_value(new_item)?;
-            arr.push(v);
-        }
-        Ok(())
-    } else {
-        Err(unsupported_op(item, op))
-    }
-}
-
-fn item_count(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<usize> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
-            let mut count = 0;
-            for v in arr.iter() {
-                if equality::value_eq(v, value)? {
-                    count += 1;
-                }
-            }
-            Ok(count)
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            if let Ok(other_dict) = value.cast::<PyDict>() {
-                let mut count = 0;
-                for table in aot.iter() {
-                    if equality::table_entries_eq(table.iter(), table.len(), other_dict)? {
-                        count += 1;
-                    }
-                }
-                Ok(count)
-            } else {
-                Ok(0)
-            }
-        }
-        _ => Err(unsupported_op(item, "count()")),
-    }
-}
-
-fn item_index(
-    item: &ItemRs,
-    value: &Bound<'_, PyAny>,
-    start: Option<i64>,
-    stop: Option<i64>,
-) -> PyResult<usize> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
-            let len = arr.len();
-            let start = clamp_index(start.unwrap_or(0), len);
-            let stop = clamp_index(stop.unwrap_or(len as i64), len);
-            for i in start..stop {
-                if let Some(v) = arr.get(i)
-                    && equality::value_eq(v, value)?
-                {
-                    return Ok(i);
-                }
-            }
-            Err(PyValueError::new_err("value not in array"))
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            let len = aot.len();
-            let start = clamp_index(start.unwrap_or(0), len);
-            let stop = clamp_index(stop.unwrap_or(len as i64), len);
-            if let Ok(other_dict) = value.cast::<PyDict>() {
-                for i in start..stop {
-                    if let Some(table) = aot.get(i)
-                        && equality::table_entries_eq(table.iter(), table.len(), other_dict)?
-                    {
-                        return Ok(i);
-                    }
-                }
-            }
-            Err(PyValueError::new_err("value not in array"))
-        }
-        _ => Err(unsupported_op(item, "index()")),
-    }
-}
-
-/// Clamp a signed index to `0..len` (negative counts from end, out-of-range clamps).
-fn clamp_index(index: i64, len: usize) -> usize {
-    let resolved = if index < 0 {
-        (len as i64 + index).max(0)
-    } else {
-        index.min(len as i64)
-    };
-    resolved as usize
-}
-
-fn item_clear(item: &mut ItemRs) -> PyResult<()> {
-    match item {
-        ItemRs::Table(table) => {
-            table.clear();
-            Ok(())
-        }
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            it.clear();
-            Ok(())
-        }
-        ItemRs::Value(ValueRs::Array(arr)) => {
-            arr.clear();
-            Ok(())
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            aot.clear();
-            Ok(())
-        }
-        _ => Err(unsupported_op(item, "clear()")),
-    }
-}
-
-/// Normalize formatting of a single item (shallow).
-fn item_fmt(item: &mut ItemRs) {
-    match item {
-        ItemRs::Table(table) => table.fmt(),
-        ItemRs::Value(ValueRs::InlineTable(it)) => it.fmt(),
-        ItemRs::Value(ValueRs::Array(arr)) => arr.fmt(),
-        _ => {} // ArrayOfTables, scalars: no-op
     }
 }

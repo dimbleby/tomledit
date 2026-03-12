@@ -7,7 +7,6 @@ from types import MappingProxyType
 
 import pytest
 
-from tests.conftest import make_doc
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -16,51 +15,41 @@ from tomledit import Document
 
 
 class TestDocumentDictProtocol:
-    def test_contains(self) -> None:
-        doc = make_doc()
+    def test_contains(self, doc: Document) -> None:
         assert "title" in doc
         assert "nonexistent" not in doc
 
-    def test_len(self) -> None:
-        doc = make_doc()
+    def test_len(self, doc: Document) -> None:
         assert len(doc) == 4  # title, owner, database, servers
 
-    def test_iter(self) -> None:
-        doc = make_doc()
+    def test_iter(self, doc: Document) -> None:
         keys = list(doc)
         assert "title" in keys
         assert "owner" in keys
 
-    def test_keys(self) -> None:
-        doc = make_doc()
+    def test_keys(self, doc: Document) -> None:
         assert set(doc.keys()) == {"title", "owner", "database", "servers"}
 
-    def test_del(self) -> None:
-        doc = make_doc()
+    def test_del(self, doc: Document) -> None:
         del doc["title"]
         assert "title" not in doc
 
-    def test_pop(self) -> None:
-        doc = make_doc()
+    def test_pop(self, doc: Document) -> None:
         doc.pop("title")
         assert "title" not in doc
 
-    def test_clear(self) -> None:
-        doc = make_doc()
+    def test_clear(self, doc: Document) -> None:
         doc.clear()
         assert len(doc) == 0
 
-    def test_get_existing(self) -> None:
-        doc = make_doc()
+    def test_get_existing(self, doc: Document) -> None:
         item = doc.get("title")
         assert item is not None
 
-    def test_get_missing(self) -> None:
-        doc = make_doc()
+    def test_get_missing(self, doc: Document) -> None:
         assert doc.get("nope") is None
 
-    def test_getitem_missing_raises(self) -> None:
-        doc = make_doc()
+    def test_getitem_missing_raises(self, doc: Document) -> None:
         with pytest.raises(KeyError):
             doc["nope"]
 
@@ -128,8 +117,7 @@ class TestDocumentValue:
         doc = Document()
         assert doc.value == {}
 
-    def test_complex(self) -> None:
-        doc = make_doc()
+    def test_complex(self, doc: Document) -> None:
         v = doc.value
         assert v["title"] == "Example"
         assert v["owner"] == {"name": "Alice", "age": 30, "active": True}

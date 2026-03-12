@@ -6,7 +6,6 @@ from datetime import date, datetime, time, timezone
 
 import pytest
 
-from tests.conftest import make_doc
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -15,12 +14,10 @@ from tomledit import Document
 
 
 class TestProxyLen:
-    def test_table_len(self) -> None:
-        doc = make_doc()
+    def test_table_len(self, doc: Document) -> None:
         assert len(doc["owner"]) == 3  # name, age, active
 
-    def test_array_len(self) -> None:
-        doc = make_doc()
+    def test_array_len(self, doc: Document) -> None:
         assert len(doc["database"]["ports"]) == 3
 
     def test_empty_array_len(self) -> None:
@@ -31,8 +28,7 @@ class TestProxyLen:
         doc = Document.parse("meta = {x = 1, y = 2}\n")
         assert len(doc["meta"]) == 2
 
-    def test_scalar_len_raises(self) -> None:
-        doc = make_doc()
+    def test_scalar_len_raises(self, doc: Document) -> None:
         with pytest.raises(TypeError):
             len(doc["title"])
 
@@ -54,8 +50,7 @@ class TestProxyLen:
 
 
 class TestProxyIter:
-    def test_table_iter_yields_keys(self) -> None:
-        doc = make_doc()
+    def test_table_iter_yields_keys(self, doc: Document) -> None:
         keys = list(doc["owner"])
         assert set(keys) == {"name", "age", "active"}
 
@@ -64,8 +59,7 @@ class TestProxyIter:
         keys = list(doc["meta"])
         assert set(keys) == {"x", "y"}
 
-    def test_array_iter_yields_proxies(self) -> None:
-        doc = make_doc()
+    def test_array_iter_yields_proxies(self, doc: Document) -> None:
         elems = list(doc["database"]["ports"])
         assert len(elems) == 3
         assert elems[0] == 8001
@@ -82,8 +76,7 @@ class TestProxyIter:
         doc = Document.parse("arr = []\n")
         assert list(doc["arr"]) == []
 
-    def test_scalar_iter_raises(self) -> None:
-        doc = make_doc()
+    def test_scalar_iter_raises(self, doc: Document) -> None:
         with pytest.raises(TypeError):
             iter(doc["title"])
 
@@ -106,8 +99,7 @@ class TestProxyIter:
 
 
 class TestProxyContains:
-    def test_table_contains_key(self) -> None:
-        doc = make_doc()
+    def test_table_contains_key(self, doc: Document) -> None:
         assert "name" in doc["owner"]
         assert "email" not in doc["owner"]
 
@@ -116,8 +108,7 @@ class TestProxyContains:
         assert "x" in doc["meta"]
         assert "z" not in doc["meta"]
 
-    def test_array_contains_value(self) -> None:
-        doc = make_doc()
+    def test_array_contains_value(self, doc: Document) -> None:
         assert 8001 in doc["database"]["ports"]
         assert 9999 not in doc["database"]["ports"]
 
@@ -156,8 +147,7 @@ class TestProxyBool:
         doc = Document.parse("arr = []\n")
         assert bool(doc["arr"]) is False
 
-    def test_nonempty_array_truthy(self) -> None:
-        doc = make_doc()
+    def test_nonempty_array_truthy(self, doc: Document) -> None:
         assert bool(doc["database"]["ports"]) is True
 
     def test_zero_int_falsy(self) -> None:
@@ -229,14 +219,12 @@ class TestProxyBool:
 
 
 class TestProxyDelitem:
-    def test_del_table_key(self) -> None:
-        doc = make_doc()
+    def test_del_table_key(self, doc: Document) -> None:
         del doc["owner"]["active"]
         assert "active" not in doc["owner"]
         assert len(doc["owner"]) == 2
 
-    def test_del_array_element(self) -> None:
-        doc = make_doc()
+    def test_del_array_element(self, doc: Document) -> None:
         del doc["database"]["ports"][0]
         assert len(doc["database"]["ports"]) == 2
 
@@ -245,13 +233,11 @@ class TestProxyDelitem:
         del doc["meta"]["x"]
         assert "x" not in doc["meta"]
 
-    def test_del_missing_table_key_raises(self) -> None:
-        doc = make_doc()
+    def test_del_missing_table_key_raises(self, doc: Document) -> None:
         with pytest.raises(KeyError):
             del doc["owner"]["nonexistent"]
 
-    def test_del_array_out_of_bounds_raises(self) -> None:
-        doc = make_doc()
+    def test_del_array_out_of_bounds_raises(self, doc: Document) -> None:
         with pytest.raises(IndexError):
             del doc["database"]["ports"][99]
 
@@ -279,18 +265,15 @@ class TestProxyDelitem:
 
 
 class TestProxyRepr:
-    def test_repr_includes_type(self) -> None:
-        doc = make_doc()
+    def test_repr_includes_type(self, doc: Document) -> None:
         r = repr(doc["owner"])
         assert "Item" in r
 
-    def test_repr_includes_content(self) -> None:
-        doc = make_doc()
+    def test_repr_includes_content(self, doc: Document) -> None:
         r = repr(doc["title"])
         assert "Example" in r
 
-    def test_repr_scalar(self) -> None:
-        doc = make_doc()
+    def test_repr_scalar(self, doc: Document) -> None:
         r = repr(doc["owner"]["age"])
         assert "30" in r
 

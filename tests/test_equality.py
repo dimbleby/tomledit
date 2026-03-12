@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from tests.conftest import SAMPLE, make_doc
 from tomledit import Document
@@ -313,6 +313,30 @@ class TestEqualityEdgeCases:
     def test_bool_not_equal_to_string(self) -> None:
         doc = Document.parse("flag = true\n")
         assert doc["flag"] != "true"
+
+    def test_date_only_equals_python_date(self) -> None:
+        doc = Document.parse("d = 2024-01-15\n")
+        assert doc["d"] == date(2024, 1, 15)
+
+    def test_date_only_not_equals_different_date(self) -> None:
+        doc = Document.parse("d = 2024-01-15\n")
+        assert doc["d"] != date(2025, 6, 1)
+
+    def test_time_only_equals_python_time(self) -> None:
+        doc = Document.parse("t = 10:30:00\n")
+        assert doc["t"] == time(10, 30, 0)
+
+    def test_time_only_not_equals_different_time(self) -> None:
+        doc = Document.parse("t = 10:30:00\n")
+        assert doc["t"] != time(11, 0, 0)
+
+    def test_reverse_date_equality(self) -> None:
+        doc = Document.parse("d = 2024-01-15\n")
+        assert date(2024, 1, 15) == doc["d"]
+
+    def test_reverse_time_equality(self) -> None:
+        doc = Document.parse("t = 10:30:00\n")
+        assert time(10, 30, 0) == doc["t"]
 
     def test_datetime_equality_with_non_utc_offset(self) -> None:
         """Proxy datetime == Python datetime with matching non-UTC offset."""

@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDateTime, PyDict, PyList, PyString};
+use pyo3::types::{PyBool, PyDate, PyDateAccess, PyDateTime, PyDict, PyList, PyString, PyTime, PyTimeAccess};
 use toml_edit::Item as ItemRs;
 
 use crate::value::Datetime;
@@ -115,6 +115,27 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
             if let Ok(py_dt) = other.cast::<PyDateTime>() {
                 let other_dt: Datetime = py_dt.extract()?;
                 return Ok(datetime_eq(dt.value(), &other_dt.0));
+            }
+            if let Ok(py_date) = other.cast::<PyDate>() {
+                if let (Some(d), None, None) = (&dt.value().date, &dt.value().time, &dt.value().offset) {
+                    return Ok(
+                        d.year == py_date.get_year() as u16
+                            && d.month == py_date.get_month()
+                            && d.day == py_date.get_day(),
+                    );
+                }
+                return Ok(false);
+            }
+            if let Ok(py_time) = other.cast::<PyTime>() {
+                if let (None, Some(t), None) = (&dt.value().date, &dt.value().time, &dt.value().offset) {
+                    return Ok(
+                        t.hour == py_time.get_hour()
+                            && t.minute == py_time.get_minute()
+                            && t.second.unwrap_or(0) == py_time.get_second()
+                            && t.nanosecond.unwrap_or(0) == (py_time.get_microsecond() * 1000),
+                    );
+                }
+                return Ok(false);
             }
         }
         toml_edit::Value::Array(arr) => {

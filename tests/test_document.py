@@ -267,6 +267,11 @@ class TestDocumentFmt:
         doc.fmt()
         assert str(doc) == "[t]\n  x  =  1\n"
 
+    def test_fmt_strips_comments(self) -> None:
+        doc = Document.parse("# comment\na = 1 # inline\n")
+        doc.fmt()
+        assert str(doc) == "a = 1\n"
+
 
 # ---------------------------------------------------------------------------
 # copy / deepcopy

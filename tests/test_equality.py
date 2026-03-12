@@ -32,6 +32,14 @@ class TestStr:
         doc["owner"]["age"] = 99
         assert str(doc["owner"]["age"]) == "99"
 
+    def test_proxy_str_float(self) -> None:
+        doc = Document.parse("x = 3.14\n")
+        assert str(doc["x"]) == "3.14"
+
+    def test_proxy_str_bool(self) -> None:
+        doc = Document.parse("x = true\n")
+        assert str(doc["x"]) == "True"
+
 
 # ---------------------------------------------------------------------------
 # Equality semantics
@@ -298,6 +306,16 @@ class TestEqualityEdgeCases:
     def test_time_only_not_equal_to_int(self) -> None:
         doc = Document.parse("t = 10:30:00\n")
         assert doc["t"] != 1030
+
+    def test_full_datetime_not_equal_to_date(self) -> None:
+        """A TOML datetime (with time component) should not equal a Python date."""
+        doc = Document.parse("dt = 2024-01-15T10:30:00\n")
+        assert doc["dt"] != date(2024, 1, 15)
+
+    def test_full_datetime_not_equal_to_time(self) -> None:
+        """A TOML datetime (with date component) should not equal a Python time."""
+        doc = Document.parse("dt = 2024-01-15T10:30:00\n")
+        assert doc["dt"] != time(10, 30, 0)
 
     def test_array_not_equal_to_string(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")

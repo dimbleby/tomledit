@@ -746,6 +746,17 @@ fn item_repr(item: &ItemRs) -> String {
 }
 
 fn item_str(item: &ItemRs, py: Python<'_>) -> PyResult<String> {
+    // Fast path for scalars: avoid Python object allocation + __str__ call.
+    if let ItemRs::Value(v) = item {
+        match v {
+            ValueRs::String(s) => return Ok(s.value().to_owned()),
+            ValueRs::Integer(i) => return Ok(i.value().to_string()),
+            ValueRs::Float(f) => return Ok(f.value().to_string()),
+            ValueRs::Boolean(b) => return Ok(if *b.value() { "True" } else { "False" }.to_owned()),
+            _ => {}
+        }
+    }
+    // Complex types (datetime, table, array, AoT): fall through to Python.
     let obj = item_to_py(item, py)?;
     obj.call_method0(py, "__str__")?.extract::<String>(py)
 }

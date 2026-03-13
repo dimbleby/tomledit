@@ -65,6 +65,9 @@ class TestProxyDictMethods:
     def test_pop_missing_with_default(self, doc: Document) -> None:
         assert doc["owner"].pop("nonexistent", 42) == 42
 
+    def test_proxy_pop_missing_with_none_default(self, doc: Document) -> None:
+        assert doc["owner"].pop("nonexistent", None) is None
+
     def test_pop_existing_ignores_default(self, doc: Document) -> None:
         val = doc["owner"].pop("age", 99)
         assert val == 30
@@ -190,6 +193,20 @@ class TestPopWithDefault:
         val = doc.pop("y", 42)
         assert val == 42
         assert "y" not in doc
+
+    def test_document_pop_missing_with_none_default(self) -> None:
+        doc = Document.parse("x = 1\n")
+        assert doc.pop("y", None) is None
+
+    def test_document_pop_too_many_args(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError, match="at most 2 arguments"):
+            doc.pop("x", 1, 2)  # type: ignore[call-overload]
+
+    def test_proxy_pop_too_many_args(self) -> None:
+        doc = Document.parse("[owner]\nname = 'Tom'\n")
+        with pytest.raises(TypeError, match="at most 2 arguments"):
+            doc["owner"].pop("name", 1, 2)  # type: ignore[call-overload]
 
 
 # ---------------------------------------------------------------------------

@@ -85,8 +85,6 @@ class Item:
     @overload
     def pop(self, key: int, /) -> Any: ...  # list-like
     @overload
-    def pop(self, key: int, default: _T, /) -> Any | _T: ...  # list-like
-    @overload
     def pop(self, /) -> Any: ...  # list-like
     @overload
     def update(self, other: Mapping[str, Any], /, **kwargs: Any) -> None: ...

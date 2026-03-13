@@ -12,6 +12,13 @@ use crate::item::Item;
 // ---------------------------------------------------------------------------
 
 pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: Item) {
+    // Tables and ArrayOfTables must stay as-is; into_value() would convert
+    // a standard Table ([foo]) into an InlineTable (foo = {}).
+    if value.0.is_table() || value.0.is_array_of_tables() {
+        item[key] = value.0;
+        return;
+    }
+
     let old_decor = item
         .get(key)
         .and_then(|e| e.as_value())

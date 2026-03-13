@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Assigning a dict now creates a standard `[table]`, not an inline table.
+
 ## 0.9.0 (13 March 2026)
 
 - Support more list-like methods: `index()`, `count()`, `__iadd__()`.

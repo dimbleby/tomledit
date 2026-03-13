@@ -354,6 +354,53 @@ class TestAssignTableToKey:
         doc["s"]["inner"] = {"b": 2}
         assert doc["s"]["inner"]["b"] == 2
 
+    def test_assign_empty_dict_creates_standard_table(self) -> None:
+        """Assigning {} to a top-level key produces a [table] header, not inline."""
+        doc = Document.parse("")
+        doc["foo"] = {}
+        assert str(doc) == "[foo]\n"
+
+    def test_assign_dict_creates_standard_table(self) -> None:
+        """Assigning a dict with values produces a [table] section."""
+        doc = Document.parse("")
+        doc["foo"] = {"bar": 1, "baz": "hello"}
+        result = str(doc)
+        assert "[foo]" in result
+        assert "bar = 1" in result
+        assert 'baz = "hello"' in result
+
+    def test_assign_nested_dict_creates_dotted_table(self) -> None:
+        """Assigning a dict inside a table creates a dotted [parent.child] header."""
+        doc = Document.parse("[existing]\nkey = 1\n")
+        doc["existing"]["nested"] = {"a": 2}
+        result = str(doc)
+        assert "[existing.nested]" in result
+        assert "a = 2" in result
+
+    def test_existing_inline_table_stays_inline(self) -> None:
+        """Mutating an already-inline table preserves inline format."""
+        doc = Document.parse("foo = { bar = 1 }\n")
+        doc["foo"]["bar"] = 2
+        assert str(doc) == "foo = { bar = 2 }\n"
+
+    def test_assign_list_of_dicts_creates_array_of_tables(self) -> None:
+        """Assigning a list of dicts produces [[table]] headers, not inline."""
+        doc = Document.parse("")
+        doc["servers"] = [{"name": "alpha"}, {"name": "beta"}]
+        result = str(doc)
+        assert result.count("[[servers]]") == 2
+        assert 'name = "alpha"' in result
+        assert 'name = "beta"' in result
+
+    def test_assign_nested_list_of_dicts_creates_dotted_aot(self) -> None:
+        """Assigning a list of dicts inside a table creates [[parent.child]]."""
+        doc = Document.parse("[project]\nname = \"foo\"\n")
+        doc["project"]["authors"] = [{"name": "Alice"}, {"name": "Bob"}]
+        result = str(doc)
+        assert result.count("[[project.authors]]") == 2
+        assert 'name = "Alice"' in result
+        assert 'name = "Bob"' in result
+
 
 # ---------------------------------------------------------------------------
 # Assign Item (proxy) as a value

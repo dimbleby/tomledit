@@ -101,91 +101,91 @@ class TestWriteArrayElements:
 
 class TestSetNewKeys:
     def test_add_string(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["name"] = "hello"
         assert doc["name"] == "hello"
 
     def test_add_int(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["count"] = 42
         assert doc["count"] == 42
 
     def test_add_float(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["gravity"] = 9.81
         assert doc["gravity"] == 9.81
 
     def test_add_bool(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["flag"] = True
         assert doc["flag"] == True  # noqa: E712
 
     def test_add_list(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["items"] = [1, 2, 3]
         assert doc["items"][0] == 1
         assert doc["items"][2] == 3
 
     def test_add_dict(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["meta"] = {"key": "value"}
         assert doc["meta"]["key"] == "value"
 
     def test_add_nested_dict(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["a"] = {"b": {"c": "deep"}}
         assert doc["a"]["b"]["c"] == "deep"
 
     def test_add_list_of_dicts(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["entries"] = [{"x": 1}, {"x": 2}]
         assert doc["entries"][0]["x"] == 1
         assert doc["entries"][1]["x"] == 2
 
     def test_add_mixed_list(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["mix"] = [1, "two", 3.0]
         assert doc["mix"][0] == 1
         assert doc["mix"][1] == "two"
         assert doc["mix"][2] == 3.0
 
     def test_add_datetime(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         chicago = zoneinfo.ZoneInfo("America/Chicago")
         now = datetime(2026, 1, 15, 12, 30, 0, tzinfo=chicago)
         doc["ts"] = now
         assert "2026-01-15" in str(doc["ts"])
 
     def test_add_date(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         value = date(2024, 1, 15)
         doc["d"] = value
         assert doc["d"].value == value
         assert str(doc) == "d = 2024-01-15\n"
 
     def test_add_time(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         value = time(10, 30, 45)
         doc["t"] = value
         assert doc["t"].value == value
         assert str(doc) == "t = 10:30:45\n"
 
     def test_add_time_with_microseconds(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         value = time(10, 30, 45, 123456)
         doc["t"] = value
         assert doc["t"].value == value
         assert str(doc) == "t = 10:30:45.123456\n"
 
     def test_add_time_with_tzinfo_raises(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         utc = zoneinfo.ZoneInfo("UTC")
         value = time(10, 30, 45, tzinfo=utc)
         with pytest.raises(TypeError, match="TOML local times"):
             doc["t"] = value
 
     def test_add_datetime_zero_microseconds(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         value = datetime(2024, 1, 15, 12, 0, 0, 0)  # noqa: DTZ001
         doc["ts"] = value
         assert str(doc) == "ts = 2024-01-15T12:00:00\n"
@@ -198,13 +198,13 @@ class TestSetNewKeys:
 
 class TestArrayOfTablesMutation:
     def test_set_element_to_scalar(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["d"] = [{"a": 1}, {"b": 2}]
         doc["d"][0] = 7
         assert doc["d"][0] == 7
 
     def test_set_nested_value_in_table(self) -> None:
-        doc = Document.parse("")
+        doc = Document()
         doc["d"] = [{"a": 1}, {"b": 2}]
         doc["d"][1]["b"] = 99
         assert doc["d"][1]["b"] == 99
@@ -356,13 +356,13 @@ class TestAssignTableToKey:
 
     def test_assign_empty_dict_creates_standard_table(self) -> None:
         """Assigning {} to a top-level key produces a [table] header, not inline."""
-        doc = Document.parse("")
+        doc = Document()
         doc["foo"] = {}
         assert str(doc) == "[foo]\n"
 
     def test_assign_dict_creates_standard_table(self) -> None:
         """Assigning a dict with values produces a [table] section."""
-        doc = Document.parse("")
+        doc = Document()
         doc["foo"] = {"bar": 1, "baz": "hello"}
         result = str(doc)
         assert "[foo]" in result
@@ -385,7 +385,7 @@ class TestAssignTableToKey:
 
     def test_assign_list_of_dicts_creates_array_of_tables(self) -> None:
         """Assigning a list of dicts produces [[table]] headers, not inline."""
-        doc = Document.parse("")
+        doc = Document()
         doc["servers"] = [{"name": "alpha"}, {"name": "beta"}]
         result = str(doc)
         assert result.count("[[servers]]") == 2
@@ -394,7 +394,7 @@ class TestAssignTableToKey:
 
     def test_assign_nested_list_of_dicts_creates_dotted_aot(self) -> None:
         """Assigning a list of dicts inside a table creates [[parent.child]]."""
-        doc = Document.parse("[project]\nname = \"foo\"\n")
+        doc = Document.parse('[project]\nname = "foo"\n')
         doc["project"]["authors"] = [{"name": "Alice"}, {"name": "Bob"}]
         result = str(doc)
         assert result.count("[[project.authors]]") == 2

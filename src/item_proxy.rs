@@ -515,8 +515,10 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_ops::apply_update_pairs(item, pairs)?;
-        self.bump_generation(&mut doc);
+        let replaced = item_ops::apply_update_pairs(item, pairs)?;
+        if replaced {
+            self.bump_generation(&mut doc);
+        }
         Ok(())
     }
 

@@ -36,10 +36,16 @@ class TestStaleProxyDetection:
         with pytest.raises(RuntimeError, match="stale"):
             _ = proxy.value
 
-    def test_stale_after_update_on_doc(self) -> None:
+    def test_valid_after_additive_update_on_doc(self) -> None:
         doc = Document.parse("x = 1")
         proxy = doc["x"]
         doc.update({"y": 2})
+        assert proxy.value == 1
+
+    def test_stale_after_replacing_update_on_doc(self) -> None:
+        doc = Document.parse("x = 1")
+        proxy = doc["x"]
+        doc.update({"x": 2})
         with pytest.raises(RuntimeError, match="stale"):
             _ = proxy.value
 
@@ -141,11 +147,18 @@ class TestStaleProxyViaProxy:
         with pytest.raises(RuntimeError, match="stale"):
             _ = item.value
 
-    def test_stale_after_proxy_update(self) -> None:
+    def test_valid_after_additive_proxy_update(self) -> None:
         doc = Document.parse("[t]\na = 1")
         a = doc["t"]["a"]
         t = doc["t"]
         t.update({"b": 2})
+        assert a.value == 1
+
+    def test_stale_after_replacing_proxy_update(self) -> None:
+        doc = Document.parse("[t]\na = 1")
+        a = doc["t"]["a"]
+        t = doc["t"]
+        t.update({"a": 2})
         with pytest.raises(RuntimeError, match="stale"):
             _ = a.value
 

@@ -156,6 +156,40 @@ class TestSetNewKeys:
         doc["ts"] = now
         assert "2026-01-15" in str(doc["ts"])
 
+    def test_add_date(self) -> None:
+        doc = Document.parse("")
+        value = date(2024, 1, 15)
+        doc["d"] = value
+        assert doc["d"].value == value
+        assert str(doc) == "d = 2024-01-15\n"
+
+    def test_add_time(self) -> None:
+        doc = Document.parse("")
+        value = time(10, 30, 45)
+        doc["t"] = value
+        assert doc["t"].value == value
+        assert str(doc) == "t = 10:30:45\n"
+
+    def test_add_time_with_microseconds(self) -> None:
+        doc = Document.parse("")
+        value = time(10, 30, 45, 123456)
+        doc["t"] = value
+        assert doc["t"].value == value
+        assert str(doc) == "t = 10:30:45.123456\n"
+
+    def test_add_time_with_tzinfo_raises(self) -> None:
+        doc = Document.parse("")
+        utc = zoneinfo.ZoneInfo("UTC")
+        value = time(10, 30, 45, tzinfo=utc)
+        with pytest.raises(TypeError, match="TOML local times"):
+            doc["t"] = value
+
+    def test_add_datetime_zero_microseconds(self) -> None:
+        doc = Document.parse("")
+        value = datetime(2024, 1, 15, 12, 0, 0, 0)  # noqa: DTZ001
+        doc["ts"] = value
+        assert str(doc) == "ts = 2024-01-15T12:00:00\n"
+
 
 # ---------------------------------------------------------------------------
 # Chained mutation on array-of-tables

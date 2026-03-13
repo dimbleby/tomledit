@@ -3,12 +3,13 @@
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{
-    PyBool, PyDateAccess, PyDateTime, PyDelta, PyDeltaAccess, PyFloat, PyInt, PyList, PyMapping,
-    PySequence, PyString, PyTimeAccess, PyTuple,
+    PyBool, PyDate, PyDateAccess, PyDateTime, PyDelta, PyDeltaAccess, PyFloat, PyInt, PyList,
+    PyMapping, PySequence, PyString, PyTime, PyTimeAccess, PyTuple,
 };
 use toml_edit::{
-    Array as ArrayRs, ArrayOfTables as ArrayOfTablesRs, Date, Datetime as DatetimeRs,
-    InlineTable as InlineTableRs, Offset, Table as TableRs, Time, Value as ValueRs,
+    Array as ArrayRs, ArrayOfTables as ArrayOfTablesRs, Date as DateRs, Datetime as DatetimeRs,
+    InlineTable as InlineTableRs, Offset as OffsetRs, Table as TableRs, Time as TimeRs,
+    Value as ValueRs,
 };
 
 // ---------------------------------------------------------------------------
@@ -22,17 +23,18 @@ impl<'py> FromPyObject<'_, 'py> for Datetime {
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         let py_datetime = obj.cast::<PyDateTime>()?;
+        let microsecond = py_datetime.get_microsecond();
 
-        let date = Date {
+        let date = DateRs {
             year: py_datetime.get_year() as u16,
             month: py_datetime.get_month(),
             day: py_datetime.get_day(),
         };
-        let time = Time {
+        let time = TimeRs {
             hour: py_datetime.get_hour(),
             minute: py_datetime.get_minute(),
             second: Some(py_datetime.get_second()),
-            nanosecond: Some(1000 * py_datetime.get_microsecond()),
+            nanosecond: (microsecond != 0).then_some(1000 * microsecond),
         };
 
         // TOML only supports minute-precision UTC offsets; any sub-minute
@@ -44,13 +46,63 @@ impl<'py> FromPyObject<'_, 'py> for Datetime {
                 let days = delta.get_days();
                 let seconds = delta.get_seconds();
                 let minutes = ((60 * 24 * days) + (seconds / 60)) as i16;
-                Offset::Custom { minutes }
+                OffsetRs::Custom { minutes }
             });
 
         Ok(Self(DatetimeRs {
             date: Some(date),
             time: Some(time),
             offset,
+        }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Date
+// ---------------------------------------------------------------------------
+
+pub(crate) struct Date(pub(crate) DateRs);
+
+impl<'py> FromPyObject<'_, 'py> for Date {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
+        let py_date = obj.cast::<PyDate>()?;
+        Ok(Self(DateRs {
+            year: py_date.get_year() as u16,
+            month: py_date.get_month(),
+            day: py_date.get_day(),
+        }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Time
+// ---------------------------------------------------------------------------
+
+pub(crate) struct Time(pub(crate) TimeRs);
+
+impl<'py> FromPyObject<'_, 'py> for Time {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
+        let py_time = obj.cast::<PyTime>()?;
+        let microsecond = py_time.get_microsecond();
+        if py_time
+            .call_method0("utcoffset")?
+            .extract::<Option<Bound<'py, PyDelta>>>()?
+            .is_some()
+        {
+            return Err(PyTypeError::new_err(
+                "TOML local times cannot have timezone information",
+            ));
+        }
+
+        Ok(Self(TimeRs {
+            hour: py_time.get_hour(),
+            minute: py_time.get_minute(),
+            second: Some(py_time.get_second()),
+            nanosecond: (microsecond != 0).then_some(1000 * microsecond),
         }))
     }
 }
@@ -147,9 +199,28 @@ impl<'py> FromPyObject<'_, 'py> for Value {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
+        // Check datetime before date (Python datetime is a subclass of date)
         if let Ok(py_datetime) = obj.cast::<PyDateTime>() {
             let datetime: Datetime = py_datetime.extract()?;
             return Ok(Self(ValueRs::from(datetime.0)));
+        }
+
+        if let Ok(py_date) = obj.cast::<PyDate>() {
+            let date: Date = py_date.extract()?;
+            return Ok(Self(ValueRs::from(DatetimeRs {
+                date: Some(date.0),
+                time: None,
+                offset: None,
+            })));
+        }
+
+        if let Ok(py_time) = obj.cast::<PyTime>() {
+            let time: Time = py_time.extract()?;
+            return Ok(Self(ValueRs::from(DatetimeRs {
+                date: None,
+                time: Some(time.0),
+                offset: None,
+            })));
         }
 
         if let Ok(py_str) = obj.cast::<PyString>() {

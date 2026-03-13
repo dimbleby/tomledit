@@ -38,15 +38,13 @@ impl<'py> FromPyObject<'_, 'py> for Datetime {
         // TOML only supports minute-precision UTC offsets; any sub-minute
         // component of the Python tzinfo is truncated by integer division.
         let offset = py_datetime
-            .call_method0("utcoffset")
-            .ok()
-            .and_then(|delta| {
-                delta.cast::<PyDelta>().ok().map(|d| {
-                    let days = d.get_days();
-                    let seconds = d.get_seconds();
-                    let minutes = ((60 * 24 * days) + (seconds / 60)) as i16;
-                    Offset::Custom { minutes }
-                })
+            .call_method0("utcoffset")?
+            .extract::<Option<Bound<'py, PyDelta>>>()?
+            .map(|delta| {
+                let days = delta.get_days();
+                let seconds = delta.get_seconds();
+                let minutes = ((60 * 24 * days) + (seconds / 60)) as i16;
+                Offset::Custom { minutes }
             });
 
         Ok(Self(DatetimeRs {
@@ -191,7 +189,7 @@ impl<'py> FromPyObject<'_, 'py> for Value {
 
         let name = obj.get_type().name()?;
         let text = format!(
-            "Could not convert object of type '{}' to value",
+            "Could not convert object of type '{}' to TOML value",
             name.to_str()?
         );
         Err(PyTypeError::new_err(text))

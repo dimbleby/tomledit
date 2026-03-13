@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyIterator};
+use pyo3::types::{PyDict, PyIterator, PyTuple};
 
 use toml_edit::DocumentMut as DocumentRs;
 
@@ -155,13 +155,26 @@ impl Document {
         Ok(())
     }
 
-    #[pyo3(signature = (key, default=None, /))]
+    #[pyo3(signature = (key, /, *default))]
     pub fn pop(
         &mut self,
         py: Python<'_>,
         key: &str,
-        default: Option<Py<PyAny>>,
+        default: &Bound<'_, PyTuple>,
     ) -> PyResult<Py<PyAny>> {
+        if default.len() > 1 {
+            return Err(PyTypeError::new_err(format!(
+                "pop expected at most 2 arguments, got {}",
+                1 + default.len()
+            )));
+        }
+
+        let default = if default.is_empty() {
+            None
+        } else {
+            Some(default.get_item(0)?.unbind())
+        };
+
         match self.inner.remove(key) {
             Some(item) => {
                 self.bump();

@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyIterator, PySlice};
+use pyo3::types::{PyDict, PyIterator, PySlice, PyTuple};
 use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
@@ -447,17 +447,41 @@ impl ItemProxy {
         }
     }
 
-    #[pyo3(signature = (key=None, default=None, /))]
-    pub fn pop(
-        &mut self,
-        py: Python<'_>,
-        key: Option<&Bound<'_, PyAny>>,
-        default: Option<Py<PyAny>>,
-    ) -> PyResult<Py<PyAny>> {
+    #[pyo3(signature = (*args))]
+    pub fn pop(&mut self, py: Python<'_>, args: &Bound<'_, PyTuple>) -> PyResult<Py<PyAny>> {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        match item_ops::item_pop(item, key) {
+
+        let max_args: usize = if matches!(
+            item,
+            ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_)
+        ) {
+            1
+        } else {
+            2
+        };
+        if args.len() > max_args {
+            return Err(PyTypeError::new_err(format!(
+                "pop expected at most {} argument{}, got {}",
+                max_args,
+                if max_args == 1 { "" } else { "s" },
+                args.len()
+            )));
+        }
+
+        let key_obj = if args.is_empty() {
+            None
+        } else {
+            Some(args.get_item(0)?)
+        };
+        let default = if args.len() == 2 {
+            Some(args.get_item(1)?.unbind())
+        } else {
+            None
+        };
+
+        match item_ops::item_pop(item, key_obj.as_ref()) {
             Ok(removed) => {
                 let result = item_ops::item_to_py(&removed.0, py)?;
                 self.bump_generation(&mut doc);

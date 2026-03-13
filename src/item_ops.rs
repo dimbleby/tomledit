@@ -567,6 +567,10 @@ pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyR
                 let idx = resolve_index(key_obj.extract::<i64>()?, arr.len())?;
                 Ok(Item(ItemRs::Value(arr.remove(idx))))
             }
+            ItemRs::ArrayOfTables(aot) => {
+                let idx = resolve_index(key_obj.extract::<i64>()?, aot.len())?;
+                Ok(Item(ItemRs::Table(aot.remove(idx))))
+            }
             _ => Err(unsupported_op(item, "pop()")),
         },
         None => match item {
@@ -576,6 +580,13 @@ pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyR
                 }
                 let last = arr.len() - 1;
                 Ok(Item(ItemRs::Value(arr.remove(last))))
+            }
+            ItemRs::ArrayOfTables(aot) => {
+                if aot.is_empty() {
+                    return Err(PyIndexError::new_err("pop from empty array"));
+                }
+                let last = aot.len() - 1;
+                Ok(Item(ItemRs::Table(aot.remove(last))))
             }
             _ => Err(PyTypeError::new_err(
                 "pop() with no argument is only supported on arrays",

@@ -58,6 +58,30 @@ class TestProxyListMethods:
         with pytest.raises(IndexError):
             doc["arr"].pop()
 
+    def test_pop_with_explicit_none_default_raises_type_error(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        with pytest.raises(TypeError, match="at most 1 argument"):
+            doc["arr"].pop(0, None)  # type: ignore[call-overload]
+
+    def test_pop_aot_last(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        val = doc["items"].pop()
+        assert val == {"name": "b"}
+        assert len(doc["items"]) == 1
+
+    def test_pop_aot_by_index(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        val = doc["items"].pop(0)
+        assert val == {"name": "a"}
+        assert len(doc["items"]) == 1
+        assert doc["items"][0] == {"name": "b"}
+
+    def test_pop_aot_empty_raises(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc["items"].pop()
+        with pytest.raises(IndexError):
+            doc["items"].pop()
+
     def test_remove_value(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
         doc["arr"].remove(2)

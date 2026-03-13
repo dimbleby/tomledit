@@ -5,6 +5,10 @@
 - Support more list-like methods: `index()`, `count()`, `__iadd__()`.
 - Fix equality comparisons for `datetime.date` and `datetime.time` values.
 - Faster `str()` conversion for scalar items (strings, ints, floats, bools).
+- Allow assigning `datetime.date` and `datetime.time` values.
+- Make `pop()` behave more like Python's built-ins.
+- Be less eager to invalidate `Item`s after additive `update()` calls.
+- Surface timezone-conversion errors when assigning `datetime` values.
 
 ## 0.8.0 (10 March 2026)
 

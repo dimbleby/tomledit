@@ -17,8 +17,12 @@ use toml_edit::{
 
 pub(crate) struct Datetime(pub(crate) DatetimeRs);
 
-impl From<Borrowed<'_, '_, PyDateTime>> for Datetime {
-    fn from(py_datetime: Borrowed<'_, '_, PyDateTime>) -> Self {
+impl<'py> FromPyObject<'_, 'py> for Datetime {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
+        let py_datetime = obj.cast::<PyDateTime>()?;
+
         let date = Date {
             year: py_datetime.get_year() as u16,
             month: py_datetime.get_month(),
@@ -45,20 +49,11 @@ impl From<Borrowed<'_, '_, PyDateTime>> for Datetime {
                 })
             });
 
-        Self(DatetimeRs {
+        Ok(Self(DatetimeRs {
             date: Some(date),
             time: Some(time),
             offset,
-        })
-    }
-}
-
-impl<'py> FromPyObject<'_, 'py> for Datetime {
-    type Error = PyErr;
-
-    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let py_datetime = obj.cast::<PyDateTime>()?;
-        Ok(Self::from(py_datetime))
+        }))
     }
 }
 

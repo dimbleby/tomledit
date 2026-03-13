@@ -266,11 +266,13 @@ impl Document {
         self.__copy__()
     }
 
-    /// Normalize the formatting of the entire document.
+    /// Normalize formatting of the document's top-level entries.
     ///
-    /// Re-applies standard TOML whitespace and trailing-comma rules.
-    /// Useful after a series of mutations that may leave inconsistent
-    /// spacing. Note: this removes comments.
+    /// This only reformats root-level key/value entries. It does not recurse
+    /// into nested tables or arrays; call `.fmt()` on a nested `Item` if you
+    /// want to reformat that value specifically.
+    /// Useful after mutations that leave awkward top-level whitespace.
+    /// Note: comments on formatted root-level entries are removed.
     pub fn fmt(&mut self) {
         self.inner.fmt();
     }

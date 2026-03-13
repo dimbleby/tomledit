@@ -205,8 +205,10 @@ impl Document {
             }
         }
         let mut doc = slf.borrow_mut();
-        item_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
-        doc.bump();
+        let replaced = item_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
+        if replaced {
+            doc.bump();
+        }
         Ok(())
     }
 

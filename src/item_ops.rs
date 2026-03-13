@@ -639,14 +639,21 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
 }
 
 /// Apply pre-extracted update pairs to an item.
-pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) -> PyResult<()> {
+///
+/// Returns `true` if any key replaced an entry that existed before the update.
+pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) -> PyResult<bool> {
     if !(item.is_table() || item.is_inline_table()) {
         return Err(unsupported_op(item, "update()"));
     }
+    let mut replaced = false;
     for (key, val) in pairs {
+        if !replaced {
+            replaced = item.as_table().is_some_and(|t| t.contains_key(&key))
+                || item.as_inline_table().is_some_and(|t| t.contains_key(&key));
+        }
         set_with_decor_preservation(item, &key, val);
     }
-    Ok(())
+    Ok(replaced)
 }
 
 // ---------------------------------------------------------------------------

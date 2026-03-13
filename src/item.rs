@@ -3,6 +3,7 @@ use crate::item_proxy::ItemProxy;
 use crate::value::{ArrayOfTables, Table, Value};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
+use pyo3::types::{PyList, PyMapping, PyTuple};
 use toml_edit::Item as ItemRs;
 
 pub(crate) struct Item(pub(crate) ItemRs);
@@ -27,24 +28,18 @@ impl<'py> FromPyObject<'_, 'py> for Item {
             ));
         }
 
-        if let Ok(table) = Table::extract(obj) {
-            let item = ItemRs::Table(table.0);
-            return Ok(Self(item));
+        if obj.cast::<PyMapping>().is_ok() {
+            let table = Table::extract(obj)?;
+            return Ok(Self(ItemRs::Table(table.0)));
         }
 
-        if let Ok(array_of_tables) = ArrayOfTables::extract(obj) {
-            let item = ItemRs::ArrayOfTables(array_of_tables.0);
-            return Ok(Self(item));
+        if (obj.is_instance_of::<PyList>() || obj.is_instance_of::<PyTuple>())
+            && let Ok(array_of_tables) = ArrayOfTables::extract(obj)
+        {
+            return Ok(Self(ItemRs::ArrayOfTables(array_of_tables.0)));
         }
 
-        if let Ok(value) = Value::extract(obj) {
-            let item = ItemRs::Value(value.0);
-            return Ok(Self(item));
-        }
-
-        let name = obj.get_type().name()?;
-        let string = name.to_str()?;
-        let text = format!("Could not convert object of type '{string}' to item");
-        Err(PyTypeError::new_err(text))
+        let value = Value::extract(obj)?;
+        Ok(Self(ItemRs::Value(value.0)))
     }
 }

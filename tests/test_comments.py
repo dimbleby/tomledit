@@ -205,6 +205,64 @@ class TestComment:
         assert doc["arr"][0].inline_comment == "# first"
         assert doc["arr"][1].inline_comment is None
 
+    # ---- inline comments transfer across arrays ----
+
+    def test_extend_transfers_inline_comment(self) -> None:
+        doc = Document()
+        doc["dst"] = ["a"]
+        doc["src"] = ["b", "c"]
+        doc["src"][0].inline_comment = "# from b"
+        doc["src"][1].inline_comment = "# from c"
+        doc["dst"].extend(doc["src"])
+        assert doc["dst"][1].inline_comment == "# from b"
+        assert doc["dst"][2].inline_comment == "# from c"
+
+    def test_append_transfers_inline_comment(self) -> None:
+        doc = Document.parse("src = [\n  1, # noted\n]\ndst = [0]\n")
+        doc["dst"].append(doc["src"][0])
+        assert doc["dst"][1].inline_comment == "# noted"
+
+    def test_insert_transfers_inline_comment(self) -> None:
+        doc = Document.parse("src = [\n  1, # noted\n]\ndst = [0, 2]\n")
+        doc["dst"].insert(1, doc["src"][0])
+        assert doc["dst"][0].inline_comment is None
+        assert doc["dst"][1].inline_comment == "# noted"
+        assert doc["dst"][2].inline_comment is None
+
+    def test_setitem_transfers_inline_comment(self) -> None:
+        doc = Document.parse("src = [\n  1, # noted\n]\ndst = [0, 2]\n")
+        doc["dst"][0] = doc["src"][0]
+        assert doc["dst"][0].inline_comment == "# noted"
+        assert doc["dst"][1].inline_comment is None
+
+    def test_setitem_preserves_existing_when_source_has_none(self) -> None:
+        doc = Document.parse("arr = [\n  1, # keep\n]\nplain = [99]\n")
+        doc["arr"][0] = doc["plain"][0]
+        assert doc["arr"][0].inline_comment == "# keep"
+
+    def test_extended_slice_transfers_inline_comment(self) -> None:
+        doc = Document.parse("src = [\n  1, # s1\n  2, # s2\n]\ndst = [0, 0, 0]\n")
+        doc["dst"][::2] = [doc["src"][0], doc["src"][1]]
+        assert doc["dst"][0].inline_comment == "# s1"
+        assert doc["dst"][1].inline_comment is None
+        assert doc["dst"][2].inline_comment == "# s2"
+
+    def test_iadd_transfers_inline_comment(self) -> None:
+        doc = Document()
+        doc["dst"] = [0]
+        doc["src"] = [1]
+        doc["src"][0].inline_comment = "# tag"
+        doc["dst"] += doc["src"]
+        assert doc["dst"][1].inline_comment == "# tag"
+
+    def test_scalar_inline_comment_transfers_to_array(self) -> None:
+        doc = Document()
+        doc["val"] = 42
+        doc["val"].inline_comment = "# answer"
+        doc["arr"] = [1]
+        doc["arr"].append(doc["val"])
+        assert doc["arr"][1].inline_comment == "# answer"
+
     # ---- insert preserves comments ----
 
     def test_insert_middle_preserves_prev_comment(self) -> None:

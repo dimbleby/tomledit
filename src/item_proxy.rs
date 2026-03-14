@@ -79,11 +79,24 @@ impl ItemProxy {
     }
 
     /// Clone the toml_edit item at this proxy's path.
+    ///
+    /// For array elements, the inline comment (stored externally in the array's
+    /// slot system) is embedded into the cloned value's decor suffix so that it
+    /// travels with the value when inserted into another array.
     pub(crate) fn clone_item(&self, py: Python<'_>) -> PyResult<ItemRs> {
         let doc = self.document.borrow(py);
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        Ok(item.clone())
+        let mut cloned = item.clone();
+        if let Some(Key::Int(idx)) = self.path.last() {
+            let parent = self.navigate_parent(&doc.inner)?;
+            if let Some(comment) = comments::get_array_item_comment(parent, *idx)
+                && let Some(v) = cloned.as_value_mut()
+            {
+                v.decor_mut().set_suffix(format!(" {comment}"));
+            }
+        }
+        Ok(cloned)
     }
 
     fn navigate<'a>(&self, doc: &'a DocumentRs) -> PyResult<&'a ItemRs> {
@@ -380,11 +393,16 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         if let Some(Key::Int(idx)) = self.path.last() {
-            comments::set_array_item_comment(
-                self.navigate_parent_mut(&mut doc.inner)?,
-                *idx,
-                value,
-            )?;
+            let parent = self.navigate_parent_mut(&mut doc.inner)?;
+            let array = parent
+                .as_value_mut()
+                .and_then(|v| v.as_array_mut())
+                .ok_or_else(|| PyTypeError::new_err("parent is not an array"))?;
+            let raw = match value {
+                Some(text) => comments::validate_inline_comment(text)?,
+                None => String::new(),
+            };
+            comments::set_array_item_comment(array, *idx, &raw);
             return Ok(());
         }
         // Inline comments inside single-line inline tables would produce

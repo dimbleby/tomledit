@@ -4,6 +4,7 @@ use pyo3::types::{PyDate, PyDateTime, PyDelta, PyDict, PyList, PyTime, PyTzInfo}
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
+use crate::comments;
 use crate::equality;
 use crate::item::Item;
 
@@ -315,9 +316,12 @@ pub(crate) fn item_delitem_slice(item: &mut ItemRs, indices: &[usize]) -> PyResu
 
     match item {
         ItemRs::Value(ValueRs::Array(arr)) => {
+            let mut ic = comments::save_inline_comments(arr);
             for idx in sorted {
                 arr.remove(idx);
+                ic.remove(idx);
             }
+            comments::restore_inline_comments(arr, &ic);
             Ok(())
         }
         ItemRs::ArrayOfTables(aot) => {
@@ -350,9 +354,12 @@ pub(crate) fn item_setitem_slice(
         let start_idx = start as usize;
         let stop_idx = stop as usize;
 
+        let mut ic = comments::save_inline_comments(arr);
+
         // Remove old elements from back to front.
         for i in (start_idx..stop_idx).rev() {
             arr.remove(i);
+            ic.remove(i);
         }
 
         // Insert new elements at start position.
@@ -364,7 +371,9 @@ pub(crate) fn item_setitem_slice(
             } else {
                 arr.insert(idx, v);
             }
+            ic.insert(idx, String::new());
         }
+        comments::restore_inline_comments(arr, &ic);
         Ok(())
     } else {
         // Extended slice: replacement must match the slice length.
@@ -535,7 +544,10 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
         }
         ItemRs::Value(ValueRs::Array(array)) => {
             let idx = resolve_index(require_int_key(key)?, array.len())?;
+            let mut ic = comments::save_inline_comments(array);
             array.remove(idx);
+            ic.remove(idx);
+            comments::restore_inline_comments(array, &ic);
             Ok(())
         }
         ItemRs::ArrayOfTables(aot) => {
@@ -572,7 +584,11 @@ pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyR
             }
             ItemRs::Value(ValueRs::Array(arr)) => {
                 let idx = resolve_index(key_obj.extract::<i64>()?, arr.len())?;
-                Ok(Item(ItemRs::Value(arr.remove(idx))))
+                let mut ic = comments::save_inline_comments(arr);
+                let removed = arr.remove(idx);
+                ic.remove(idx);
+                comments::restore_inline_comments(arr, &ic);
+                Ok(Item(ItemRs::Value(removed)))
             }
             ItemRs::ArrayOfTables(aot) => {
                 let idx = resolve_index(key_obj.extract::<i64>()?, aot.len())?;
@@ -586,7 +602,11 @@ pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyR
                     return Err(PyIndexError::new_err("pop from empty array"));
                 }
                 let last = arr.len() - 1;
-                Ok(Item(ItemRs::Value(arr.remove(last))))
+                let mut ic = comments::save_inline_comments(arr);
+                let removed = arr.remove(last);
+                ic.remove(last);
+                comments::restore_inline_comments(arr, &ic);
+                Ok(Item(ItemRs::Value(removed)))
             }
             ItemRs::ArrayOfTables(aot) => {
                 if aot.is_empty() {
@@ -669,8 +689,11 @@ pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) 
 
 pub(crate) fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
+        let mut ic = comments::save_inline_comments(arr);
         let v = into_value(value)?;
         arr.push(v);
+        ic.push(String::new());
+        comments::restore_inline_comments(arr, &ic);
         Ok(())
     } else {
         Err(unsupported_op(item, "append()"))
@@ -680,8 +703,11 @@ pub(crate) fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
 pub(crate) fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
         let resolved = clamp_index(index, arr.len());
+        let mut ic = comments::save_inline_comments(arr);
         let v = into_value(value)?;
         arr.insert(resolved, v);
+        ic.insert(resolved, String::new());
+        comments::restore_inline_comments(arr, &ic);
         Ok(())
     } else {
         Err(unsupported_op(item, "insert()"))
@@ -690,11 +716,14 @@ pub(crate) fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResul
 
 pub(crate) fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
+        let mut ic = comments::save_inline_comments(arr);
         for i in 0..arr.len() {
             if let Some(v) = arr.get(i)
                 && equality::value_eq(v, value)?
             {
                 arr.remove(i);
+                ic.remove(i);
+                comments::restore_inline_comments(arr, &ic);
                 return Ok(());
             }
         }
@@ -706,10 +735,13 @@ pub(crate) fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResu
 
 pub(crate) fn item_extend(item: &mut ItemRs, items: Vec<Item>, op: &str) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
+        let mut ic = comments::save_inline_comments(arr);
         for new_item in items {
             let v = into_value(new_item)?;
             arr.push(v);
+            ic.push(String::new());
         }
+        comments::restore_inline_comments(arr, &ic);
         Ok(())
     } else {
         Err(unsupported_op(item, op))

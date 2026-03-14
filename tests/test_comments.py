@@ -177,8 +177,95 @@ class TestComment:
         doc2 = Document.parse(str(doc))
         assert doc2["arr"][0].inline_comment == "# only"
 
+    def test_inline_comment_stable_after_append(self) -> None:
+        doc = Document()
+        doc["array"] = ["zero", "one"]
+        doc["array"][1].inline_comment = "# better than zero"
+        doc["array"].append("two")
+        assert doc["array"][1].inline_comment == "# better than zero"
+        assert doc["array"][2].inline_comment is None
+
+    def test_inline_comment_stable_after_append_multiline(self) -> None:
+        doc = Document.parse('arr = [\n  "a",\n  "b", # note\n]\n')
+        assert doc["arr"][1].inline_comment == "# note"
+        doc["arr"].append("c")
+        assert doc["arr"][1].inline_comment == "# note"
+        assert doc["arr"][2].inline_comment is None
+
+    def test_inline_comment_stable_after_extend(self) -> None:
+        doc = Document.parse("arr = [\n  1, # first\n]\n")
+        doc["arr"].extend([2, 3])
+        assert doc["arr"][0].inline_comment == "# first"
+        assert doc["arr"][1].inline_comment is None
+        assert doc["arr"][2].inline_comment is None
+
+    def test_inline_comment_stable_after_iadd(self) -> None:
+        doc = Document.parse("arr = [\n  1, # first\n]\n")
+        doc["arr"] += [2, 3]
+        assert doc["arr"][0].inline_comment == "# first"
+        assert doc["arr"][1].inline_comment is None
+
+    # ---- insert preserves comments ----
+
+    def test_insert_middle_preserves_prev_comment(self) -> None:
+        doc = Document.parse("arr = [\n  1, # first\n  2, # second\n  3, # third\n]\n")
+        doc["arr"].insert(1, 99)
+        assert doc["arr"][0].inline_comment == "# first"
+        assert doc["arr"][1].inline_comment is None
+        assert doc["arr"][2].inline_comment == "# second"
+        assert doc["arr"][3].inline_comment == "# third"
+
+    def test_insert_at_start_no_comment_shift(self) -> None:
+        doc = Document.parse("arr = [\n  1, # first\n  2, # second\n]\n")
+        doc["arr"].insert(0, 99)
+        assert doc["arr"][0].inline_comment is None
+        assert doc["arr"][1].inline_comment == "# first"
+        assert doc["arr"][2].inline_comment == "# second"
+
+    def test_insert_at_end_preserves_prev_comment(self) -> None:
+        doc = Document.parse("arr = [\n  1, # first\n  2, # second\n]\n")
+        doc["arr"].insert(2, 99)
+        assert doc["arr"][0].inline_comment == "# first"
+        assert doc["arr"][1].inline_comment == "# second"
+        assert doc["arr"][2].inline_comment is None
+
+    # ---- removal preserves comments ----
+
+    def test_pop_last_drops_its_comment(self) -> None:
+        doc = Document.parse("arr = [\n  1,\n  2,\n  3, # last\n]\n")
+        doc["arr"].pop()
+        assert doc["arr"][0].inline_comment is None
+        assert doc["arr"][1].inline_comment is None
+
+    def test_pop_last_preserves_prev_comment(self) -> None:
+        doc = Document.parse("arr = [\n  1,\n  2, # second\n  3,\n]\n")
+        doc["arr"].pop()
+        assert doc["arr"][1].inline_comment == "# second"
+
+    def test_remove_middle_preserves_prev_comment(self) -> None:
+        doc = Document.parse("arr = [\n  1, # first\n  2,\n  3,\n]\n")
+        doc["arr"].remove(2)
+        assert doc["arr"][0].inline_comment == "# first"
+        assert doc["arr"][1].inline_comment is None
+
+    def test_del_middle_all_commented(self) -> None:
+        doc = Document.parse("arr = [\n  1, # first\n  2, # second\n  3, # third\n]\n")
+        del doc["arr"][1]
+        assert doc["arr"][0].inline_comment == "# first"
+        assert doc["arr"][1].inline_comment == "# third"
+
+    def test_pop_first_drops_its_comment(self) -> None:
+        doc = Document.parse("arr = [\n  1, # first\n  2, # second\n  3, # third\n]\n")
+        doc["arr"].pop(0)
+        assert doc["arr"][0].inline_comment == "# second"
+        assert doc["arr"][1].inline_comment == "# third"
+
+    def test_slice_del_preserves_survivor_comments(self) -> None:
+        doc = Document.parse("arr = [\n  1, # first\n  2, # second\n  3, # third\n]\n")
+        del doc["arr"][0:2]
+        assert doc["arr"][0].inline_comment == "# third"
+
     def test_array_comment_valid_toml(self) -> None:
-        """Every array comment operation should produce re-parseable TOML."""
         doc = Document.parse("arr = [\n  1,\n  2,\n  3,\n]\n")
         doc["arr"][0].inline_comment = "# first"
         doc["arr"][1].comment = "# block"

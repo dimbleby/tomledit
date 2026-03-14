@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.2 (14 March 2026)
+
 - Fix `.comment` on tables.
 
 ## 0.9.1 (13 March 2026)

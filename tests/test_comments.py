@@ -89,7 +89,7 @@ class TestComment:
         assert doc["key"].comment is None
         assert str(doc) == "key = 42\n"
 
-    def test_multiline_comment_set(self) -> None:
+    def test_set_multiline_comment(self) -> None:
         doc = Document.parse("key = 42\n")
         doc["key"].comment = "# line A\n# line B"
         assert str(doc) == "# line A\n# line B\nkey = 42\n"
@@ -113,12 +113,6 @@ class TestComment:
         assert str(doc) == toml
 
     # ---- array element comments ----
-
-    def test_comment_on_array_element(self) -> None:
-        doc = Document.parse("arr = [\n  1,\n  2,\n]\n")
-        assert doc["arr"][0].comment is None
-        doc["arr"][1].comment = "# about two"
-        assert str(doc) == "arr = [\n  1,\n  # about two\n  2,\n]\n"
 
     def test_set_inline_comment_on_array_element(self) -> None:
         doc = Document.parse("arr = [\n  1,\n  2,\n  3,\n]\n")
@@ -146,7 +140,7 @@ class TestComment:
         assert doc["arr"][1].inline_comment is None
         assert str(doc) == "arr = [\n  1,\n  2,\n  3,\n]\n"
 
-    def test_array_inline_comment_replace(self) -> None:
+    def test_replace_array_inline_comment(self) -> None:
         toml = "arr = [\n  1, # old\n  2,\n]\n"
         doc = Document.parse(toml)
         assert doc["arr"][0].inline_comment == "# old"
@@ -406,7 +400,7 @@ class TestComment:
         # blank line is preserved as part of the block comment
         assert doc["arr"][1].comment == "\n# after blank"
 
-    def test_array_element_comment_roundtrip_multiline(self) -> None:
+    def test_set_comment_on_multiline_array_element(self) -> None:
         """Set a block comment on an element in a multiline array."""
         toml = "arr = [\n  1,\n  2,\n  3,\n]\n"
         doc = Document.parse(toml)
@@ -457,3 +451,23 @@ class TestComment:
         """AoT has no key prefix — comment returns None."""
         doc = Document.parse('[[items]]\nname = "a"\n')
         assert doc["items"].comment is None
+
+    # ---- comments survive mutations ----
+
+    def test_inline_comment_preserved_on_top_level_update(self) -> None:
+        toml = 'title = "old" # important note\n'
+        doc = Document.parse(toml)
+        doc["title"] = "new"
+        assert str(doc) == 'title = "new" # important note\n'
+
+    def test_inline_comment_preserved_on_nested_update(self) -> None:
+        toml = '[owner]\nname = "Tom"  # the owner name\nage = 30\n'
+        doc = Document.parse(toml)
+        doc["owner"]["name"] = "Bob"
+        assert str(doc) == '[owner]\nname = "Bob"  # the owner name\nage = 30\n'
+
+    def test_standalone_comment_preserved_on_nested_update(self) -> None:
+        toml = '[owner]\n# this is the name\nname = "Tom"\n'
+        doc = Document.parse(toml)
+        doc["owner"]["name"] = "Bob"
+        assert str(doc) == '[owner]\n# this is the name\nname = "Bob"\n'

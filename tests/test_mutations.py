@@ -1,4 +1,4 @@
-"""Tests for reading/writing scalars, arrays, keys, and format preservation."""
+"""Tests for writing/mutating values, keys, arrays, and tables."""
 
 from __future__ import annotations
 
@@ -10,34 +10,15 @@ import pytest
 from tomledit import Document, Item
 
 # ---------------------------------------------------------------------------
-# Reading scalar values (like dict access)
+# Navigation (reading deeply nested paths and array indices)
 # ---------------------------------------------------------------------------
 
 
-class TestReadScalars:
-    def test_top_level_string(self, doc: Document) -> None:
-        assert doc["title"] == "Example"
-
-    def test_nested_string(self, doc: Document) -> None:
-        assert doc["owner"]["name"] == "Alice"
-
-    def test_nested_int(self, doc: Document) -> None:
-        assert doc["owner"]["age"] == 30
-
-    def test_nested_bool(self, doc: Document) -> None:
-        assert doc["owner"]["active"] == True  # noqa: E712
-
+class TestNavigation:
     def test_deeply_nested(self, doc: Document) -> None:
         assert doc["servers"]["alpha"]["ip"] == "10.0.0.1"
         assert doc["servers"]["beta"]["role"] == "backend"
 
-
-# ---------------------------------------------------------------------------
-# Reading array elements (like list access)
-# ---------------------------------------------------------------------------
-
-
-class TestReadArrays:
     def test_array_element_by_index(self, doc: Document) -> None:
         assert doc["database"]["ports"][0] == 8001
         assert doc["database"]["ports"][2] == 8002
@@ -243,74 +224,6 @@ class TestInlineTableMutation:
 
 
 # ---------------------------------------------------------------------------
-# Format preservation
-# ---------------------------------------------------------------------------
-
-
-class TestFormatPreservation:
-    def test_comments_preserved(self) -> None:
-        toml = '# a comment\nkey = "value"\n'
-        doc = Document.parse(toml)
-        assert str(doc) == toml
-
-    def test_whitespace_preserved(self) -> None:
-        toml = 'key   =   "value"\n'
-        doc = Document.parse(toml)
-        assert str(doc) == toml
-
-    def test_mutation_preserves_other_formatting(self) -> None:
-        toml = "# header\na = 1\nb = 2\n"
-        doc = Document.parse(toml)
-        doc["a"] = 10
-        assert str(doc) == "# header\na = 10\nb = 2\n"
-
-    def test_inline_comment_preserved_on_top_level_update(self) -> None:
-        toml = 'title = "old" # important note\n'
-        doc = Document.parse(toml)
-        doc["title"] = "new"
-        assert str(doc) == 'title = "new" # important note\n'
-
-    def test_inline_comment_preserved_on_nested_update(self) -> None:
-        toml = '[owner]\nname = "Tom"  # the owner name\nage = 30\n'
-        doc = Document.parse(toml)
-        doc["owner"]["name"] = "Bob"
-        assert str(doc) == '[owner]\nname = "Bob"  # the owner name\nage = 30\n'
-
-    def test_standalone_comment_preserved_on_nested_update(self) -> None:
-        toml = '[owner]\n# this is the name\nname = "Tom"\n'
-        doc = Document.parse(toml)
-        doc["owner"]["name"] = "Bob"
-        assert str(doc) == '[owner]\n# this is the name\nname = "Bob"\n'
-
-
-# ---------------------------------------------------------------------------
-# Mutation via .get(), .items(), .values() (not just __getitem__)
-# ---------------------------------------------------------------------------
-
-
-class TestMutationViaAccessors:
-    def test_get_returns_live_proxy(self, doc: Document) -> None:
-        owner = doc.get("owner")
-        assert owner is not None
-        owner["name"] = "Bob"
-        assert doc["owner"]["name"] == "Bob"
-
-    def test_items_returns_live_proxies(self, doc: Document) -> None:
-        for key, proxy in doc.items():
-            if key == "owner":
-                proxy["name"] = "Charlie"
-                break
-        assert doc["owner"]["name"] == "Charlie"
-
-    def test_values_returns_live_proxies(self) -> None:
-        doc = Document.parse("[section]\nval = 10\n")
-        vals = doc.values()
-        assert len(vals) == 1
-        vals[0]["val"] = 99
-        assert doc["section"]["val"] == 99
-
-
-# ---------------------------------------------------------------------------
 # Nested array access (navigate_parent with Key::Int)
 # ---------------------------------------------------------------------------
 
@@ -318,7 +231,7 @@ class TestMutationViaAccessors:
 class TestNestedArrayNavigation:
     """Exercise the Key::Int branch in navigate_parent / navigate_parent_mut."""
 
-    def test_comment_on_nested_array_element(self) -> None:
+    def test_read_value_from_nested_array_element(self) -> None:
         """doc["arr"][0] navigates to an array element; accessing a child
         of that element uses navigate_parent with int key in path."""
         doc = Document.parse("arr = [{x = 1}, {x = 2}]\n")
@@ -507,7 +420,7 @@ class TestItemParse:
         doc["x"] = Item.parse("'''multi\nline'''")
         assert str(doc) == "x = '''multi\nline'''\n"
 
-    def test_value_is_correct(self) -> None:
+    def test_item_parse_value_returns_int(self) -> None:
         item = Item.parse("0xFF")
         assert item.value == 255
 
@@ -552,3 +465,21 @@ class TestTupleToArray:
         doc = Document.parse("x = 1\n")
         doc["x"] = (1, [2, 3])
         assert doc["x"] == [1, [2, 3]]
+
+
+# ---------------------------------------------------------------------------
+# Format preservation on mutation
+# ---------------------------------------------------------------------------
+
+
+class TestFormatPreservation:
+    def test_whitespace_preserved(self) -> None:
+        toml = 'key   =   "value"\n'
+        doc = Document.parse(toml)
+        assert str(doc) == toml
+
+    def test_mutation_preserves_other_formatting(self) -> None:
+        toml = "# header\na = 1\nb = 2\n"
+        doc = Document.parse(toml)
+        doc["a"] = 10
+        assert str(doc) == "# header\na = 10\nb = 2\n"

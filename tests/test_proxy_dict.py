@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import MappingProxyType
 
 import pytest
 
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
-# Item: dict-like methods (keys, values, items, get, pop, update, etc.)
+# Proxy dict-like methods (keys, values, items, get, pop, update, etc.)
 # ---------------------------------------------------------------------------
 
 
 class TestProxyDictMethods:
+    # -- keys / values / items --
+
     def test_keys(self, doc: Document) -> None:
         assert set(doc["owner"].keys()) == {"name", "age", "active"}
 
@@ -41,11 +44,7 @@ class TestProxyDictMethods:
                 proxy["val"] = 99
         assert doc["t"]["inner"]["val"] == 99
 
-    def test_get_existing(self, doc: Document) -> None:
-        assert doc["owner"].get("name") == "Alice"
-
-    def test_get_missing(self, doc: Document) -> None:
-        assert doc["owner"].get("email") is None
+    # -- get --
 
     def test_get_returns_live_proxy(self) -> None:
         doc = Document.parse("[t]\n[t.inner]\nval = 10\n")
@@ -53,6 +52,20 @@ class TestProxyDictMethods:
         assert inner is not None
         inner["val"] = 42
         assert doc["t"]["inner"]["val"] == 42
+
+    def test_get_existing(self) -> None:
+        doc = Document.parse("[tbl]\nx = 1\n")
+        assert doc["tbl"].get("x") == 1
+
+    def test_get_missing_no_default(self) -> None:
+        doc = Document.parse("[tbl]\nx = 1\n")
+        assert doc["tbl"].get("y") is None
+
+    def test_get_missing_with_default(self) -> None:
+        doc = Document.parse("[tbl]\nx = 1\n")
+        assert doc["tbl"].get("y", "fallback") == "fallback"
+
+    # -- pop --
 
     def test_pop_table_key(self, doc: Document) -> None:
         doc["owner"].pop("active")
@@ -65,13 +78,32 @@ class TestProxyDictMethods:
     def test_pop_missing_with_default(self, doc: Document) -> None:
         assert doc["owner"].pop("nonexistent", 42) == 42
 
-    def test_proxy_pop_missing_with_none_default(self, doc: Document) -> None:
+    def test_pop_missing_with_none_default(self, doc: Document) -> None:
         assert doc["owner"].pop("nonexistent", None) is None
 
     def test_pop_existing_ignores_default(self, doc: Document) -> None:
         val = doc["owner"].pop("age", 99)
         assert val == 30
         assert "age" not in doc["owner"]
+
+    def test_pop_too_many_args(self) -> None:
+        doc = Document.parse("[owner]\nname = 'Tom'\n")
+        with pytest.raises(TypeError, match="at most 2 arguments"):
+            doc["owner"].pop("name", 1, 2)  # type: ignore[call-overload]
+
+    def test_pop_by_key_returns_native(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        v = doc["t"].pop("a")
+        assert v == 1
+        assert "a" not in doc["t"]
+
+    def test_pop_array_element_returns_native(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        v = doc["arr"].pop()
+        assert v == 3
+        assert doc["arr"] == [1, 2]
+
+    # -- update --
 
     def test_update(self, doc: Document) -> None:
         doc["owner"].update({"name": "Bob", "email": "bob@example.com"})
@@ -88,6 +120,8 @@ class TestProxyDictMethods:
         assert doc["owner"]["name"] == "Bob"
         assert doc["owner"]["email"] == "bob@example.com"
 
+    # -- setdefault --
+
     def test_setdefault_missing(self, doc: Document) -> None:
         result = doc["owner"].setdefault("email", "default@example.com")
         assert result == "default@example.com"
@@ -97,9 +131,19 @@ class TestProxyDictMethods:
         result = doc["owner"].setdefault("name", "fallback")
         assert result == "Alice"  # not overwritten
 
+    # -- clear --
+
     def test_clear_table(self, doc: Document) -> None:
         doc["owner"].clear()
         assert len(doc["owner"]) == 0
+
+    def test_clear_inline_table(self) -> None:
+        doc = Document.parse("t = {a = 1, b = 2}\n")
+        doc["t"].clear()
+        assert len(doc["t"]) == 0
+        assert doc["t"] == {}
+
+    # -- inline table specifics --
 
     def test_inline_table_keys(self) -> None:
         doc = Document.parse("meta = {x = 1, y = 2}\n")
@@ -120,62 +164,76 @@ class TestProxyDictMethods:
         doc["meta"].update({"y": 2})
         assert doc["meta"]["y"] == 2
 
+    # -- errors --
+
     def test_keys_on_scalar_raises(self, doc: Document) -> None:
         with pytest.raises(TypeError):
             doc["title"].keys()
 
-    def test_clear_inline_table(self) -> None:
-        doc = Document.parse("t = {a = 1, b = 2}\n")
-        doc["t"].clear()
-        assert len(doc["t"]) == 0
-        assert doc["t"] == {}
-
 
 # ---------------------------------------------------------------------------
-# get() with default
+# Document-level dict methods (get, pop with defaults, return types)
 # ---------------------------------------------------------------------------
 
 
-class TestGetWithDefault:
-    """get() should accept an optional default value."""
+class TestDocumentDictMethods:
+    # -- contains / len / iter / keys --
 
-    def test_doc_get_existing(self) -> None:
+    def test_contains(self, doc: Document) -> None:
+        assert "title" in doc
+        assert "nonexistent" not in doc
+
+    def test_len(self, doc: Document) -> None:
+        assert len(doc) == 4  # title, owner, database, servers
+
+    def test_iter(self, doc: Document) -> None:
+        keys = list(doc)
+        assert "title" in keys
+        assert "owner" in keys
+
+    def test_keys(self, doc: Document) -> None:
+        assert set(doc.keys()) == {"title", "owner", "database", "servers"}
+
+    # -- getitem --
+
+    def test_getitem_missing_raises(self, doc: Document) -> None:
+        with pytest.raises(KeyError):
+            doc["nope"]
+
+    # -- get --
+
+    def test_get_existing(self) -> None:
         doc = Document.parse("x = 1\n")
         assert doc.get("x") == 1
 
-    def test_doc_get_missing_no_default(self) -> None:
+    def test_get_missing_no_default(self) -> None:
         doc = Document.parse("x = 1\n")
         assert doc.get("y") is None
 
-    def test_doc_get_missing_with_default(self) -> None:
+    def test_get_missing_with_default(self) -> None:
         doc = Document.parse("x = 1\n")
         assert doc.get("y", 42) == 42
 
-    def test_proxy_get_existing(self) -> None:
-        doc = Document.parse("[tbl]\nx = 1\n")
-        assert doc["tbl"].get("x") == 1
+    def test_get_returns_live_proxy(self, doc: Document) -> None:
+        owner = doc.get("owner")
+        assert owner is not None
+        owner["name"] = "Bob"
+        assert doc["owner"]["name"] == "Bob"
 
-    def test_proxy_get_missing_no_default(self) -> None:
-        doc = Document.parse("[tbl]\nx = 1\n")
-        assert doc["tbl"].get("y") is None
+    # -- delitem --
 
-    def test_proxy_get_missing_with_default(self) -> None:
-        doc = Document.parse("[tbl]\nx = 1\n")
-        assert doc["tbl"].get("y", "fallback") == "fallback"
+    def test_delitem_existing_key(self) -> None:
+        doc = Document.parse("x = 1\ny = 2\n")
+        del doc["x"]
+        assert "x" not in doc
+        assert "y" in doc
 
+    def test_delitem_raises_key_error(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(KeyError):
+            del doc["nonexistent"]
 
-# ---------------------------------------------------------------------------
-# pop() with default
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# pop() with default
-# ---------------------------------------------------------------------------
-
-
-class TestPopWithDefault:
-    """Document.pop() should accept an optional default."""
+    # -- pop argument handling --
 
     def test_pop_existing(self) -> None:
         doc = Document.parse("x = 1\ny = 2\n")
@@ -194,28 +252,16 @@ class TestPopWithDefault:
         assert val == 42
         assert "y" not in doc
 
-    def test_document_pop_missing_with_none_default(self) -> None:
+    def test_pop_missing_with_none_default(self) -> None:
         doc = Document.parse("x = 1\n")
         assert doc.pop("y", None) is None
 
-    def test_document_pop_too_many_args(self) -> None:
+    def test_pop_too_many_args(self) -> None:
         doc = Document.parse("x = 1\n")
         with pytest.raises(TypeError, match="at most 2 arguments"):
             doc.pop("x", 1, 2)  # type: ignore[call-overload]
 
-    def test_proxy_pop_too_many_args(self) -> None:
-        doc = Document.parse("[owner]\nname = 'Tom'\n")
-        with pytest.raises(TypeError, match="at most 2 arguments"):
-            doc["owner"].pop("name", 1, 2)  # type: ignore[call-overload]
-
-
-# ---------------------------------------------------------------------------
-# pop() returns native Python values
-# ---------------------------------------------------------------------------
-
-
-class TestPopReturnsNative:
-    """pop() should return native Python objects, not internal Item wrappers."""
+    # -- pop return types --
 
     def test_pop_table_returns_dict(self, doc: Document) -> None:
         owner = doc.pop("owner")
@@ -255,27 +301,74 @@ class TestPopReturnsNative:
         doc = Document.parse("[a]\n[a.b]\nx = 1\n")
         assert doc.pop("a") == {"b": {"x": 1}}
 
-    def test_pop_missing_raises(self) -> None:
+    # -- items / values return live proxies --
+
+    def test_items_returns_live_proxies(self, doc: Document) -> None:
+        for key, proxy in doc.items():
+            if key == "owner":
+                proxy["name"] = "Charlie"
+                break
+        assert doc["owner"]["name"] == "Charlie"
+
+    def test_values_returns_live_proxies(self) -> None:
+        doc = Document.parse("[section]\nval = 10\n")
+        vals = doc.values()
+        assert len(vals) == 1
+        vals[0]["val"] = 99
+        assert doc["section"]["val"] == 99
+
+    # -- update --
+
+    def test_update(self) -> None:
         doc = Document.parse("x = 1\n")
-        with pytest.raises(KeyError):
-            doc.pop("nope")
+        doc.update({"x": 10, "y": 20})
+        assert doc["x"] == 10
+        assert doc["y"] == 20
 
-    def test_pop_missing_with_default(self) -> None:
+    def test_update_kwargs(self) -> None:
         doc = Document.parse("x = 1\n")
-        assert doc.pop("nope", 42) == 42
+        doc.update(x=10, y=20)
+        assert doc["x"] == 10
+        assert doc["y"] == 20
 
-    def test_pop_removes_key(self, doc: Document) -> None:
-        doc.pop("owner")
-        assert "owner" not in doc
+    def test_update_dict_and_kwargs(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc.update({"x": 10}, y=20)
+        assert doc["x"] == 10
+        assert doc["y"] == 20
 
-    def test_proxy_pop_array_element(self) -> None:
-        doc = Document.parse("arr = [1, 2, 3]\n")
-        v = doc["arr"].pop()
-        assert v == 3
-        assert doc["arr"] == [1, 2]
+    def test_update_iterable_of_pairs(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc.update([("x", 10), ("y", 20)])
+        assert doc["x"] == 10
+        assert doc["y"] == 20
 
-    def test_proxy_pop_by_key(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
-        v = doc["t"].pop("a")
-        assert v == 1
-        assert "a" not in doc["t"]
+    def test_update_no_args(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc.update()
+        assert doc["x"] == 1
+
+    def test_update_mapping_with_keys(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc.update(MappingProxyType({"x": 10, "y": 20}))
+        assert doc["x"] == 10
+        assert doc["y"] == 20
+
+    # -- setdefault --
+
+    def test_setdefault_missing(self) -> None:
+        doc = Document.parse("x = 1\n")
+        result = doc.setdefault("y", 42)
+        assert result == 42
+        assert doc["y"] == 42
+
+    def test_setdefault_existing(self) -> None:
+        doc = Document.parse("x = 1\n")
+        result = doc.setdefault("x", 99)
+        assert result == 1
+
+    # -- clear --
+
+    def test_clear(self, doc: Document) -> None:
+        doc.clear()
+        assert len(doc) == 0

@@ -1,58 +1,12 @@
-"""Tests for the Document class: dict protocol, constructor, value, and completeness."""
+"""Tests for the Document class: constructor, value, identity, fmt, copy."""
 
 from __future__ import annotations
 
 import copy
-from types import MappingProxyType
 
 import pytest
 
 from tomledit import Document
-
-# ---------------------------------------------------------------------------
-# Dict-like protocol on Document
-# ---------------------------------------------------------------------------
-
-
-class TestDocumentDictProtocol:
-    def test_contains(self, doc: Document) -> None:
-        assert "title" in doc
-        assert "nonexistent" not in doc
-
-    def test_len(self, doc: Document) -> None:
-        assert len(doc) == 4  # title, owner, database, servers
-
-    def test_iter(self, doc: Document) -> None:
-        keys = list(doc)
-        assert "title" in keys
-        assert "owner" in keys
-
-    def test_keys(self, doc: Document) -> None:
-        assert set(doc.keys()) == {"title", "owner", "database", "servers"}
-
-    def test_del(self, doc: Document) -> None:
-        del doc["title"]
-        assert "title" not in doc
-
-    def test_pop(self, doc: Document) -> None:
-        doc.pop("title")
-        assert "title" not in doc
-
-    def test_clear(self, doc: Document) -> None:
-        doc.clear()
-        assert len(doc) == 0
-
-    def test_get_existing(self, doc: Document) -> None:
-        item = doc.get("title")
-        assert item is not None
-
-    def test_get_missing(self, doc: Document) -> None:
-        assert doc.get("nope") is None
-
-    def test_getitem_missing_raises(self, doc: Document) -> None:
-        with pytest.raises(KeyError):
-            doc["nope"]
-
 
 # ---------------------------------------------------------------------------
 # Document constructor
@@ -103,13 +57,13 @@ class TestDocumentConstructor:
 class TestDocumentValue:
     """Document.value returns the entire document as a native Python dict."""
 
-    def test_simple(self) -> None:
+    def test_value_returns_flat_native_dict(self) -> None:
         doc = Document.parse("a = 1\nb = 2\n")
         v = doc.value
         assert v == {"a": 1, "b": 2}
         assert type(v) is dict
 
-    def test_nested(self) -> None:
+    def test_value_with_nested_table(self) -> None:
         doc = Document.parse("[section]\nx = 1\ny = 2\n")
         assert doc.value == {"section": {"x": 1, "y": 2}}
 
@@ -117,7 +71,7 @@ class TestDocumentValue:
         doc = Document()
         assert doc.value == {}
 
-    def test_complex(self, doc: Document) -> None:
+    def test_value_on_complex_fixture(self, doc: Document) -> None:
         v = doc.value
         assert v["title"] == "Example"
         assert v["owner"] == {"name": "Alice", "age": 30, "active": True}
@@ -131,12 +85,12 @@ class TestDocumentValue:
 
 
 # ---------------------------------------------------------------------------
-# Document completeness (repr, bool, eq, del, update, setdefault)
+# Document identity (repr, bool, equality)
 # ---------------------------------------------------------------------------
 
 
-class TestDocumentCompleteness:
-    """Document should have a complete dict-like API."""
+class TestDocumentIdentity:
+    """Document repr, bool, and equality."""
 
     def test_repr(self) -> None:
         doc = Document.parse("a = 1\nb = 2\n")
@@ -179,63 +133,6 @@ class TestDocumentCompleteness:
         a = Document.parse("x = true\n")
         b = Document.parse("x = 1\n")
         assert a != b
-
-    def test_delitem_raises_key_error(self) -> None:
-        doc = Document.parse("x = 1\n")
-        with pytest.raises(KeyError):
-            del doc["nonexistent"]
-
-    def test_delitem_existing_key(self) -> None:
-        doc = Document.parse("x = 1\ny = 2\n")
-        del doc["x"]
-        assert "x" not in doc
-        assert "y" in doc
-
-    def test_update(self) -> None:
-        doc = Document.parse("x = 1\n")
-        doc.update({"x": 10, "y": 20})
-        assert doc["x"] == 10
-        assert doc["y"] == 20
-
-    def test_update_kwargs(self) -> None:
-        doc = Document.parse("x = 1\n")
-        doc.update(x=10, y=20)
-        assert doc["x"] == 10
-        assert doc["y"] == 20
-
-    def test_update_dict_and_kwargs(self) -> None:
-        doc = Document.parse("x = 1\n")
-        doc.update({"x": 10}, y=20)
-        assert doc["x"] == 10
-        assert doc["y"] == 20
-
-    def test_update_iterable_of_pairs(self) -> None:
-        doc = Document.parse("x = 1\n")
-        doc.update([("x", 10), ("y", 20)])
-        assert doc["x"] == 10
-        assert doc["y"] == 20
-
-    def test_update_no_args(self) -> None:
-        doc = Document.parse("x = 1\n")
-        doc.update()
-        assert doc["x"] == 1
-
-    def test_update_mapping_with_keys(self) -> None:
-        doc = Document.parse("x = 1\n")
-        doc.update(MappingProxyType({"x": 10, "y": 20}))
-        assert doc["x"] == 10
-        assert doc["y"] == 20
-
-    def test_setdefault_missing(self) -> None:
-        doc = Document.parse("x = 1\n")
-        result = doc.setdefault("y", 42)
-        assert result == 42
-        assert doc["y"] == 42
-
-    def test_setdefault_existing(self) -> None:
-        doc = Document.parse("x = 1\n")
-        result = doc.setdefault("x", 99)
-        assert result == 1
 
 
 # ---------------------------------------------------------------------------

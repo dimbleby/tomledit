@@ -293,39 +293,35 @@ class TestComment:
     def test_set_table_comment(self) -> None:
         doc = Document.parse("[section]\nx = 1\n")
         doc["section"].comment = "# added"
-        result = str(doc)
-        assert "# added" in result
+        assert str(doc) == "# added\n[section]\nx = 1\n"
         assert doc["section"].comment == "# added"
-        Document.parse(result)  # must be valid TOML
 
     def test_set_table_comment_from_scratch(self) -> None:
         doc = Document()
         doc["foo"] = {"this": "that"}
         doc["foo"].comment = "# Hello"
-        result = str(doc)
-        assert "# Hello" in result
-        doc2 = Document.parse(result)
+        assert str(doc) == '# Hello\n[foo]\nthis = "that"\n'
+        doc2 = Document.parse(str(doc))
         assert doc2["foo"]["this"] == "that"
         assert doc2["foo"].comment == "# Hello"
 
     def test_replace_table_comment(self) -> None:
         doc = Document.parse("# old\n[section]\nx = 1\n")
         doc["section"].comment = "# new"
+        assert str(doc) == "# new\n[section]\nx = 1\n"
         assert doc["section"].comment == "# new"
-        Document.parse(str(doc))
 
     def test_clear_table_comment(self) -> None:
         doc = Document.parse("# remove\n[section]\nx = 1\n")
         doc["section"].comment = None
+        assert str(doc) == "\n[section]\nx = 1\n"
         assert doc["section"].comment is None
-        Document.parse(str(doc))
 
     def test_multiline_table_comment(self) -> None:
         doc = Document.parse("[section]\nx = 1\n")
         doc["section"].comment = "# line A\n# line B"
-        result = str(doc)
+        assert str(doc) == "# line A\n# line B\n[section]\nx = 1\n"
         assert doc["section"].comment == "# line A\n# line B"
-        Document.parse(result)
 
     def test_table_comment_roundtrip(self) -> None:
         toml = "# important\n[section]\nkey = 42\n"
@@ -337,10 +333,9 @@ class TestComment:
         doc = Document.parse("[section]\nx = 1\n")
         doc["section"].comment = "# above"
         doc["section"].inline_comment = "# inline"
-        result = str(doc)
+        assert str(doc) == "# above\n[section] # inline\nx = 1\n"
         assert doc["section"].comment == "# above"
         assert doc["section"].inline_comment == "# inline"
-        Document.parse(result)
 
     # ---- table section inline comments ----
 
@@ -370,17 +365,36 @@ class TestComment:
         doc = Document.parse("t = {x = 1, y = 2}\n")
         assert doc["t"]["x"].comment is None
 
-    def test_set_inline_table_key_comment_raises(self) -> None:
-        """Block comments on inline table keys would produce multi-line
-        inline tables (invalid TOML 1.0), so they are rejected."""
+    def test_set_inline_table_key_comment(self) -> None:
+        """Setting a block comment on an inline table key produces a
+        multi-line inline table (valid TOML 1.1)."""
         doc = Document.parse("t = {x = 1, y = 2}\n")
-        with pytest.raises(TypeError, match="inline table"):
-            doc["t"]["x"].comment = "# note"
+        doc["t"]["x"].comment = "# note"
+        assert str(doc) == "t = {# note\nx = 1, y = 2}\n"
+        doc2 = Document.parse(str(doc))
+        assert doc2["t"]["x"] == 1
+        assert doc2["t"]["y"] == 2
+        assert doc2["t"]["x"].comment == "# note"
 
     def test_clear_inline_table_key_comment(self) -> None:
         doc = Document.parse("t = {x = 1, y = 2}\n")
         doc["t"]["x"].comment = None
         assert doc["t"]["x"].comment is None
+        assert str(doc) == "t = {x = 1, y = 2}\n"
+
+    def test_inline_comment_on_inline_table_value_rejected(self) -> None:
+        """Inline comments inside inline tables would produce invalid TOML
+        because # comments out everything to end-of-line, eating `,` and `}`."""
+        doc = Document.parse("t = {x = 1, y = 2}\n")
+        with pytest.raises(TypeError, match="inline comment"):
+            doc["t"]["x"].inline_comment = "# boom"
+        with pytest.raises(TypeError, match="inline comment"):
+            doc["t"]["y"].inline_comment = "# boom"
+
+    def test_clear_inline_comment_on_inline_table_value_allowed(self) -> None:
+        """Clearing (None) is always safe, even inside inline tables."""
+        doc = Document.parse("t = {x = 1, y = 2}\n")
+        doc["t"]["x"].inline_comment = None
         assert str(doc) == "t = {x = 1, y = 2}\n"
 
     # ---- array comment edge cases ----

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix `.comment` on tables.
+
 ## 0.9.1 (13 March 2026)
 
 - Assigning a dict now creates a standard `[table]`, not an inline table.

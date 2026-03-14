@@ -280,6 +280,68 @@ class TestComment:
         with pytest.raises(TypeError, match="does not support"):
             doc["s"][0].comment = "# nope"
 
+    # ---- table section block comments ----
+
+    def test_read_table_comment(self) -> None:
+        doc = Document.parse("# before table\n[section]\nx = 1\n")
+        assert doc["section"].comment == "# before table"
+
+    def test_read_table_no_comment(self) -> None:
+        doc = Document.parse("[section]\nx = 1\n")
+        assert doc["section"].comment is None
+
+    def test_set_table_comment(self) -> None:
+        doc = Document.parse("[section]\nx = 1\n")
+        doc["section"].comment = "# added"
+        result = str(doc)
+        assert "# added" in result
+        assert doc["section"].comment == "# added"
+        Document.parse(result)  # must be valid TOML
+
+    def test_set_table_comment_from_scratch(self) -> None:
+        doc = Document()
+        doc["foo"] = {"this": "that"}
+        doc["foo"].comment = "# Hello"
+        result = str(doc)
+        assert "# Hello" in result
+        doc2 = Document.parse(result)
+        assert doc2["foo"]["this"] == "that"
+        assert doc2["foo"].comment == "# Hello"
+
+    def test_replace_table_comment(self) -> None:
+        doc = Document.parse("# old\n[section]\nx = 1\n")
+        doc["section"].comment = "# new"
+        assert doc["section"].comment == "# new"
+        Document.parse(str(doc))
+
+    def test_clear_table_comment(self) -> None:
+        doc = Document.parse("# remove\n[section]\nx = 1\n")
+        doc["section"].comment = None
+        assert doc["section"].comment is None
+        Document.parse(str(doc))
+
+    def test_multiline_table_comment(self) -> None:
+        doc = Document.parse("[section]\nx = 1\n")
+        doc["section"].comment = "# line A\n# line B"
+        result = str(doc)
+        assert doc["section"].comment == "# line A\n# line B"
+        Document.parse(result)
+
+    def test_table_comment_roundtrip(self) -> None:
+        toml = "# important\n[section]\nkey = 42\n"
+        doc = Document.parse(toml)
+        assert doc["section"].comment == "# important"
+        assert str(doc) == toml
+
+    def test_table_both_comments(self) -> None:
+        doc = Document.parse("[section]\nx = 1\n")
+        doc["section"].comment = "# above"
+        doc["section"].inline_comment = "# inline"
+        result = str(doc)
+        assert doc["section"].comment == "# above"
+        assert doc["section"].inline_comment == "# inline"
+        Document.parse(result)
+
     # ---- table section inline comments ----
 
     def test_read_table_section_inline_comment(self) -> None:

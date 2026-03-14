@@ -387,6 +387,17 @@ impl ItemProxy {
             )?;
             return Ok(());
         }
+        // Inline comments inside single-line inline tables would produce
+        // invalid TOML (the # eats the rest of the line including `}`).
+        if value.is_some() && self.path.len() >= 2 {
+            let parent = self.navigate_parent(&doc.inner)?;
+            if parent.is_inline_table() {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "cannot set inline comment on inline table value \
+                     (comment would consume the closing `}`)",
+                ));
+            }
+        }
         let item = self.navigate_mut(&mut doc.inner)?;
         comments::set_suffix_comment(item, value)?;
         Ok(())

@@ -109,22 +109,20 @@ pub(crate) fn set_suffix_comment(item: &mut ItemRs, comment: Option<&str>) -> Py
 /// Table's own decor prefix (before the `[` bracket), not in the key's
 /// leaf decor (which would be *inside* the brackets).
 pub(crate) fn get_key_prefix_comment(parent: &ItemRs, key: &str) -> Option<String> {
-    match parent {
-        ItemRs::Table(table) => {
-            if let Some(ItemRs::Table(child)) = table.get(key) {
-                let raw = child.decor().prefix()?.as_str()?;
-                extract_block_comment(raw)
-            } else {
-                let raw = table.key(key)?.leaf_decor().prefix()?.as_str()?;
-                extract_block_comment(raw)
-            }
-        }
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            let raw = it.key(key)?.leaf_decor().prefix()?.as_str()?;
-            extract_block_comment(raw)
-        }
-        _ => None,
+    // Child tables store the block comment in the Table's own decor prefix.
+    if let ItemRs::Table(table) = parent
+        && let Some(ItemRs::Table(child)) = table.get(key)
+    {
+        let raw = child.decor().prefix()?.as_str()?;
+        return extract_block_comment(raw);
     }
+    // Plain key-value pairs store it in the key's leaf decor prefix.
+    let raw = match parent {
+        ItemRs::Table(table) => table.key(key)?.leaf_decor().prefix()?.as_str()?,
+        ItemRs::Value(ValueRs::InlineTable(it)) => it.key(key)?.leaf_decor().prefix()?.as_str()?,
+        _ => return None,
+    };
+    extract_block_comment(raw)
 }
 
 /// Set the comment before a key in the parent table's key decor.
@@ -137,39 +135,33 @@ pub(crate) fn set_key_prefix_comment(
     key: &str,
     comment: Option<&str>,
 ) -> PyResult<()> {
-    match parent {
-        ItemRs::Table(table) => {
-            let is_child_table = table.get(key).is_some_and(|item| item.is_table());
-            if is_child_table {
-                let child = table.get_mut(key).unwrap().as_table_mut().unwrap();
-                match comment {
-                    Some(text) => child.decor_mut().set_prefix(build_block_comment(text, "")?),
-                    None => child.decor_mut().set_prefix("\n"),
-                }
-            } else {
-                let Some(mut km) = table.key_mut(key) else {
-                    return Err(PyKeyError::new_err(key.to_owned()));
-                };
-                match comment {
-                    Some(text) => km
-                        .leaf_decor_mut()
-                        .set_prefix(build_block_comment(text, "")?),
-                    None => km.leaf_decor_mut().set_prefix(""),
-                }
-            }
+    // Child tables store the block comment in the Table's own decor prefix.
+    // Two-step check: immutable get() to test, then get_mut() to modify,
+    // because we can't hold an immutable borrow across mutation.
+    if let ItemRs::Table(table) = parent
+        && table.get(key).is_some_and(|item| item.is_table())
+    {
+        let child = table.get_mut(key).unwrap().as_table_mut().unwrap();
+        match comment {
+            Some(text) => child.decor_mut().set_prefix(build_block_comment(text, "")?),
+            None => child.decor_mut().set_prefix("\n"),
         }
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            let Some(mut km) = it.key_mut(key) else {
-                return Err(PyKeyError::new_err(key.to_owned()));
-            };
-            match comment {
-                Some(text) => km
-                    .leaf_decor_mut()
-                    .set_prefix(build_block_comment(text, "")?),
-                None => km.leaf_decor_mut().set_prefix(""),
-            }
-        }
-        _ => return Err(PyKeyError::new_err(key.to_owned())),
+        return Ok(());
+    }
+    // Plain key-value pairs store it in the key's leaf decor prefix.
+    let key_mut = match parent {
+        ItemRs::Table(table) => table.key_mut(key),
+        ItemRs::Value(ValueRs::InlineTable(it)) => it.key_mut(key),
+        _ => None,
+    };
+    let Some(mut km) = key_mut else {
+        return Err(PyKeyError::new_err(key.to_owned()));
+    };
+    match comment {
+        Some(text) => km
+            .leaf_decor_mut()
+            .set_prefix(build_block_comment(text, "")?),
+        None => km.leaf_decor_mut().set_prefix(""),
     }
     Ok(())
 }

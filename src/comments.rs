@@ -169,12 +169,22 @@ pub(crate) fn set_key_prefix_comment(
 // ---------------------------------------------------------------------------
 // Array element prefix decomposition
 // ---------------------------------------------------------------------------
+//
+// In toml_edit an array element's inline comment is serialised *after* the
+// comma but *before* the next value, so it lives in the **next** element's
+// decor prefix (or the array trailing for the last element).  We call this
+// location the element's "slot".
+//
+// A slot string has the form `{inline}\n{block}{indent}` where:
+//   - `inline` is ` # text` (inline comment after comma) or empty
+//   - `block`  is zero or more `{indent}# text\n` lines
+//   - `indent` is the whitespace before the value
+//
+// The helpers below decompose / reconstruct this format and abstract over
+// the "next-element-or-trailing" indirection so that callers can work in
+// terms of *element index* without worrying about where the raw string
+// physically lives.
 
-/// Parts of an array element's prefix (or array trailing).
-/// The prefix has the form: `{inline}\n{block}{indent}` where:
-/// - `inline` is ` # text` (inline comment after comma) or empty
-/// - `block` is zero or more `{indent}# text\n` lines
-/// - `indent` is the whitespace before the value
 struct PrefixParts {
     inline: String,
     block: String,
@@ -213,34 +223,54 @@ fn join_prefix(parts: &PrefixParts) -> String {
     format!("{}\n{}{}", parts.inline, parts.block, parts.indent)
 }
 
+// -- thin helpers over split_prefix / join_prefix --
+
+/// Extract the inline-comment portion from a raw prefix or trailing string.
+fn read_inline(raw: &str) -> String {
+    split_prefix(raw).inline
+}
+
+/// Return `raw` with its inline-comment portion replaced by `new_inline`.
+fn replace_inline(raw: &str, new_inline: &str) -> String {
+    let mut parts = split_prefix(raw);
+    parts.inline = new_inline.to_owned();
+    join_prefix(&parts)
+}
+
+// -- slot helpers (abstract over "next element prefix vs trailing") --
+
+/// Read the raw string from the inline-comment slot for array element `idx`.
+fn slot_raw(arr: &toml_edit::Array, idx: usize) -> String {
+    if idx + 1 < arr.len() {
+        arr.get(idx + 1)
+            .and_then(|v| v.decor().prefix().and_then(|r| r.as_str()))
+            .unwrap_or_default()
+            .to_owned()
+    } else {
+        arr.trailing().as_str().unwrap_or_default().to_owned()
+    }
+}
+
+/// Write a raw string to the inline-comment slot for array element `idx`.
+fn set_slot_raw(arr: &mut toml_edit::Array, idx: usize, raw: &str) {
+    if idx + 1 < arr.len() {
+        arr.get_mut(idx + 1).unwrap().decor_mut().set_prefix(raw);
+    } else {
+        arr.set_trailing(raw);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Array element comment operations
 // ---------------------------------------------------------------------------
 
-/// Get the raw prefix string for array element at `idx` (from the next
-/// element's prefix, or the array trailing for the last element).
-fn get_array_raw_prefix(array: &toml_edit::Array, idx: usize) -> Option<String> {
-    let len = array.len();
-    if idx >= len {
-        return None;
-    }
-    if idx + 1 < len {
-        array
-            .get(idx + 1)?
-            .decor()
-            .prefix()?
-            .as_str()
-            .map(|s| s.to_owned())
-    } else {
-        array.trailing().as_str().map(|s| s.to_owned())
-    }
-}
-
 /// Get the inline comment for array element `idx`.
 pub(crate) fn get_array_item_comment(parent: &ItemRs, idx: usize) -> Option<String> {
     let array = parent.as_value()?.as_array()?;
-    let raw = get_array_raw_prefix(array, idx)?;
-    extract_inline_comment(&split_prefix(&raw).inline)
+    if idx >= array.len() {
+        return None;
+    }
+    extract_inline_comment(&read_inline(&slot_raw(array, idx)))
 }
 
 /// Set the inline comment for array element `idx`, preserving any block comments.
@@ -253,22 +283,18 @@ pub(crate) fn set_array_item_comment(
         .as_value_mut()
         .and_then(|v| v.as_array_mut())
         .ok_or_else(|| PyTypeError::new_err("parent is not an array"))?;
-    let len = array.len();
-    if idx >= len {
+    if idx >= array.len() {
         return Err(PyIndexError::new_err("array index out of range"));
     }
-    let raw = get_array_raw_prefix(array, idx).unwrap_or_default();
-    let mut parts = split_prefix(&raw);
-    parts.inline = match comment {
+    let new_inline = match comment {
         Some(text) => validate_inline_comment(text)?,
         None => String::new(),
     };
-    let new_prefix = join_prefix(&parts);
-    if let Some(elem) = array.get_mut(idx + 1) {
-        elem.decor_mut().set_prefix(new_prefix);
-    } else {
-        array.set_trailing(new_prefix);
-    }
+    set_slot_raw(
+        array,
+        idx,
+        &replace_inline(&slot_raw(array, idx), &new_inline),
+    );
     Ok(())
 }
 
@@ -284,6 +310,40 @@ pub(crate) fn get_value_prefix_comment(item: &ItemRs) -> Option<String> {
         return None;
     }
     extract_block_comment(&parts.block)
+}
+
+/// Snapshot all inline comments in the array, indexed by element position.
+pub(crate) fn save_inline_comments(arr: &toml_edit::Array) -> Vec<String> {
+    (0..arr.len())
+        .map(|i| read_inline(&slot_raw(arr, i)))
+        .collect()
+}
+
+/// Restore inline comments after a mutation.
+///
+/// `comments` must have the same length as `arr` and be indexed by element
+/// position.  Callers mirror their mutation on the `Vec` (e.g. `vec.insert`,
+/// `vec.remove`, `vec.push`) before calling this so the mapping is trivial.
+pub(crate) fn restore_inline_comments(arr: &mut toml_edit::Array, comments: &[String]) {
+    debug_assert_eq!(comments.len(), arr.len());
+    // Pre-compute updates (read all slots before writing any).
+    let updates: Vec<Option<String>> = comments
+        .iter()
+        .enumerate()
+        .map(|(i, inline)| {
+            let raw = slot_raw(arr, i);
+            if read_inline(&raw) != *inline {
+                Some(replace_inline(&raw, inline))
+            } else {
+                None
+            }
+        })
+        .collect();
+    for (i, update) in updates.into_iter().enumerate() {
+        if let Some(raw) = update {
+            set_slot_raw(arr, i, &raw);
+        }
+    }
 }
 
 /// Set the block comment before an array element, preserving any inline comment

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix inline comments on array elements being displaced by mutations (append,
+  insert, remove, pop, del, slice assignment, extend).
+
 ## 0.9.2 (14 March 2026)
 
 - Fix `.comment` on tables.

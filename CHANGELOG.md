@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.3 (14 March 2026)
+
 - Fix inline comments on array elements being displaced by mutations (append,
   insert, remove, pop, del, slice assignment, extend).
 

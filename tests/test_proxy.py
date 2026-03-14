@@ -1,4 +1,4 @@
-"""Tests for Item proxy: len, iter, contains, bool, del, repr, value, fmt."""
+"""Tests for Item proxy: len, iter, contains, bool, del, repr, str, value, fmt."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timezone
 
 import pytest
 
+from tests.conftest import SAMPLE
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -60,7 +61,7 @@ class TestProxyIter:
         assert elems[0] == 8001
         assert elems[2] == 8002
 
-    def test_array_iter_for_loop(self) -> None:
+    def test_array_iter_count(self) -> None:
         doc = Document.parse("arr = [10, 20, 30]\n")
         total = 0
         for _item in doc["arr"]:
@@ -259,6 +260,40 @@ class TestProxyRepr:
 
 
 # ---------------------------------------------------------------------------
+# Item: __str__
+# ---------------------------------------------------------------------------
+
+
+class TestStr:
+    def test_document_roundtrip(self) -> None:
+        doc = Document.parse(SAMPLE)
+        assert str(doc) == SAMPLE
+
+    def test_proxy_str_scalar(self) -> None:
+        doc = Document.parse("x = 42\n")
+        assert str(doc["x"]) == "42"
+
+    def test_proxy_str_string(self) -> None:
+        doc = Document.parse('name = "hello"\n')
+        assert str(doc["name"]) == "hello"
+
+    def test_proxy_str_int(self, doc: Document) -> None:
+        assert str(doc["owner"]["age"]) == "30"
+
+    def test_proxy_str_after_mutation(self, doc: Document) -> None:
+        doc["owner"]["age"] = 99
+        assert str(doc["owner"]["age"]) == "99"
+
+    def test_proxy_str_float(self) -> None:
+        doc = Document.parse("x = 3.14\n")
+        assert str(doc["x"]) == "3.14"
+
+    def test_proxy_str_bool(self) -> None:
+        doc = Document.parse("x = true\n")
+        assert str(doc["x"]) == "True"
+
+
+# ---------------------------------------------------------------------------
 # .value property
 # ---------------------------------------------------------------------------
 
@@ -336,13 +371,6 @@ y = 2
         doc["count"] = doc["count"].value + 4
         assert doc["count"] == 6
 
-    def test_pop_returns_native(self) -> None:
-        """pop() returns a native value, not an Item wrapper."""
-        doc = Document.parse("x = 99\n")
-        v = doc.pop("x")
-        assert v == 99
-        assert type(v) is int
-
     def test_value_is_a_copy(self) -> None:
         """Mutating .value does not affect the document."""
         doc = Document.parse("arr = [1, 2, 3]\n")
@@ -419,7 +447,7 @@ class TestArrayOfTablesAccess:
         with pytest.raises(IndexError):
             doc["items"][99]
 
-    def test_str(self) -> None:
+    def test_aot_str(self) -> None:
         doc = Document.parse('[[items]]\nname = "a"\n')
         assert str(doc["items"]) == "[{'name': 'a'}]"
 

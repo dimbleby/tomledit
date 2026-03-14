@@ -1,45 +1,10 @@
-"""Tests for equality semantics and string representation."""
+"""Tests for equality semantics."""
 
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 
-from tests.conftest import SAMPLE
 from tomledit import Document
-
-# ---------------------------------------------------------------------------
-# String representation (__str__)
-# ---------------------------------------------------------------------------
-
-
-class TestStr:
-    def test_document_roundtrip(self) -> None:
-        doc = Document.parse(SAMPLE)
-        assert str(doc) == SAMPLE
-
-    def test_proxy_str_scalar(self) -> None:
-        doc = Document.parse("x = 42\n")
-        assert str(doc["x"]) == "42"
-
-    def test_proxy_str_string(self) -> None:
-        doc = Document.parse('name = "hello"\n')
-        assert str(doc["name"]) == "hello"
-
-    def test_proxy_str_int(self, doc: Document) -> None:
-        assert str(doc["owner"]["age"]) == "30"
-
-    def test_proxy_str_after_mutation(self, doc: Document) -> None:
-        doc["owner"]["age"] = 99
-        assert str(doc["owner"]["age"]) == "99"
-
-    def test_proxy_str_float(self) -> None:
-        doc = Document.parse("x = 3.14\n")
-        assert str(doc["x"]) == "3.14"
-
-    def test_proxy_str_bool(self) -> None:
-        doc = Document.parse("x = true\n")
-        assert str(doc["x"]) == "True"
-
 
 # ---------------------------------------------------------------------------
 # Equality semantics
@@ -222,7 +187,7 @@ class TestProxyStructuralEquality:
         doc = Document.parse(toml)
         assert doc["a"] == doc["b"]
 
-    def test_proxy_vs_proxy_aot_different(self) -> None:
+    def test_proxy_vs_proxy_array_of_tables_different(self) -> None:
         toml = "[[a]]\nx = 1\n[[b]]\nx = 2\n"
         doc = Document.parse(toml)
         assert doc["a"] != doc["b"]
@@ -329,7 +294,7 @@ class TestEqualityEdgeCases:
         doc = Document.parse("d = 2024-01-15\n")
         assert doc["d"] == date(2024, 1, 15)
 
-    def test_date_only_not_equals_different_date(self) -> None:
+    def test_date_only_not_equal_to_different_date(self) -> None:
         doc = Document.parse("d = 2024-01-15\n")
         assert doc["d"] != date(2025, 6, 1)
 
@@ -337,7 +302,7 @@ class TestEqualityEdgeCases:
         doc = Document.parse("t = 10:30:00\n")
         assert doc["t"] == time(10, 30, 0)
 
-    def test_time_only_not_equals_different_time(self) -> None:
+    def test_time_only_not_equal_to_different_time(self) -> None:
         doc = Document.parse("t = 10:30:00\n")
         assert doc["t"] != time(11, 0, 0)
 
@@ -376,7 +341,7 @@ class TestNumericTowerEquality:
         doc = Document.parse("x = 1.0\n")
         assert doc["x"] == 1
 
-    def test_float_proxy_neq_python_int(self) -> None:
+    def test_float_proxy_not_equal_to_python_int(self) -> None:
         doc = Document.parse("x = 1.5\n")
         assert doc["x"] != 1
 

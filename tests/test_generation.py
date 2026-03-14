@@ -63,7 +63,7 @@ class TestStaleProxyDetection:
         doc.setdefault("y", 2)
         assert proxy.value == 1
 
-    def test_not_stale_after_setdefault_existing_key(self) -> None:
+    def test_valid_after_setdefault_existing_key(self) -> None:
         doc = Document.parse("x = 1")
         proxy = doc["x"]
         doc.setdefault("x", 99)  # no-op, key exists
@@ -98,7 +98,7 @@ class TestStaleProxyViaProxy:
         assert item.value == 1
         assert arr.value == [1, 2, 3]
 
-    def test_negative_index_stable_after_append(self) -> None:
+    def test_valid_after_append_with_negative_index_proxy(self) -> None:
         """Negative indices are resolved at lookup time, so append can't shift them."""
         doc = Document.parse("arr = [1, 2, 3]")
         last = doc["arr"][-1]

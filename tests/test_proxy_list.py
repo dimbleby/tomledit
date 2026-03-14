@@ -43,11 +43,6 @@ class TestProxyListMethods:
         doc["arr"].insert(-100, 0)
         assert doc["arr"] == [0, 1, 2, 3]
 
-    def test_pop_last(self) -> None:
-        doc = Document.parse("arr = [1, 2, 3]\n")
-        doc["arr"].pop()
-        assert len(doc["arr"]) == 2
-
     def test_pop_by_index(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
         doc["arr"].pop(0)

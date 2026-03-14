@@ -364,14 +364,15 @@ pub(crate) fn item_setitem_slice(
 
         // Insert new elements at start position.
         for (offset, value) in values.into_iter().enumerate() {
-            let v = into_value(value)?;
+            let mut v = into_value(value)?;
+            let inline = comments::take_inline_comment(&mut v);
             let idx = start_idx + offset;
             if idx >= arr.len() {
                 arr.push(v);
             } else {
                 arr.insert(idx, v);
             }
-            ic.insert(idx, String::new());
+            ic.insert(idx, inline);
         }
         comments::restore_inline_comments(arr, &ic);
         Ok(())
@@ -386,8 +387,12 @@ pub(crate) fn item_setitem_slice(
             )));
         }
         for (idx, value) in indices.into_iter().zip(values) {
-            let v = into_value(value)?;
+            let mut v = into_value(value)?;
+            let inline = comments::take_inline_comment(&mut v);
             arr.replace(idx, v);
+            if !inline.is_empty() {
+                comments::set_array_item_comment(arr, idx, &inline);
+            }
         }
         Ok(())
     }
@@ -507,7 +512,12 @@ pub(crate) fn item_setitem(
         }
         ItemRs::Value(ValueRs::Array(array)) => {
             let idx = resolve_index(require_int_key(key)?, array.len())?;
-            array.replace(idx, into_value(value)?);
+            let mut v = into_value(value)?;
+            let inline = comments::take_inline_comment(&mut v);
+            array.replace(idx, v);
+            if !inline.is_empty() {
+                comments::set_array_item_comment(array, idx, &inline);
+            }
             Ok(true)
         }
         ItemRs::ArrayOfTables(aot) => {
@@ -690,9 +700,10 @@ pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) 
 pub(crate) fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
         let mut ic = comments::save_inline_comments(arr);
-        let v = into_value(value)?;
+        let mut v = into_value(value)?;
+        let inline = comments::take_inline_comment(&mut v);
         arr.push(v);
-        ic.push(String::new());
+        ic.push(inline);
         comments::restore_inline_comments(arr, &ic);
         Ok(())
     } else {
@@ -704,9 +715,10 @@ pub(crate) fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResul
     if let Some(arr) = item.as_array_mut() {
         let resolved = clamp_index(index, arr.len());
         let mut ic = comments::save_inline_comments(arr);
-        let v = into_value(value)?;
+        let mut v = into_value(value)?;
+        let inline = comments::take_inline_comment(&mut v);
         arr.insert(resolved, v);
-        ic.insert(resolved, String::new());
+        ic.insert(resolved, inline);
         comments::restore_inline_comments(arr, &ic);
         Ok(())
     } else {
@@ -737,9 +749,10 @@ pub(crate) fn item_extend(item: &mut ItemRs, items: Vec<Item>, op: &str) -> PyRe
     if let Some(arr) = item.as_array_mut() {
         let mut ic = comments::save_inline_comments(arr);
         for new_item in items {
-            let v = into_value(new_item)?;
+            let mut v = into_value(new_item)?;
+            let inline = comments::take_inline_comment(&mut v);
             arr.push(v);
-            ic.push(String::new());
+            ic.push(inline);
         }
         comments::restore_inline_comments(arr, &ic);
         Ok(())

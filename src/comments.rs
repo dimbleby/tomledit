@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
@@ -38,7 +38,7 @@ fn extract_block_comment(s: &str) -> Option<String> {
 }
 
 /// Validate an inline comment and format it for storage in a decor suffix.
-fn validate_inline_comment(text: &str) -> PyResult<String> {
+pub(crate) fn validate_inline_comment(text: &str) -> PyResult<String> {
     if text.contains('\n') {
         return Err(PyValueError::new_err(
             "inline comment must not contain newlines",
@@ -273,29 +273,11 @@ pub(crate) fn get_array_item_comment(parent: &ItemRs, idx: usize) -> Option<Stri
     extract_inline_comment(&read_inline(&slot_raw(array, idx)))
 }
 
-/// Set the inline comment for array element `idx`, preserving any block comments.
-pub(crate) fn set_array_item_comment(
-    parent: &mut ItemRs,
-    idx: usize,
-    comment: Option<&str>,
-) -> PyResult<()> {
-    let array = parent
-        .as_value_mut()
-        .and_then(|v| v.as_array_mut())
-        .ok_or_else(|| PyTypeError::new_err("parent is not an array"))?;
-    if idx >= array.len() {
-        return Err(PyIndexError::new_err("array index out of range"));
-    }
-    let new_inline = match comment {
-        Some(text) => validate_inline_comment(text)?,
-        None => String::new(),
-    };
-    set_slot_raw(
-        array,
-        idx,
-        &replace_inline(&slot_raw(array, idx), &new_inline),
-    );
-    Ok(())
+/// Set the inline comment for array element `idx`, preserving any block
+/// comments.  `inline` is a pre-validated raw suffix (e.g. `" # note"`)
+/// or empty to clear.
+pub(crate) fn set_array_item_comment(arr: &mut toml_edit::Array, idx: usize, inline: &str) {
+    set_slot_raw(arr, idx, &replace_inline(&slot_raw(arr, idx), inline));
 }
 
 /// Get the block comment before an array element from its value's decor prefix.
@@ -310,6 +292,29 @@ pub(crate) fn get_value_prefix_comment(item: &ItemRs) -> Option<String> {
         return None;
     }
     extract_block_comment(&parts.block)
+}
+
+/// Extract (and clear) an inline comment from a value's decor suffix.
+///
+/// When [`ItemProxy::clone_item`] clones an array element it copies the
+/// slot-based inline comment into the value's decor suffix.  Array mutation
+/// functions call this to retrieve that comment before pushing/replacing
+/// the value, then feed it into the target array's slot system.
+/// Returns the raw suffix (e.g. `" # note"`) or empty string if none,
+/// matching the format used by [`save_inline_comments`].
+pub(crate) fn take_inline_comment(value: &mut ValueRs) -> String {
+    let raw = value
+        .decor()
+        .suffix()
+        .and_then(|r| r.as_str())
+        .unwrap_or_default();
+    if raw.trim().starts_with('#') {
+        let result = raw.to_owned();
+        value.decor_mut().set_suffix("");
+        result
+    } else {
+        String::new()
+    }
 }
 
 /// Snapshot all inline comments in the array, indexed by element position.

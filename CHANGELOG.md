@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.9.5 (15 March 2026)
+
+- Fix insertion of dictionaries into inline tables
+
 ## 0.9.4 (15 March 2026)
 
 - Support `.inline_comment` on inline table values (read, write, preserve across mutations).

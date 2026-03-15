@@ -521,20 +521,168 @@ class TestComment:
         assert doc["t"]["x"].comment is None
         assert str(doc) == "t = {x = 1, y = 2}\n"
 
-    def test_inline_comment_on_inline_table_value_rejected(self) -> None:
-        """Inline comments inside inline tables would produce invalid TOML
-        because # comments out everything to end-of-line, eating `,` and `}`."""
+    def test_set_inline_comment_on_inline_table_value(self) -> None:
+        """Setting inline comment on inline table value produces multiline."""
         doc = Document.parse("t = {x = 1, y = 2}\n")
-        with pytest.raises(TypeError, match="inline comment"):
-            doc["t"]["x"].inline_comment = "# boom"
-        with pytest.raises(TypeError, match="inline comment"):
-            doc["t"]["y"].inline_comment = "# boom"
+        doc["t"]["x"].inline_comment = "# boom"
+        result = str(doc)
+        assert "# boom" in result
+        doc2 = Document.parse(result)
+        assert doc2["t"]["x"] == 1
+        assert doc2["t"]["y"] == 2
+        assert doc2["t"]["x"].inline_comment == "# boom"
+
+    def test_read_inline_comment_on_inline_table_value(self) -> None:
+        """Inline comments on inline table values can be read."""
+        doc = Document.parse("t = {\n  x = 1, # note on x\n  y = 2,\n}\n")
+        assert doc["t"]["x"].inline_comment == "# note on x"
+        assert doc["t"]["y"].inline_comment is None
+
+    def test_read_inline_comment_on_last_inline_table_value(self) -> None:
+        """Last element's inline comment lives in trailing."""
+        doc = Document.parse("t = {\n  x = 1,\n  y = 2, # note on y\n}\n")
+        assert doc["t"]["x"].inline_comment is None
+        assert doc["t"]["y"].inline_comment == "# note on y"
+
+    def test_read_inline_comment_all_values(self) -> None:
+        """All inline table values can have inline comments."""
+        src = "t = {\n  a = 1, # ca\n  b = 2, # cb\n  c = 3, # cc\n}\n"
+        doc = Document.parse(src)
+        assert doc["t"]["a"].inline_comment == "# ca"
+        assert doc["t"]["b"].inline_comment == "# cb"
+        assert doc["t"]["c"].inline_comment == "# cc"
+
+    def test_set_and_clear_inline_comment_on_inline_table_value(self) -> None:
+        """Set then clear inline comment."""
+        doc = Document.parse("t = {\n  x = 1,\n  y = 2,\n}\n")
+        doc["t"]["x"].inline_comment = "# hi"
+        assert doc["t"]["x"].inline_comment == "# hi"
+        doc["t"]["x"].inline_comment = None
+        assert doc["t"]["x"].inline_comment is None
 
     def test_clear_inline_comment_on_inline_table_value_allowed(self) -> None:
         """Clearing (None) is always safe, even inside inline tables."""
         doc = Document.parse("t = {x = 1, y = 2}\n")
         doc["t"]["x"].inline_comment = None
         assert str(doc) == "t = {x = 1, y = 2}\n"
+
+    def test_inline_comment_single_key_inline_table(self) -> None:
+        """Single-key inline table: comment goes to trailing."""
+        doc = Document.parse("t = {\n  x = 1,\n}\n")
+        doc["t"]["x"].inline_comment = "# only"
+        assert doc["t"]["x"].inline_comment == "# only"
+        result = str(doc)
+        doc2 = Document.parse(result)
+        assert doc2["t"]["x"].inline_comment == "# only"
+
+    def test_inline_comment_coexists_with_block_comment(self) -> None:
+        """Inline comment on x and block comment on y are independent."""
+        src = "t = {\n  x = 1, # inline on x\n  # block on y\n  y = 2,\n}\n"
+        doc = Document.parse(src)
+        assert doc["t"]["x"].inline_comment == "# inline on x"
+        assert doc["t"]["y"].comment == "# block on y"
+        assert doc["t"]["y"].inline_comment is None
+        assert doc["t"]["x"].comment is None
+
+    def test_delete_key_preserves_sibling_inline_comments(self) -> None:
+        """Deleting middle key preserves other keys' inline comments."""
+        src = "t = {\n  a = 1, # ca\n  b = 2, # cb\n  c = 3, # cc\n}\n"
+        doc = Document.parse(src)
+        del doc["t"]["b"]
+        assert doc["t"]["a"].inline_comment == "# ca"
+        assert doc["t"]["c"].inline_comment == "# cc"
+
+    def test_delete_first_key_preserves_inline_comments(self) -> None:
+        """Deleting first key preserves remaining comments."""
+        src = "t = {\n  a = 1, # ca\n  b = 2, # cb\n}\n"
+        doc = Document.parse(src)
+        del doc["t"]["a"]
+        assert doc["t"]["b"].inline_comment == "# cb"
+
+    def test_delete_last_key_preserves_inline_comments(self) -> None:
+        """Deleting last key preserves remaining comments."""
+        src = "t = {\n  a = 1, # ca\n  b = 2, # cb\n}\n"
+        doc = Document.parse(src)
+        del doc["t"]["b"]
+        assert doc["t"]["a"].inline_comment == "# ca"
+
+    def test_pop_key_preserves_inline_comments(self) -> None:
+        """pop() preserves sibling inline comments."""
+        src = "t = {\n  a = 1, # ca\n  b = 2, # cb\n  c = 3, # cc\n}\n"
+        doc = Document.parse(src)
+        val = doc["t"].pop("b")
+        assert val == 2
+        assert doc["t"]["a"].inline_comment == "# ca"
+        assert doc["t"]["c"].inline_comment == "# cc"
+
+    def test_add_key_preserves_inline_comments(self) -> None:
+        """Adding a new key preserves existing inline comments."""
+        src = "t = {\n  a = 1, # ca\n  b = 2, # cb\n}\n"
+        doc = Document.parse(src)
+        doc["t"]["c"] = 3
+        assert doc["t"]["a"].inline_comment == "# ca"
+        assert doc["t"]["b"].inline_comment == "# cb"
+        assert doc["t"]["c"].inline_comment is None
+
+    def test_update_preserves_inline_comments(self) -> None:
+        """update() with new keys preserves existing inline comments."""
+        src = "t = {\n  a = 1, # ca\n}\n"
+        doc = Document.parse(src)
+        doc["t"].update({"b": 2})
+        assert doc["t"]["a"].inline_comment == "# ca"
+
+    def test_setdefault_preserves_inline_comments(self) -> None:
+        """setdefault() with new key preserves existing inline comments."""
+        src = "t = {\n  a = 1, # ca\n}\n"
+        doc = Document.parse(src)
+        doc["t"].setdefault("b", 2)
+        assert doc["t"]["a"].inline_comment == "# ca"
+
+    def test_clone_inline_table_value_carries_inline_comment(self) -> None:
+        """Assigning a value from an inline table copies its inline comment."""
+        src = "t = {\n  x = 1, # travel\n  y = 2,\n}\narr = [0]\n"
+        doc = Document.parse(src)
+        doc["arr"][0] = doc["t"]["x"]
+        assert doc["arr"][0].inline_comment == "# travel"
+
+    def test_inline_table_comment_not_misattributed(self) -> None:
+        """An inline comment after x must not appear as y's block comment."""
+        doc = Document.parse("t = {\n  x = 1, # note on x\n  y = 2,\n}\n")
+        assert doc["t"]["x"].comment is None
+        assert doc["t"]["y"].comment is None
+
+    def test_inline_table_set_comment_preserves_prev_inline(self) -> None:
+        """Setting y's block comment must not clobber x's inline comment."""
+        src = "t = {\n  x = 1, # note on x\n  y = 2,\n}\n"
+        doc = Document.parse(src)
+        doc["t"]["y"].comment = "# block on y"
+        result = str(doc)
+        # x's inline comment survives in the serialised output
+        assert "# note on x" in result
+        assert "# block on y" in result
+        # roundtrip: y's block comment reads back correctly
+        doc2 = Document.parse(result)
+        assert doc2["t"]["y"].comment == "# block on y"
+
+    def test_inline_table_clear_comment_preserves_prev_inline(self) -> None:
+        """Clearing y's block comment preserves x's inline comment."""
+        src = "t = {\n  x = 1, # note on x\n  # block on y\n  y = 2,\n}\n"
+        doc = Document.parse(src)
+        assert doc["t"]["y"].comment == "# block on y"
+        doc["t"]["y"].comment = None
+        result = str(doc)
+        assert "# note on x" in result
+        doc2 = Document.parse(result)
+        assert doc2["t"]["y"].comment is None
+
+    def test_inline_table_both_inline_and_block_separated(self) -> None:
+        """When the prefix has both an inline comment from the previous
+        element and a block comment for this key, only the block portion
+        is returned by .comment."""
+        src = "t = {\n  x = 1, # inline on x\n  # block on y\n  y = 2,\n}\n"
+        doc = Document.parse(src)
+        assert doc["t"]["x"].comment is None
+        assert doc["t"]["y"].comment == "# block on y"
 
     # ---- array comment edge cases ----
 

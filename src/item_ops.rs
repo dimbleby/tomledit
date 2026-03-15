@@ -9,6 +9,23 @@ use crate::equality;
 use crate::item::Item;
 
 // ---------------------------------------------------------------------------
+// Inline-table comment-preserving helpers
+// ---------------------------------------------------------------------------
+
+/// Remove a key from an inline table, preserving sibling inline comments.
+/// Returns the removed value, or `None` if the key was not found.
+fn it_remove_preserving(it: &mut toml_edit::InlineTable, key: &str) -> Option<toml_edit::Value> {
+    let mut ic = comments::save_it_inline_comments(it);
+    let pos = comments::it_key_position(it, key);
+    let removed = it.remove(key)?;
+    if let Some(pos) = pos {
+        ic.remove(pos);
+    }
+    comments::restore_it_inline_comments(it, &ic);
+    Some(removed)
+}
+
+// ---------------------------------------------------------------------------
 // Decor preservation
 // ---------------------------------------------------------------------------
 
@@ -19,6 +36,13 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         item[key] = value.0;
         return;
     }
+
+    // For new keys in inline tables, preserve sibling inline comments
+    // (existing keys don't change key order, so no save/restore needed).
+    let saved_ic = item
+        .as_inline_table()
+        .filter(|it| !it.contains_key(key))
+        .map(comments::save_it_inline_comments);
 
     let old_decor = item
         .get(key)
@@ -39,6 +63,13 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         }
         (_, Err(new_item)) => {
             item[key] = new_item;
+        }
+    }
+
+    if let Some(mut ic) = saved_ic {
+        ic.push(String::new());
+        if let Some(it) = item.as_inline_table_mut() {
+            comments::restore_it_inline_comments(it, &ic);
         }
     }
 }
@@ -547,7 +578,7 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
         }
         ItemRs::Value(ValueRs::InlineTable(it)) => {
             let k = require_str_key(key)?;
-            if it.remove(&k).is_none() {
+            if it_remove_preserving(it, &k).is_none() {
                 return Err(PyKeyError::new_err(k));
             }
             Ok(())
@@ -588,7 +619,7 @@ pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyR
             }
             ItemRs::Value(ValueRs::InlineTable(it)) => {
                 let key: &str = key_obj.extract()?;
-                it.remove(key)
+                it_remove_preserving(it, key)
                     .map(|v| Item(ItemRs::Value(v)))
                     .ok_or_else(|| PyKeyError::new_err(key.to_owned()))
             }

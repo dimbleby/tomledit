@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Still more comment fixes
+- Support `.inline_comment` on inline table values (read, write, preserve across mutations).
+- Fix `.comment` on inline table keys being misattributed to the wrong key.
 
 ## 0.9.3 (14 March 2026)
 

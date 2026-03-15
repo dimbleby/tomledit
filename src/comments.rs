@@ -116,10 +116,12 @@ pub(crate) fn get_key_prefix_comment(parent: &ItemRs, key: &str) -> Option<Strin
         let raw = child.decor().prefix()?.as_str()?;
         return extract_block_comment(raw);
     }
+    if let ItemRs::Value(ValueRs::InlineTable(it)) = parent {
+        return get_it_block_comment(it, key);
+    }
     // Plain key-value pairs store it in the key's leaf decor prefix.
     let raw = match parent {
         ItemRs::Table(table) => table.key(key)?.leaf_decor().prefix()?.as_str()?,
-        ItemRs::Value(ValueRs::InlineTable(it)) => it.key(key)?.leaf_decor().prefix()?.as_str()?,
         _ => return None,
     };
     extract_block_comment(raw)
@@ -136,8 +138,6 @@ pub(crate) fn set_key_prefix_comment(
     comment: Option<&str>,
 ) -> PyResult<()> {
     // Child tables store the block comment in the Table's own decor prefix.
-    // Two-step check: immutable get() to test, then get_mut() to modify,
-    // because we can't hold an immutable borrow across mutation.
     if let ItemRs::Table(table) = parent
         && table.get(key).is_some_and(|item| item.is_table())
     {
@@ -148,10 +148,12 @@ pub(crate) fn set_key_prefix_comment(
         }
         return Ok(());
     }
+    if let ItemRs::Value(ValueRs::InlineTable(it)) = parent {
+        return set_it_block_comment(it, key, comment);
+    }
     // Plain key-value pairs store it in the key's leaf decor prefix.
     let key_mut = match parent {
         ItemRs::Table(table) => table.key_mut(key),
-        ItemRs::Value(ValueRs::InlineTable(it)) => it.key_mut(key),
         _ => None,
     };
     let Some(mut km) = key_mut else {
@@ -372,4 +374,165 @@ pub(crate) fn set_value_prefix_comment(item: &mut ItemRs, comment: Option<&str>)
     let new_prefix = join_prefix(&parts);
     decor.set_prefix(new_prefix);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Inline-table comment operations
+// ---------------------------------------------------------------------------
+//
+// Inline tables use the same next-element indirection as arrays: an inline
+// comment after key K's value is stored in the *next* key's
+// `leaf_decor().prefix()` (or `inline_table.trailing()` for the last key).
+//
+// Block comments (.comment) also live in the key's leaf_decor prefix, but
+// for non-first keys the prefix mixes the *previous* key's inline comment
+// with this key's block comment; `split_prefix` separates them.
+
+// -- block comment helpers (.comment on inline table keys) --
+
+/// Whether `key` is the first key in the inline table's iteration order.
+fn is_first_it_key(it: &toml_edit::InlineTable, key: &str) -> bool {
+    it.iter().next().is_some_and(|(k, _)| k == key)
+}
+
+/// Extract the block comment from an inline table key's prefix.
+fn get_it_block_comment(it: &toml_edit::InlineTable, key: &str) -> Option<String> {
+    let raw = it.key(key)?.leaf_decor().prefix()?.as_str()?;
+    if is_first_it_key(it, key) {
+        extract_block_comment(raw)
+    } else {
+        let parts = split_prefix(raw);
+        if parts.block.is_empty() {
+            None
+        } else {
+            extract_block_comment(&parts.block)
+        }
+    }
+}
+
+/// Set the block comment on an inline table key's prefix.
+fn set_it_block_comment(
+    it: &mut toml_edit::InlineTable,
+    key: &str,
+    comment: Option<&str>,
+) -> PyResult<()> {
+    let is_first = is_first_it_key(it, key);
+    let mut km = it
+        .key_mut(key)
+        .ok_or_else(|| PyKeyError::new_err(key.to_owned()))?;
+    if is_first {
+        match comment {
+            Some(text) => km
+                .leaf_decor_mut()
+                .set_prefix(build_block_comment(text, "")?),
+            None => km.leaf_decor_mut().set_prefix(""),
+        }
+    } else {
+        let raw = km
+            .leaf_decor()
+            .prefix()
+            .and_then(|r| r.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        let mut parts = split_prefix(&raw);
+        parts.block = match comment {
+            Some(text) => build_block_comment(text, &parts.indent)?,
+            None => String::new(),
+        };
+        km.leaf_decor_mut().set_prefix(join_prefix(&parts));
+    }
+    Ok(())
+}
+
+// -- slot system (inline comment in next key's prefix / trailing) --
+
+/// Find the key that follows `key` in iteration order.
+fn next_it_key(it: &toml_edit::InlineTable, key: &str) -> Option<String> {
+    let mut iter = it.iter().skip_while(|(k, _)| *k != key);
+    iter.next();
+    iter.next().map(|(k, _)| k.to_owned())
+}
+
+/// Find the 0-based position of `key` in iteration order.
+pub(crate) fn it_key_position(it: &toml_edit::InlineTable, key: &str) -> Option<usize> {
+    it.iter().position(|(k, _)| k == key)
+}
+
+/// Read the raw slot string.  `next_key` is the key after the target in
+/// iteration order, or `None` for the last key (which uses trailing).
+fn it_slot_raw(it: &toml_edit::InlineTable, next_key: Option<&str>) -> String {
+    match next_key {
+        Some(next) => it
+            .key(next)
+            .and_then(|k| k.leaf_decor().prefix().and_then(|r| r.as_str()))
+            .unwrap_or_default()
+            .to_owned(),
+        None => it.trailing().as_str().unwrap_or_default().to_owned(),
+    }
+}
+
+/// Write a raw slot string.  `next_key` is the key after the target in
+/// iteration order, or `None` for the last key (which uses trailing).
+fn set_it_slot_raw(it: &mut toml_edit::InlineTable, next_key: Option<&str>, raw: &str) {
+    match next_key {
+        Some(next) => {
+            it.key_mut(next).unwrap().leaf_decor_mut().set_prefix(raw);
+        }
+        None => it.set_trailing(raw),
+    }
+}
+
+// -- higher-level inline table comment operations --
+
+/// Get the inline comment for an inline-table key.
+pub(crate) fn get_it_item_comment(it: &toml_edit::InlineTable, key: &str) -> Option<String> {
+    it.get(key)?;
+    let next = next_it_key(it, key);
+    extract_inline_comment(&read_inline(&it_slot_raw(it, next.as_deref())))
+}
+
+/// Set the inline comment for an inline-table key.  `inline` is a
+/// pre-validated raw suffix (e.g. `" # note"`) or empty to clear.
+pub(crate) fn set_it_item_comment(it: &mut toml_edit::InlineTable, key: &str, inline: &str) {
+    let next = next_it_key(it, key);
+    let raw = it_slot_raw(it, next.as_deref());
+    if read_inline(&raw) == inline {
+        return;
+    }
+    set_it_slot_raw(it, next.as_deref(), &replace_inline(&raw, inline));
+}
+
+/// Snapshot all inline comments in the inline table (iteration order).
+pub(crate) fn save_it_inline_comments(it: &toml_edit::InlineTable) -> Vec<String> {
+    let keys: Vec<&str> = it.iter().map(|(k, _)| k).collect();
+    (0..keys.len())
+        .map(|i| read_inline(&it_slot_raw(it, keys.get(i + 1).copied())))
+        .collect()
+}
+
+/// Restore inline comments after a mutation.
+///
+/// `comments` must have the same length as `it` and be in iteration order.
+/// Callers mirror their mutation on the Vec before calling this.
+pub(crate) fn restore_it_inline_comments(it: &mut toml_edit::InlineTable, comments: &[String]) {
+    debug_assert_eq!(comments.len(), it.len());
+    let keys: Vec<String> = it.iter().map(|(k, _)| k.to_owned()).collect();
+    let n = keys.len();
+    let updates: Vec<Option<String>> = (0..n)
+        .map(|i| {
+            let next = keys.get(i + 1).map(|k| k.as_str());
+            let raw = it_slot_raw(it, next);
+            if read_inline(&raw) != comments[i] {
+                Some(replace_inline(&raw, &comments[i]))
+            } else {
+                None
+            }
+        })
+        .collect();
+    for (i, update) in updates.into_iter().enumerate() {
+        if let Some(raw) = update {
+            let next = keys.get(i + 1).map(|k| k.as_str());
+            set_it_slot_raw(it, next, &raw);
+        }
+    }
 }

@@ -80,21 +80,34 @@ impl ItemProxy {
 
     /// Clone the toml_edit item at this proxy's path.
     ///
-    /// For array elements, the inline comment (stored externally in the array's
-    /// slot system) is embedded into the cloned value's decor suffix so that it
-    /// travels with the value when inserted into another array.
+    /// For array elements and inline-table values the inline comment is stored
+    /// externally (slot system).  It is embedded into the cloned value's decor
+    /// suffix so that it travels with the value when inserted elsewhere.
     pub(crate) fn clone_item(&self, py: Python<'_>) -> PyResult<ItemRs> {
         let doc = self.document.borrow(py);
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
         let mut cloned = item.clone();
-        if let Some(Key::Int(idx)) = self.path.last() {
-            let parent = self.navigate_parent(&doc.inner)?;
-            if let Some(comment) = comments::get_array_item_comment(parent, *idx)
-                && let Some(v) = cloned.as_value_mut()
-            {
-                v.decor_mut().set_suffix(format!(" {comment}"));
+        // For array elements and inline-table values, the inline comment is
+        // stored externally (slot system).  Embed it in the clone's decor
+        // suffix so it travels with the value.
+        let slot_comment = match self.path.last() {
+            Some(Key::Int(idx)) if self.path.len() >= 2 => {
+                let parent = self.navigate_parent(&doc.inner)?;
+                comments::get_array_item_comment(parent, *idx)
             }
+            Some(Key::Str(key)) if self.path.len() >= 2 => {
+                let parent = self.navigate_parent(&doc.inner)?;
+                parent
+                    .as_inline_table()
+                    .and_then(|it| comments::get_it_item_comment(it, key))
+            }
+            _ => None,
+        };
+        if let Some(comment) = slot_comment
+            && let Some(v) = cloned.as_value_mut()
+        {
+            v.decor_mut().set_suffix(format!(" {comment}"));
         }
         Ok(cloned)
     }
@@ -380,6 +393,15 @@ impl ItemProxy {
             let parent = self.navigate_parent(&doc.inner)?;
             return Ok(comments::get_array_item_comment(parent, *idx));
         }
+        // Inline-table values: comment lives in next key's prefix / trailing.
+        if let Some(Key::Str(key)) = self.path.last()
+            && self.path.len() >= 2
+        {
+            let parent = self.navigate_parent(&doc.inner)?;
+            if let Some(it) = parent.as_inline_table() {
+                return Ok(comments::get_it_item_comment(it, key));
+            }
+        }
         let item = self.navigate(&doc.inner)?;
         Ok(comments::get_suffix_comment(item))
     }
@@ -392,28 +414,30 @@ impl ItemProxy {
     pub fn set_inline_comment(&self, py: Python<'_>, value: Option<&str>) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
+        // Slot-based paths (arrays, inline tables) need pre-validated raw format.
+        let raw = || -> PyResult<String> {
+            Ok(match value {
+                Some(text) => comments::validate_inline_comment(text)?,
+                None => String::new(),
+            })
+        };
         if let Some(Key::Int(idx)) = self.path.last() {
+            let raw = raw()?;
             let parent = self.navigate_parent_mut(&mut doc.inner)?;
             let array = parent
                 .as_value_mut()
                 .and_then(|v| v.as_array_mut())
                 .ok_or_else(|| PyTypeError::new_err("parent is not an array"))?;
-            let raw = match value {
-                Some(text) => comments::validate_inline_comment(text)?,
-                None => String::new(),
-            };
             comments::set_array_item_comment(array, *idx, &raw);
             return Ok(());
         }
-        // Inline comments inside single-line inline tables would produce
-        // invalid TOML (the # eats the rest of the line including `}`).
-        if value.is_some() && self.path.len() >= 2 {
-            let parent = self.navigate_parent(&doc.inner)?;
-            if parent.is_inline_table() {
-                return Err(pyo3::exceptions::PyTypeError::new_err(
-                    "cannot set inline comment on inline table value \
-                     (comment would consume the closing `}`)",
-                ));
+        if let Some(Key::Str(key)) = self.path.last()
+            && self.path.len() >= 2
+        {
+            let parent = self.navigate_parent_mut(&mut doc.inner)?;
+            if let Some(it) = parent.as_value_mut().and_then(|v| v.as_inline_table_mut()) {
+                comments::set_it_item_comment(it, key, &raw()?);
+                return Ok(());
             }
         }
         let item = self.navigate_mut(&mut doc.inner)?;

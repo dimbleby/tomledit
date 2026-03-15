@@ -222,6 +222,17 @@ class TestInlineTableMutation:
         doc["owner"]["email"] = "alice@example.com"
         assert doc["owner"]["email"] == "alice@example.com"
 
+    def test_assign_dict_to_inline_table_key(self) -> None:
+        """Assigning a dict into an inline table must produce a nested inline
+        table."""
+        doc = Document.parse("it = { a = 1 }\n")
+        doc["it"]["b"] = {"foo": "bar"}
+        assert doc["it"]["b"]["foo"] == "bar"
+        assert list(doc["it"]) == ["a", "b"]
+        assert str(doc) == 'it = { a = 1 , b = { foo = "bar" } }\n'
+        doc2 = Document.parse(str(doc))
+        assert doc2 == doc
+
 
 # ---------------------------------------------------------------------------
 # Nested array access (navigate_parent with Key::Int)

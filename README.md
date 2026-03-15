@@ -1,5 +1,7 @@
 # tomledit
 
+[![PyPI](https://img.shields.io/pypi/v/tomledit)](https://pypi.org/project/tomledit/)
+
 A format-preserving TOML editor for Python, powered by Rust's
 [toml_edit](https://docs.rs/toml_edit).
 

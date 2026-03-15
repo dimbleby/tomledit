@@ -32,7 +32,8 @@ fn it_remove_preserving(it: &mut toml_edit::InlineTable, key: &str) -> Option<to
 pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: Item) {
     // Tables and ArrayOfTables must stay as-is; into_value() would convert
     // a standard Table ([foo]) into an InlineTable (foo = {}).
-    if value.0.is_table() || value.0.is_array_of_tables() {
+    // Exception: inside inline tables, nested dicts MUST become inline tables.
+    if (value.0.is_table() || value.0.is_array_of_tables()) && !item.is_inline_table() {
         item[key] = value.0;
         return;
     }

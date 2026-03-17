@@ -109,7 +109,6 @@ pub(crate) fn set_suffix_comment(item: &mut ItemRs, comment: Option<&str>) -> Py
 /// Table's own decor prefix (before the `[` bracket), not in the key's
 /// leaf decor (which would be *inside* the brackets).
 pub(crate) fn get_key_prefix_comment(parent: &ItemRs, key: &str) -> Option<String> {
-    // Child tables store the block comment in the Table's own decor prefix.
     if let ItemRs::Table(table) = parent
         && let Some(ItemRs::Table(child)) = table.get(key)
     {
@@ -119,7 +118,6 @@ pub(crate) fn get_key_prefix_comment(parent: &ItemRs, key: &str) -> Option<Strin
     if let ItemRs::Value(ValueRs::InlineTable(it)) = parent {
         return get_it_block_comment(it, key);
     }
-    // Plain key-value pairs store it in the key's leaf decor prefix.
     let raw = match parent {
         ItemRs::Table(table) => table.key(key)?.leaf_decor().prefix()?.as_str()?,
         _ => return None,
@@ -137,7 +135,6 @@ pub(crate) fn set_key_prefix_comment(
     key: &str,
     comment: Option<&str>,
 ) -> PyResult<()> {
-    // Child tables store the block comment in the Table's own decor prefix.
     if let ItemRs::Table(table) = parent
         && table.get(key).is_some_and(|item| item.is_table())
     {
@@ -151,7 +148,6 @@ pub(crate) fn set_key_prefix_comment(
     if let ItemRs::Value(ValueRs::InlineTable(it)) = parent {
         return set_it_block_comment(it, key, comment);
     }
-    // Plain key-value pairs store it in the key's leaf decor prefix.
     let key_mut = match parent {
         ItemRs::Table(table) => table.key_mut(key),
         _ => None,
@@ -510,7 +506,7 @@ pub(crate) fn save_it_inline_comments(it: &toml_edit::InlineTable) -> Vec<String
         .collect()
 }
 
-/// Restore inline comments after a mutation.
+/// Restore inline-table inline comments after a mutation.
 ///
 /// `comments` must have the same length as `it` and be in iteration order.
 /// Callers mirror their mutation on the Vec before calling this.

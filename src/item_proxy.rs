@@ -10,30 +10,7 @@ use crate::document::Document;
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
-
-fn navigate_path<'a>(doc: &'a DocumentRs, path: &[Key]) -> PyResult<&'a ItemRs> {
-    let mut current: &ItemRs = doc.as_item();
-    for key in path {
-        let next = match key {
-            Key::Str(s) => current.get(s.as_str()),
-            Key::Int(i) => current.get(*i),
-        };
-        current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
-    }
-    Ok(current)
-}
-
-fn navigate_path_mut<'a>(doc: &'a mut DocumentRs, path: &[Key]) -> PyResult<&'a mut ItemRs> {
-    let mut current: &mut ItemRs = doc.as_item_mut();
-    for key in path {
-        let next = match key {
-            Key::Str(s) => current.get_mut(s.as_str()),
-            Key::Int(i) => current.get_mut(*i),
-        };
-        current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
-    }
-    Ok(current)
-}
+use crate::views::{ItemsView, KeysView, ValuesView};
 
 /// A reference to a value inside a Document (table, array, or scalar).
 ///
@@ -110,30 +87,37 @@ impl ItemProxy {
     }
 
     fn navigate<'a>(&self, doc: &'a DocumentRs) -> PyResult<&'a ItemRs> {
-        navigate_path(doc, &self.path)
+        item_ops::navigate_path(doc, &self.path)
     }
 
     fn navigate_mut<'a>(&self, doc: &'a mut DocumentRs) -> PyResult<&'a mut ItemRs> {
-        navigate_path_mut(doc, &self.path)
+        item_ops::navigate_path_mut(doc, &self.path)
     }
 
     fn child_proxy(&self, py: Python<'_>, key: Key) -> ItemProxy {
-        let mut path = self.path.clone();
-        path.push(key);
-        ItemProxy {
-            document: self.document.clone_ref(py),
-            path,
-            generation: self.generation,
-        }
+        Self::make_child(&self.document, &self.path, self.generation, py, key)
+    }
+
+    /// Build a child proxy from constituent parts. Used by views too.
+    pub(crate) fn make_child(
+        document: &Py<Document>,
+        path: &[Key],
+        generation: u64,
+        py: Python<'_>,
+        child_key: Key,
+    ) -> ItemProxy {
+        let mut child_path = path.to_vec();
+        child_path.push(child_key);
+        ItemProxy::new(document.clone_ref(py), child_path, generation)
     }
 
     /// Navigate to the parent item (all path segments except the last).
     fn navigate_parent<'a>(&self, doc: &'a DocumentRs) -> PyResult<&'a ItemRs> {
-        navigate_path(doc, &self.path[..self.path.len() - 1])
+        item_ops::navigate_path(doc, &self.path[..self.path.len() - 1])
     }
 
     fn navigate_parent_mut<'a>(&self, doc: &'a mut DocumentRs) -> PyResult<&'a mut ItemRs> {
-        navigate_path_mut(doc, &self.path[..self.path.len() - 1])
+        item_ops::navigate_path_mut(doc, &self.path[..self.path.len() - 1])
     }
 }
 
@@ -444,36 +428,38 @@ impl ItemProxy {
 
     // ---- dict-like methods ----
 
-    pub fn keys(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+    pub fn keys(&self, py: Python<'_>) -> PyResult<KeysView> {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_ops::item_keys(item)
+        // Validate this is a table-like item before creating the view.
+        item_ops::item_keys(item)?;
+        Ok(KeysView::new(
+            self.document.clone_ref(py),
+            self.path.clone(),
+        ))
     }
 
-    pub fn values(&self, py: Python<'_>) -> PyResult<Vec<ItemProxy>> {
+    pub fn values(&self, py: Python<'_>) -> PyResult<ValuesView> {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        let keys = item_ops::item_keys(item)?;
-        Ok(keys
-            .into_iter()
-            .map(|k| self.child_proxy(py, Key::Str(k)))
-            .collect())
+        item_ops::item_keys(item)?;
+        Ok(ValuesView::new(
+            self.document.clone_ref(py),
+            self.path.clone(),
+        ))
     }
 
-    pub fn items(&self, py: Python<'_>) -> PyResult<Vec<(String, ItemProxy)>> {
+    pub fn items(&self, py: Python<'_>) -> PyResult<ItemsView> {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        let keys = item_ops::item_keys(item)?;
-        Ok(keys
-            .into_iter()
-            .map(|k| {
-                let proxy = self.child_proxy(py, Key::Str(k.clone()));
-                (k, proxy)
-            })
-            .collect())
+        item_ops::item_keys(item)?;
+        Ok(ItemsView::new(
+            self.document.clone_ref(py),
+            self.path.clone(),
+        ))
     }
 
     #[pyo3(signature = (key, default=None, /))]

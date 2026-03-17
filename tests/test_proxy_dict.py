@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import ItemsView, KeysView, ValuesView
 from datetime import datetime
 from types import MappingProxyType
 
@@ -27,7 +28,7 @@ class TestProxyDictMethods:
 
     def test_values_are_live_proxies(self) -> None:
         doc = Document.parse("[t]\n[t.inner]\nval = 10\n")
-        vals = doc["t"].values()
+        vals = list(doc["t"].values())
         vals[0]["val"] = 99
         assert doc["t"]["inner"]["val"] == 99
 
@@ -312,7 +313,7 @@ class TestDocumentDictMethods:
 
     def test_values_returns_live_proxies(self) -> None:
         doc = Document.parse("[section]\nval = 10\n")
-        vals = doc.values()
+        vals = list(doc.values())
         assert len(vals) == 1
         vals[0]["val"] = 99
         assert doc["section"]["val"] == 99
@@ -372,3 +373,218 @@ class TestDocumentDictMethods:
     def test_clear(self, doc: Document) -> None:
         doc.clear()
         assert len(doc) == 0
+
+
+# ---------------------------------------------------------------------------
+# Live dictionary views (KeysView, ValuesView, ItemsView)
+# ---------------------------------------------------------------------------
+
+
+class TestViews:
+    # -- KeysView --
+
+    def test_keys_view_is_live(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        kv = doc.keys()
+        assert set(kv) == {"a", "b"}
+        doc["c"] = 3
+        assert set(kv) == {"a", "b", "c"}
+
+    def test_keys_view_len(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        kv = doc.keys()
+        assert len(kv) == 2
+        doc["c"] = 3
+        assert len(kv) == 3
+
+    def test_keys_view_contains(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        kv = doc.keys()
+        assert "a" in kv
+        assert "z" not in kv
+
+    def test_keys_view_repr(self) -> None:
+        doc = Document.parse("a = 1\n")
+        kv = doc.keys()
+        assert "KeysView" in repr(kv)
+        assert "'a'" in repr(kv)
+
+    def test_keys_view_set_intersection(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\nc = 3\n")
+        assert doc.keys() & {"a", "c"} == {"a", "c"}
+
+    def test_keys_view_set_union(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert doc.keys() | {"b"} == {"a", "b"}
+
+    def test_keys_view_set_difference(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.keys() - {"b"} == {"a"}
+
+    def test_keys_view_reversed(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\nc = 3\n")
+        assert list(reversed(doc.keys())) == ["c", "b", "a"]
+
+    # -- ValuesView --
+
+    def test_values_view_is_live(self) -> None:
+        doc = Document.parse("a = 1\n")
+        vv = doc.values()
+        assert len(vv) == 1
+        doc["b"] = 2
+        assert len(vv) == 2
+
+    def test_values_view_iter(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        vals = list(doc.values())
+        assert vals[0] == 1
+        assert vals[1] == 2
+
+    def test_values_view_contains(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert 1 in doc.values()
+        assert 99 not in doc.values()
+
+    # -- ItemsView --
+
+    def test_items_view_is_live(self) -> None:
+        doc = Document.parse("a = 1\n")
+        iv = doc.items()
+        assert len(iv) == 1
+        doc["b"] = 2
+        assert len(iv) == 2
+
+    def test_items_view_iter(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        pairs = list(doc.items())
+        assert pairs[0][0] == "a"
+        assert pairs[0][1] == 1
+
+    def test_items_view_contains(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert ("a", 1) in doc.items()
+        assert ("a", 99) not in doc.items()
+        assert ("z", 1) not in doc.items()
+
+    # -- Proxy (nested) views --
+
+    def test_proxy_keys_view_is_live(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        kv = doc["t"].keys()
+        assert set(kv) == {"a"}
+        doc["t"]["b"] = 2
+        kv2 = doc["t"].keys()
+        assert set(kv2) == {"a", "b"}
+
+    def test_proxy_values_view(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        vals = list(doc["t"].values())
+        assert len(vals) == 2
+
+    def test_proxy_items_view(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        pairs = dict(doc["t"].items())
+        assert pairs["a"] == 1
+        assert pairs["b"] == 2
+
+    # -- ABC registration --
+
+    def test_keys_view_isinstance(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert isinstance(doc.keys(), KeysView)
+
+    def test_values_view_isinstance(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert isinstance(doc.values(), ValuesView)
+
+    def test_items_view_isinstance(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert isinstance(doc.items(), ItemsView)
+
+    # -- KeysView: xor and eq --
+
+    def test_keys_view_set_xor(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.keys() ^ {"b", "c"} == {"a", "c"}
+
+    def test_keys_view_eq(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.keys() == {"a", "b"}
+        assert doc.keys() != {"a"}
+
+    # -- ValuesView: repr and eq --
+
+    def test_values_view_repr(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        r = repr(doc.values())
+        assert "ValuesView" in r
+        assert "2 values" in r
+
+    def test_values_view_eq(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        vals = list(doc.values())
+        assert doc.values() == vals
+        assert doc.values() != [1]
+        assert doc.values() != [1, 2, 3]
+        assert doc.values() != 42  # non-iterable
+
+    # -- ItemsView: repr and eq --
+
+    def test_items_view_repr(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        r = repr(doc.items())
+        assert "ItemsView" in r
+        assert "2 items" in r
+
+    def test_items_view_eq(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        pairs = list(doc.items())
+        assert doc.items() == pairs
+        assert doc.items() != [("a", 1)]
+        assert doc.items() != [("a", 1), ("b", 99)]
+        assert doc.items() != 42  # non-iterable
+
+    def test_items_view_contains_non_tuple(self) -> None:
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(TypeError):
+            "not a tuple" in doc.items()
+
+    # -- Nested (non-root path) view operations --
+
+    def test_proxy_keys_view_contains(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        kv = doc["t"].keys()
+        assert "a" in kv
+        assert "z" not in kv
+
+    def test_proxy_values_view_contains(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        assert 1 in doc["t"].values()
+        assert 99 not in doc["t"].values()
+
+    def test_proxy_values_view_repr(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        r = repr(doc["t"].values())
+        assert "ValuesView" in r
+
+    def test_proxy_items_view_contains(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert ("a", 1) in doc["t"].items()
+        assert ("z", 1) not in doc["t"].items()
+
+    def test_proxy_items_view_repr(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        r = repr(doc["t"].items())
+        assert "ItemsView" in r
+
+    def test_items_view_contains_wrong_length_tuple(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert ("a", 1, "extra") not in doc.items()
+
+    def test_items_view_eq_other_longer(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert doc.items() != [("a", 1), ("b", 2)]
+
+    def test_values_view_eq_element_mismatch(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.values() != [1, 99]

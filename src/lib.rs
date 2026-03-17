@@ -5,14 +5,41 @@ mod item;
 mod item_ops;
 mod item_proxy;
 mod value;
+mod views;
 
 use document::Document;
 use item_proxy::ItemProxy;
 use pyo3::prelude::*;
+use pyo3::types::IntoPyDict;
+use views::{ItemsView, KeysView, ValuesView};
 
 #[pymodule]
-fn tomledit(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn tomledit(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Document>()?;
     m.add_class::<ItemProxy>()?;
+    m.add_class::<KeysView>()?;
+    m.add_class::<ValuesView>()?;
+    m.add_class::<ItemsView>()?;
+
+    // Register as collections.abc subclasses so isinstance() checks work.
+    py.run(
+        pyo3::ffi::c_str!(
+            "from collections.abc import KeysView, ValuesView, ItemsView, MutableMapping\n\
+             KeysView.register(_KV)\n\
+             ValuesView.register(_VV)\n\
+             ItemsView.register(_IV)\n\
+             MutableMapping.register(_Doc)\n"
+        ),
+        Some(
+            &[
+                ("_KV", m.getattr("KeysView")?),
+                ("_VV", m.getattr("ValuesView")?),
+                ("_IV", m.getattr("ItemsView")?),
+                ("_Doc", m.getattr("Document")?),
+            ]
+            .into_py_dict(py)?,
+        ),
+        None,
+    )?;
     Ok(())
 }

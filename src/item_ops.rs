@@ -1,6 +1,7 @@
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDate, PyDateTime, PyDelta, PyDict, PyList, PyTime, PyTzInfo};
+use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
@@ -910,4 +911,31 @@ pub(crate) fn item_fmt(item: &mut ItemRs) {
 pub(crate) enum Key {
     Str(String),
     Int(usize),
+}
+
+pub(crate) fn navigate_path<'a>(doc: &'a DocumentRs, path: &[Key]) -> PyResult<&'a ItemRs> {
+    let mut current: &ItemRs = doc.as_item();
+    for key in path {
+        let next = match key {
+            Key::Str(s) => current.get(s.as_str()),
+            Key::Int(i) => current.get(*i),
+        };
+        current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
+    }
+    Ok(current)
+}
+
+pub(crate) fn navigate_path_mut<'a>(
+    doc: &'a mut DocumentRs,
+    path: &[Key],
+) -> PyResult<&'a mut ItemRs> {
+    let mut current: &mut ItemRs = doc.as_item_mut();
+    for key in path {
+        let next = match key {
+            Key::Str(s) => current.get_mut(s.as_str()),
+            Key::Int(i) => current.get_mut(*i),
+        };
+        current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
+    }
+    Ok(current)
 }

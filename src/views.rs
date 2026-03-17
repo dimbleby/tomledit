@@ -1,0 +1,349 @@
+//! Live dictionary views (KeysView, ValuesView, ItemsView) for Document and
+//! Item proxies.  Each view holds a `Py<Document>` and a key path, just like
+//! `ItemProxy`, so it re-navigates on every access and always reflects the
+//! current state of the document.
+
+use std::collections::HashSet;
+
+use pyo3::exceptions::PyTypeError;
+use pyo3::prelude::*;
+use pyo3::types::{PyIterator, PySet, PyTuple};
+
+use crate::document::Document;
+use crate::item_ops::{self, Key};
+use crate::item_proxy::ItemProxy;
+
+use toml_edit::DocumentMut as DocumentRs;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn get_key_set(doc: &DocumentRs, path: &[Key]) -> PyResult<HashSet<String>> {
+    Ok(get_keys(doc, path)?.into_iter().collect())
+}
+
+fn other_to_string_set(other: &Bound<'_, PyAny>) -> PyResult<HashSet<String>> {
+    let mut set = HashSet::new();
+    for item in other.try_iter()? {
+        set.insert(item?.extract::<String>()?);
+    }
+    Ok(set)
+}
+
+fn string_set_to_pyset<'py>(set: HashSet<String>, py: Python<'py>) -> PyResult<Bound<'py, PySet>> {
+    PySet::new(py, set.iter())
+}
+
+fn get_keys(doc: &DocumentRs, path: &[Key]) -> PyResult<Vec<String>> {
+    if path.is_empty() {
+        Ok(doc.iter().map(|(k, _)| k.to_owned()).collect())
+    } else {
+        let item = item_ops::navigate_path(doc, path)?;
+        item_ops::item_keys(item)
+    }
+}
+
+fn get_len(doc: &DocumentRs, path: &[Key]) -> PyResult<usize> {
+    if path.is_empty() {
+        Ok(doc.len())
+    } else {
+        let item = item_ops::navigate_path(doc, path)?;
+        item_ops::item_len(item).ok_or_else(|| PyTypeError::new_err("TOML item has no len()"))
+    }
+}
+
+fn contains_key(doc: &DocumentRs, path: &[Key], key: &str) -> PyResult<bool> {
+    if path.is_empty() {
+        Ok(doc.contains_key(key))
+    } else {
+        let item = item_ops::navigate_path(doc, path)?;
+        item_ops::item_has_key(item, key)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// KeysView
+// ---------------------------------------------------------------------------
+
+/// A live view of the string keys in a TOML table (or the document root).
+#[pyclass(name = "KeysView", module = "tomledit")]
+pub(crate) struct KeysView {
+    document: Py<Document>,
+    path: Vec<Key>,
+}
+
+impl KeysView {
+    pub(crate) fn new(document: Py<Document>, path: Vec<Key>) -> Self {
+        Self { document, path }
+    }
+}
+
+#[pymethods]
+impl KeysView {
+    fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
+        let doc = self.document.bind(py).borrow();
+        get_len(&doc.inner, &self.path)
+    }
+
+    fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
+        let doc = self.document.bind(py).borrow();
+        let keys = get_keys(&doc.inner, &self.path)?;
+        let list = keys.into_pyobject(py)?;
+        Ok(list.try_iter()?.unbind())
+    }
+
+    fn __contains__(&self, py: Python<'_>, key: &str) -> PyResult<bool> {
+        let doc = self.document.bind(py).borrow();
+        contains_key(&doc.inner, &self.path, key)
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        let doc = self.document.bind(py).borrow();
+        let keys = get_keys(&doc.inner, &self.path)?;
+        let inner: Vec<String> = keys.iter().map(|k| format!("'{k}'")).collect();
+        Ok(format!("KeysView([{}])", inner.join(", ")))
+    }
+
+    fn __reversed__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
+        let doc = self.document.bind(py).borrow();
+        let mut keys = get_keys(&doc.inner, &self.path)?;
+        keys.reverse();
+        let list = keys.into_pyobject(py)?;
+        Ok(list.try_iter()?.unbind())
+    }
+
+    // Set operations — performed in Rust, only crossing to Python for the result.
+
+    fn __and__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PySet>> {
+        let doc = self.document.bind(py).borrow();
+        let ours = get_key_set(&doc.inner, &self.path)?;
+        let theirs = other_to_string_set(other)?;
+        string_set_to_pyset(&ours & &theirs, py)
+    }
+
+    fn __or__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PySet>> {
+        let doc = self.document.bind(py).borrow();
+        let ours = get_key_set(&doc.inner, &self.path)?;
+        let theirs = other_to_string_set(other)?;
+        string_set_to_pyset(&ours | &theirs, py)
+    }
+
+    fn __sub__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PySet>> {
+        let doc = self.document.bind(py).borrow();
+        let ours = get_key_set(&doc.inner, &self.path)?;
+        let theirs = other_to_string_set(other)?;
+        string_set_to_pyset(&ours - &theirs, py)
+    }
+
+    fn __xor__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PySet>> {
+        let doc = self.document.bind(py).borrow();
+        let ours = get_key_set(&doc.inner, &self.path)?;
+        let theirs = other_to_string_set(other)?;
+        string_set_to_pyset(&ours ^ &theirs, py)
+    }
+
+    fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let doc = self.document.bind(py).borrow();
+        let ours = get_key_set(&doc.inner, &self.path)?;
+        let theirs = other_to_string_set(other)?;
+        Ok(ours == theirs)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ValuesView
+// ---------------------------------------------------------------------------
+
+/// A live view of the values in a TOML table (or the document root).
+#[pyclass(name = "ValuesView", module = "tomledit")]
+pub(crate) struct ValuesView {
+    document: Py<Document>,
+    path: Vec<Key>,
+}
+
+impl ValuesView {
+    pub(crate) fn new(document: Py<Document>, path: Vec<Key>) -> Self {
+        Self { document, path }
+    }
+}
+
+#[pymethods]
+impl ValuesView {
+    fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
+        let doc = self.document.bind(py).borrow();
+        get_len(&doc.inner, &self.path)
+    }
+
+    fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
+        let doc = self.document.bind(py).borrow();
+        let keys = get_keys(&doc.inner, &self.path)?;
+        let proxies: Vec<Py<PyAny>> = keys
+            .into_iter()
+            .map(|k| {
+                ItemProxy::make_child(&self.document, &self.path, doc.generation, py, Key::Str(k))
+                    .into_pyobject(py)
+                    .map(|b| b.into_any().unbind())
+            })
+            .collect::<PyResult<_>>()?;
+        let list = proxies.into_pyobject(py)?;
+        Ok(list.try_iter()?.unbind())
+    }
+
+    fn __contains__(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let doc = self.document.bind(py).borrow();
+        let keys = get_keys(&doc.inner, &self.path)?;
+        for key in &keys {
+            let item = if self.path.is_empty() {
+                doc.inner.as_item().get(key.as_str())
+            } else {
+                item_ops::navigate_path(&doc.inner, &self.path)?.get(key.as_str())
+            };
+            if let Some(item) = item
+                && crate::equality::item_eq(item, value)?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        let doc = self.document.bind(py).borrow();
+        let len = get_len(&doc.inner, &self.path)?;
+        Ok(format!("ValuesView(<{len} values>)"))
+    }
+
+    fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let our_iter = self.__iter__(py)?;
+        let mut our_iter = our_iter.into_bound(py);
+        let other_iter = match other.try_iter() {
+            Ok(it) => it,
+            Err(_) => return Ok(false),
+        };
+        for other_val in other_iter {
+            let other_val = other_val?;
+            match our_iter.next() {
+                Some(our_val) => {
+                    if !our_val?.eq(&other_val)? {
+                        return Ok(false);
+                    }
+                }
+                None => return Ok(false),
+            }
+        }
+        Ok(our_iter.next().is_none())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ItemsView
+// ---------------------------------------------------------------------------
+
+/// A live view of the (key, value) pairs in a TOML table (or the document root).
+#[pyclass(name = "ItemsView", module = "tomledit")]
+pub(crate) struct ItemsView {
+    document: Py<Document>,
+    path: Vec<Key>,
+}
+
+impl ItemsView {
+    pub(crate) fn new(document: Py<Document>, path: Vec<Key>) -> Self {
+        Self { document, path }
+    }
+}
+
+#[pymethods]
+impl ItemsView {
+    fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
+        let doc = self.document.bind(py).borrow();
+        get_len(&doc.inner, &self.path)
+    }
+
+    fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
+        let doc = self.document.bind(py).borrow();
+        let keys = get_keys(&doc.inner, &self.path)?;
+        let pairs: Vec<(String, Py<PyAny>)> = keys
+            .into_iter()
+            .map(|k| {
+                let proxy = ItemProxy::make_child(
+                    &self.document,
+                    &self.path,
+                    doc.generation,
+                    py,
+                    Key::Str(k.clone()),
+                );
+                let obj = proxy.into_pyobject(py)?.into_any().unbind();
+                Ok((k, obj))
+            })
+            .collect::<PyResult<_>>()?;
+        let list = pairs.into_pyobject(py)?;
+        Ok(list.try_iter()?.unbind())
+    }
+
+    fn __contains__(&self, py: Python<'_>, item: &Bound<'_, PyAny>) -> PyResult<bool> {
+        // ItemsView.__contains__ expects a (key, value) tuple
+        let tuple = item
+            .cast::<PyTuple>()
+            .map_err(|_| PyTypeError::new_err("ItemsView.__contains__ requires a tuple"))?;
+        if tuple.len() != 2 {
+            return Ok(false);
+        }
+        let key: String = tuple.get_item(0)?.extract()?;
+        let value = tuple.get_item(1)?;
+
+        let doc = self.document.bind(py).borrow();
+        let target = if self.path.is_empty() {
+            doc.inner.as_item().get(key.as_str())
+        } else {
+            item_ops::navigate_path(&doc.inner, &self.path)?.get(key.as_str())
+        };
+        match target {
+            Some(item_rs) => crate::equality::item_eq(item_rs, &value),
+            None => Ok(false),
+        }
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        let doc = self.document.bind(py).borrow();
+        let len = get_len(&doc.inner, &self.path)?;
+        Ok(format!("ItemsView(<{len} items>)"))
+    }
+
+    fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let our_iter = self.__iter__(py)?;
+        let mut our_iter = our_iter.into_bound(py);
+        let other_iter = match other.try_iter() {
+            Ok(it) => it,
+            Err(_) => return Ok(false),
+        };
+        for other_val in other_iter {
+            let other_val = other_val?;
+            match our_iter.next() {
+                Some(our_val) => {
+                    if !our_val?.eq(&other_val)? {
+                        return Ok(false);
+                    }
+                }
+                None => return Ok(false),
+            }
+        }
+        Ok(our_iter.next().is_none())
+    }
+}

@@ -9,6 +9,7 @@ use crate::item::Item;
 use crate::item_ops::{self, Key};
 use crate::item_proxy::ItemProxy;
 use crate::value::Table;
+use crate::views::{ItemsView, KeysView, ValuesView};
 
 /// A TOML document that preserves formatting when edited.
 ///
@@ -86,24 +87,16 @@ impl Document {
         Ok(list.try_iter()?.unbind())
     }
 
-    pub fn keys(&self) -> Vec<&str> {
-        self.inner.iter().map(|(k, _)| k).collect()
+    pub fn keys(slf: &Bound<'_, Self>) -> KeysView {
+        KeysView::new(slf.clone().unbind(), vec![])
     }
 
-    pub fn items(slf: &Bound<'_, Self>) -> Vec<(String, ItemProxy)> {
-        let doc = slf.borrow();
-        doc.inner
-            .iter()
-            .map(|(k, _)| (k.to_owned(), Self::make_proxy(slf, k)))
-            .collect()
+    pub fn items(slf: &Bound<'_, Self>) -> ItemsView {
+        ItemsView::new(slf.clone().unbind(), vec![])
     }
 
-    pub fn values(slf: &Bound<'_, Self>) -> Vec<ItemProxy> {
-        let doc = slf.borrow();
-        doc.inner
-            .iter()
-            .map(|(k, _)| Self::make_proxy(slf, k))
-            .collect()
+    pub fn values(slf: &Bound<'_, Self>) -> ValuesView {
+        ValuesView::new(slf.clone().unbind(), vec![])
     }
 
     pub fn __len__(&self) -> usize {

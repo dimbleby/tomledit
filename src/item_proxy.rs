@@ -88,9 +88,6 @@ impl ItemProxy {
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
         let mut cloned = item.clone();
-        // For array elements and inline-table values, the inline comment is
-        // stored externally (slot system).  Embed it in the clone's decor
-        // suffix so it travels with the value.
         let slot_comment = match self.path.last() {
             Some(Key::Int(idx)) if self.path.len() >= 2 => {
                 let parent = self.navigate_parent(&doc.inner)?;

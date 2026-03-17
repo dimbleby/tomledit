@@ -23,16 +23,26 @@ fn get_key_set(doc: &DocumentRs, path: &[Key]) -> PyResult<HashSet<String>> {
     Ok(get_keys(doc, path)?.into_iter().collect())
 }
 
+/// Collect elements from `other` that are strings into a HashSet.
+/// Non-string elements are silently ignored (they can never match a key).
 fn other_to_string_set(other: &Bound<'_, PyAny>) -> PyResult<HashSet<String>> {
     let mut set = HashSet::new();
     for item in other.try_iter()? {
-        set.insert(item?.extract::<String>()?);
+        if let Ok(s) = item?.extract::<String>() {
+            set.insert(s);
+        }
     }
     Ok(set)
 }
 
-fn string_set_to_pyset<'py>(set: HashSet<String>, py: Python<'py>) -> PyResult<Bound<'py, PySet>> {
-    PySet::new(py, set.iter())
+/// Build a Python set from our string keys.
+fn keys_to_pyset<'py>(
+    doc: &DocumentRs,
+    path: &[Key],
+    py: Python<'py>,
+) -> PyResult<Bound<'py, PySet>> {
+    let keys = get_keys(doc, path)?;
+    PySet::new(py, keys.iter())
 }
 
 fn get_keys(doc: &DocumentRs, path: &[Key]) -> PyResult<Vec<String>> {
@@ -113,7 +123,10 @@ impl KeysView {
         Ok(list.try_iter()?.unbind())
     }
 
-    // Set operations — performed in Rust, only crossing to Python for the result.
+    // Set operations.
+    // __and__ and __sub__ always produce subsets of our keys (strings),
+    // so we stay in Rust.  __or__ and __xor__ can include arbitrary
+    // elements from `other`, so we delegate to Python set operations.
 
     fn __and__<'py>(
         &self,
@@ -123,18 +136,18 @@ impl KeysView {
         let doc = self.document.bind(py).borrow();
         let ours = get_key_set(&doc.inner, &self.path)?;
         let theirs = other_to_string_set(other)?;
-        string_set_to_pyset(&ours & &theirs, py)
+        let result = &ours & &theirs;
+        PySet::new(py, result.iter())
     }
 
     fn __or__<'py>(
         &self,
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PySet>> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         let doc = self.document.bind(py).borrow();
-        let ours = get_key_set(&doc.inner, &self.path)?;
-        let theirs = other_to_string_set(other)?;
-        string_set_to_pyset(&ours | &theirs, py)
+        let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
+        ours.call_method1("__or__", (other,))
     }
 
     fn __sub__<'py>(
@@ -145,25 +158,24 @@ impl KeysView {
         let doc = self.document.bind(py).borrow();
         let ours = get_key_set(&doc.inner, &self.path)?;
         let theirs = other_to_string_set(other)?;
-        string_set_to_pyset(&ours - &theirs, py)
+        let result = &ours - &theirs;
+        PySet::new(py, result.iter())
     }
 
     fn __xor__<'py>(
         &self,
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PySet>> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         let doc = self.document.bind(py).borrow();
-        let ours = get_key_set(&doc.inner, &self.path)?;
-        let theirs = other_to_string_set(other)?;
-        string_set_to_pyset(&ours ^ &theirs, py)
+        let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
+        ours.call_method1("__xor__", (other,))
     }
 
     fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         let doc = self.document.bind(py).borrow();
-        let ours = get_key_set(&doc.inner, &self.path)?;
-        let theirs = other_to_string_set(other)?;
-        Ok(ours == theirs)
+        let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
+        ours.eq(other)
     }
 }
 

@@ -205,15 +205,28 @@ impl Document {
         Ok(())
     }
 
-    #[pyo3(signature = (key, default, /))]
-    pub fn setdefault(slf: &Bound<'_, Self>, key: &str, default: Item) -> ItemProxy {
+    #[pyo3(signature = (key, default=None, /))]
+    pub fn setdefault(
+        slf: &Bound<'_, Self>,
+        key: &str,
+        default: Option<Item>,
+    ) -> PyResult<ItemProxy> {
         {
-            let mut doc = slf.borrow_mut();
-            if !doc.inner.contains_key(key) {
-                item_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, default);
+            let doc = slf.borrow();
+            if doc.inner.contains_key(key) {
+                return Ok(Self::make_proxy(slf, key));
             }
         }
-        Self::make_proxy(slf, key)
+        let default = default.ok_or_else(|| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "setdefault() requires a default value: TOML has no null type",
+            )
+        })?;
+        {
+            let mut doc = slf.borrow_mut();
+            item_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, default);
+        }
+        Ok(Self::make_proxy(slf, key))
     }
 
     pub fn clear(&mut self) {

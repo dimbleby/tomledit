@@ -226,3 +226,20 @@ class TestWrongTypeErrors:
         doc = Document.parse("[t]\na = 1\n")
         with pytest.raises(TypeError, match="extend"):
             doc["t"].extend([1, 2])
+
+    # -- view methods on wrong types --
+
+    def test_keys_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError, match="has no keys"):
+            doc["x"].keys()
+
+    def test_values_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError, match="has no values"):
+            doc["x"].values()
+
+    def test_items_on_scalar_raises(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError, match="has no items"):
+            doc["x"].items()

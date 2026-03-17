@@ -7,6 +7,7 @@ from datetime import date, datetime, time
 
 import pytest
 
+from tests.conftest import toml_literal
 from tomledit import Document, Item
 
 # ---------------------------------------------------------------------------
@@ -129,6 +130,14 @@ class TestSetNewKeys:
         assert doc["mix"][0] == 1
         assert doc["mix"][1] == "two"
         assert doc["mix"][2] == 3.0
+
+    def test_add_mixed_list_with_inline_tables(self) -> None:
+        doc = Document()
+        doc["mix"] = [1, {"a": 2}, "three"]
+        assert doc["mix"][0] == 1
+        assert doc["mix"][1]["a"] == 2
+        assert doc["mix"][2] == "three"
+        assert str(doc) == 'mix = [1, { a = 2 }, "three"]\n'
 
     def test_add_datetime(self) -> None:
         doc = Document()
@@ -325,6 +334,44 @@ class TestAssignTableToKey:
         assert 'name = "Alice"' in result
         assert 'name = "Bob"' in result
 
+    def test_assign_deeply_nested_dict_creates_regular_tables(self) -> None:
+        doc = Document()
+        doc["foo"] = {"foo": {"bar": "baz"}}
+        assert str(doc) == toml_literal("""
+            [foo.foo]
+            bar = "baz"
+        """)
+
+    def test_assign_three_level_nested_dict(self) -> None:
+        doc = Document()
+        doc["a"] = {"b": {"c": {"d": "deep"}}}
+        assert str(doc) == toml_literal("""
+            [a.b.c]
+            d = "deep"
+        """)
+
+    def test_assign_nested_dict_with_sibling_scalars(self) -> None:
+        doc = Document()
+        doc["pkg"] = {"name": "hello", "deps": {"requests": ">=2.0"}}
+        assert str(doc) == toml_literal("""
+            [pkg]
+            name = "hello"
+
+            [pkg.deps]
+            requests = ">=2.0"
+        """)
+
+    def test_assign_nested_aot_inside_dict(self) -> None:
+        doc = Document()
+        doc["pkg"] = {"servers": [{"name": "a"}, {"name": "b"}]}
+        assert str(doc) == toml_literal("""
+            [[pkg.servers]]
+            name = "a"
+
+            [[pkg.servers]]
+            name = "b"
+        """)
+
 
 # ---------------------------------------------------------------------------
 # Assign Item (proxy) as a value
@@ -493,4 +540,8 @@ class TestFormatPreservation:
         toml = "# header\na = 1\nb = 2\n"
         doc = Document.parse(toml)
         doc["a"] = 10
-        assert str(doc) == "# header\na = 10\nb = 2\n"
+        assert str(doc) == toml_literal("""
+            # header
+            a = 10
+            b = 2
+        """)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import textwrap
+
 import pytest
 
 from tomledit import Document
@@ -29,6 +31,19 @@ role = "frontend"
 ip = "10.0.0.2"
 role = "backend"
 """
+
+
+def toml_literal(text: str) -> str:
+    """Dedent a triple-quoted TOML string for comparison with ``str(doc)``.
+
+    Usage::
+
+        assert str(doc) == toml_literal(\"\"\"
+            [foo]
+            bar = 1
+        \"\"\")
+    """
+    return textwrap.dedent(text).strip() + "\n"
 
 
 @pytest.fixture

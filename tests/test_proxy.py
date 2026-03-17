@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timezone
 
 import pytest
 
-from tests.conftest import SAMPLE
+from tests.conftest import SAMPLE, toml_literal
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -461,7 +461,11 @@ class TestProxyFmt:
     def test_fmt_table(self) -> None:
         doc = Document.parse("[t]\na   =   1\nb   =   2\n")
         doc["t"].fmt()
-        assert str(doc) == "[t]\na = 1\nb = 2\n"
+        assert str(doc) == toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
 
     def test_fmt_inline_table(self) -> None:
         doc = Document.parse("meta = {x = 1 }\n")

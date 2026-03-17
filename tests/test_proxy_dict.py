@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import ItemsView, KeysView, ValuesView
+from collections.abc import ItemsView, KeysView, MutableMapping, ValuesView
 from datetime import datetime
 from types import MappingProxyType
 
@@ -131,6 +131,14 @@ class TestProxyDictMethods:
     def test_setdefault_existing(self, doc: Document) -> None:
         result = doc["owner"].setdefault("name", "fallback")
         assert result == "Alice"  # not overwritten
+
+    def test_setdefault_no_default_existing(self, doc: Document) -> None:
+        result = doc["owner"].setdefault("name")
+        assert result == "Alice"
+
+    def test_setdefault_no_default_missing(self, doc: Document) -> None:
+        with pytest.raises(TypeError, match="TOML has no null type"):
+            doc["owner"].setdefault("email")
 
     # -- clear --
 
@@ -368,6 +376,16 @@ class TestDocumentDictMethods:
         result = doc.setdefault("x", 99)
         assert result == 1
 
+    def test_setdefault_no_default_existing(self) -> None:
+        doc = Document.parse("x = 1\n")
+        result = doc.setdefault("x")
+        assert result == 1
+
+    def test_setdefault_no_default_missing(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError, match="TOML has no null type"):
+            doc.setdefault("y")
+
     # -- clear --
 
     def test_clear(self, doc: Document) -> None:
@@ -462,9 +480,9 @@ class TestViews:
 
     def test_items_view_contains(self) -> None:
         doc = Document.parse("a = 1\nb = 2\n")
-        assert ("a", 1) in doc.items()
-        assert ("a", 99) not in doc.items()
-        assert ("z", 1) not in doc.items()
+        assert ("a", 1) in doc.items()  # type: ignore[comparison-overlap]
+        assert ("a", 99) not in doc.items()  # type: ignore[comparison-overlap]
+        assert ("z", 1) not in doc.items()  # type: ignore[comparison-overlap]
 
     # -- Proxy (nested) views --
 
@@ -500,6 +518,10 @@ class TestViews:
     def test_items_view_isinstance(self) -> None:
         doc = Document.parse("a = 1\n")
         assert isinstance(doc.items(), ItemsView)
+
+    def test_document_isinstance_mutable_mapping(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert isinstance(doc, MutableMapping)
 
     # -- KeysView: xor and eq --
 
@@ -547,7 +569,7 @@ class TestViews:
     def test_items_view_contains_non_tuple(self) -> None:
         doc = Document.parse("a = 1\n")
         with pytest.raises(TypeError):
-            "not a tuple" in doc.items()
+            "not a tuple" in doc.items()  # type: ignore[comparison-overlap]  # noqa: B015
 
     # -- Nested (non-root path) view operations --
 
@@ -569,8 +591,8 @@ class TestViews:
 
     def test_proxy_items_view_contains(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
-        assert ("a", 1) in doc["t"].items()
-        assert ("z", 1) not in doc["t"].items()
+        assert ("a", 1) in doc["t"].items()  # type: ignore[comparison-overlap]
+        assert ("z", 1) not in doc["t"].items()  # type: ignore[comparison-overlap]
 
     def test_proxy_items_view_repr(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
@@ -579,7 +601,7 @@ class TestViews:
 
     def test_items_view_contains_wrong_length_tuple(self) -> None:
         doc = Document.parse("a = 1\n")
-        assert ("a", 1, "extra") not in doc.items()
+        assert ("a", 1, "extra") not in doc.items()  # type: ignore[comparison-overlap]
 
     def test_items_view_eq_other_longer(self) -> None:
         doc = Document.parse("a = 1\n")

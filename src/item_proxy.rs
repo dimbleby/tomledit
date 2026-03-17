@@ -435,8 +435,12 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        // Validate this is a table-like item before creating the view.
-        item_ops::item_keys(item)?;
+        if !item_ops::is_table_like(item) {
+            return Err(PyTypeError::new_err(format!(
+                "TOML {} item has no keys()",
+                item.type_name()
+            )));
+        }
         Ok(KeysView::new(
             self.document.clone_ref(py),
             self.path.clone(),
@@ -447,7 +451,12 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_ops::item_keys(item)?;
+        if !item_ops::is_table_like(item) {
+            return Err(PyTypeError::new_err(format!(
+                "TOML {} item has no values()",
+                item.type_name()
+            )));
+        }
         Ok(ValuesView::new(
             self.document.clone_ref(py),
             self.path.clone(),
@@ -458,7 +467,12 @@ impl ItemProxy {
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
-        item_ops::item_keys(item)?;
+        if !item_ops::is_table_like(item) {
+            return Err(PyTypeError::new_err(format!(
+                "TOML {} item has no items()",
+                item.type_name()
+            )));
+        }
         Ok(ItemsView::new(
             self.document.clone_ref(py),
             self.path.clone(),
@@ -561,15 +575,27 @@ impl ItemProxy {
         Ok(())
     }
 
-    #[pyo3(signature = (key, default, /))]
-    pub fn setdefault(&mut self, py: Python<'_>, key: &str, default: Item) -> PyResult<ItemProxy> {
+    #[pyo3(signature = (key, default=None, /))]
+    pub fn setdefault(
+        &mut self,
+        py: Python<'_>,
+        key: &str,
+        default: Option<Item>,
+    ) -> PyResult<ItemProxy> {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
 
-        if !item_ops::item_has_key(item, key)? {
-            item_ops::set_with_decor_preservation(item, key, default);
+        if item_ops::item_has_key(item, key)? {
+            return Ok(self.child_proxy(py, Key::Str(key.to_owned())));
         }
+
+        let default = default.ok_or_else(|| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "setdefault() requires a default value: TOML has no null type",
+            )
+        })?;
+        item_ops::set_with_decor_preservation(item, key, default);
 
         Ok(self.child_proxy(py, Key::Str(key.to_owned())))
     }

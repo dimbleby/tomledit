@@ -495,6 +495,14 @@ pub(crate) fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
     }
 }
 
+/// Cheap check that `item` is a table or inline table.
+pub(crate) fn is_table_like(item: &ItemRs) -> bool {
+    matches!(
+        item,
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_))
+    )
+}
+
 pub(crate) fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
     match item {
         ItemRs::Table(table) => Ok(table.contains_key(key)),

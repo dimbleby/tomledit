@@ -1,5 +1,6 @@
 //! Python → toml_edit extraction for all TOML types.
 
+use crate::item::Item;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{
@@ -132,14 +133,17 @@ impl<'py> FromPyObject<'_, 'py> for Array {
 // InlineTable / Table (shared helper)
 // ---------------------------------------------------------------------------
 
-fn extract_mapping_pairs(py_mapping: &Bound<'_, PyMapping>) -> PyResult<Vec<(String, ValueRs)>> {
+fn extract_mapping_pairs<'py, V>(py_mapping: &Bound<'py, PyMapping>) -> PyResult<Vec<(String, V)>>
+where
+    for<'a> V: FromPyObject<'a, 'py, Error = PyErr>,
+{
     let len = py_mapping.len()?;
     let mut pairs = Vec::with_capacity(len);
-    for item in py_mapping.items()? {
-        let py_tuple = item.cast::<PyTuple>()?;
+    for pair in py_mapping.items()? {
+        let py_tuple = pair.cast::<PyTuple>()?;
         let key: String = py_tuple.get_item(0)?.extract()?;
-        let value: Value = py_tuple.get_item(1)?.extract()?;
-        pairs.push((key, value.0));
+        let value: V = py_tuple.get_item(1)?.extract()?;
+        pairs.push((key, value));
     }
     Ok(pairs)
 }
@@ -151,8 +155,10 @@ impl<'py> FromPyObject<'_, 'py> for InlineTable {
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         let py_mapping = obj.cast::<PyMapping>()?;
-        let pairs = extract_mapping_pairs(&py_mapping)?;
-        Ok(Self(InlineTableRs::from_iter(pairs)))
+        let pairs: Vec<(String, Value)> = extract_mapping_pairs(&py_mapping)?;
+        Ok(Self(InlineTableRs::from_iter(
+            pairs.into_iter().map(|(k, v)| (k, v.0)),
+        )))
     }
 }
 
@@ -163,8 +169,12 @@ impl<'py> FromPyObject<'_, 'py> for Table {
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         let py_mapping = obj.cast::<PyMapping>()?;
-        let pairs = extract_mapping_pairs(&py_mapping)?;
-        Ok(Self(TableRs::from_iter(pairs)))
+        let pairs: Vec<(String, Item)> = extract_mapping_pairs(&py_mapping)?;
+        let mut table = TableRs::from_iter(pairs.into_iter().map(|(k, v)| (k, v.0)));
+        if !table.is_empty() {
+            table.set_implicit(true);
+        }
+        Ok(Self(table))
     }
 }
 

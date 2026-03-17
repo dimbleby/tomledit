@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.conftest import toml_literal
 from tomledit import Document
 
 
@@ -92,7 +93,11 @@ class TestComment:
     def test_set_multiline_comment(self) -> None:
         doc = Document.parse("key = 42\n")
         doc["key"].comment = "# line A\n# line B"
-        assert str(doc) == "# line A\n# line B\nkey = 42\n"
+        assert str(doc) == toml_literal("""
+            # line A
+            # line B
+            key = 42
+        """)
         assert doc["key"].comment == "# line A\n# line B"
 
     # ---- both together ----
@@ -118,7 +123,13 @@ class TestComment:
         doc = Document.parse("arr = [\n  1,\n  2,\n  3,\n]\n")
         doc["arr"][0].inline_comment = "# first"
         doc["arr"][2].inline_comment = "# last"
-        assert str(doc) == "arr = [\n  1, # first\n  2,\n  3, # last\n]\n"
+        assert str(doc) == toml_literal("""
+            arr = [
+              1, # first
+              2,
+              3, # last
+            ]
+        """)
         doc2 = Document.parse(str(doc))
         assert doc2["arr"][0].inline_comment == "# first"
         assert doc2["arr"][1].inline_comment is None
@@ -138,7 +149,13 @@ class TestComment:
         assert doc["arr"][1].inline_comment == "# temp"
         doc["arr"][1].inline_comment = None
         assert doc["arr"][1].inline_comment is None
-        assert str(doc) == "arr = [\n  1,\n  2,\n  3,\n]\n"
+        assert str(doc) == toml_literal("""
+            arr = [
+              1,
+              2,
+              3,
+            ]
+        """)
 
     def test_replace_array_inline_comment(self) -> None:
         toml = "arr = [\n  1, # old\n  2,\n]\n"
@@ -146,7 +163,12 @@ class TestComment:
         assert doc["arr"][0].inline_comment == "# old"
         doc["arr"][0].inline_comment = "# new"
         assert doc["arr"][0].inline_comment == "# new"
-        assert str(doc) == "arr = [\n  1, # new\n  2,\n]\n"
+        assert str(doc) == toml_literal("""
+            arr = [
+              1, # new
+              2,
+            ]
+        """)
 
     def test_array_inline_comment_preserves_values(self) -> None:
         doc = Document.parse("arr = [\n  1,\n  2,\n]\n")
@@ -157,23 +179,43 @@ class TestComment:
     def test_array_inline_comment_preserves_indentation(self) -> None:
         doc = Document.parse("arr = [\n    1,\n    2,\n]\n")
         doc["arr"][0].inline_comment = "# wide indent"
-        assert str(doc) == "arr = [\n    1, # wide indent\n    2,\n]\n"
+        assert str(doc) == toml_literal("""
+            arr = [
+                1, # wide indent
+                2,
+            ]
+        """)
 
     def test_array_comment_preserves_indentation(self) -> None:
         doc = Document.parse("arr = [\n    1,\n    2,\n]\n")
         doc["arr"][1].comment = "# about two"
-        assert str(doc) == "arr = [\n    1,\n    # about two\n    2,\n]\n"
+        assert str(doc) == toml_literal("""
+            arr = [
+                1,
+                # about two
+                2,
+            ]
+        """)
 
     def test_array_comment_clear(self) -> None:
         toml = "arr = [\n  1,\n  # note\n  2,\n]\n"
         doc = Document.parse(toml)
         doc["arr"][1].comment = None
-        assert str(doc) == "arr = [\n  1,\n  2,\n]\n"
+        assert str(doc) == toml_literal("""
+            arr = [
+              1,
+              2,
+            ]
+        """)
 
     def test_array_inline_comment_on_single_element(self) -> None:
         doc = Document.parse("arr = [\n  1,\n]\n")
         doc["arr"][0].inline_comment = "# only"
-        assert str(doc) == "arr = [\n  1, # only\n]\n"
+        assert str(doc) == toml_literal("""
+            arr = [
+              1, # only
+            ]
+        """)
         doc2 = Document.parse(str(doc))
         assert doc2["arr"][0].inline_comment == "# only"
 
@@ -334,9 +376,14 @@ class TestComment:
         doc = Document.parse("arr = [\n  1,\n  2,\n  3,\n]\n")
         doc["arr"][0].inline_comment = "# inline on first"
         doc["arr"][1].comment = "# block before second"
-        assert str(doc) == (
-            "arr = [\n  1, # inline on first\n  # block before second\n  2,\n  3,\n]\n"
-        )
+        assert str(doc) == toml_literal("""
+            arr = [
+              1, # inline on first
+              # block before second
+              2,
+              3,
+            ]
+        """)
         assert doc["arr"][0].inline_comment == "# inline on first"
         assert doc["arr"][1].comment == "# block before second"
         Document.parse(str(doc))  # valid TOML
@@ -353,12 +400,22 @@ class TestComment:
     def test_blank_line_before_comment_roundtrip(self) -> None:
         doc = Document.parse("a = 1\n\n# note\nb = 2\n")
         assert doc["b"].comment == "\n# note"
-        assert str(doc) == "a = 1\n\n# note\nb = 2\n"
+        assert str(doc) == toml_literal("""
+            a = 1
+
+            # note
+            b = 2
+        """)
 
     def test_set_blank_line_before_comment(self) -> None:
         doc = Document.parse("a = 1\nb = 2\n")
         doc["b"].comment = "\n# note"
-        assert str(doc) == "a = 1\n\n# note\nb = 2\n"
+        assert str(doc) == toml_literal("""
+            a = 1
+
+            # note
+            b = 2
+        """)
         assert doc["b"].comment == "\n# note"
 
     def test_multiple_blank_lines_before_comment(self) -> None:
@@ -368,7 +425,13 @@ class TestComment:
     def test_blank_line_between_comment_lines(self) -> None:
         doc = Document.parse("a = 1\nb = 2\n")
         doc["b"].comment = "# first\n\n# second"
-        assert str(doc) == "a = 1\n# first\n\n# second\nb = 2\n"
+        assert str(doc) == toml_literal("""
+            a = 1
+            # first
+
+            # second
+            b = 2
+        """)
         assert doc["b"].comment == "# first\n\n# second"
 
     # ---- validation (consolidated) ----
@@ -432,14 +495,22 @@ class TestComment:
     def test_set_table_comment(self) -> None:
         doc = Document.parse("[section]\nx = 1\n")
         doc["section"].comment = "# added"
-        assert str(doc) == "# added\n[section]\nx = 1\n"
+        assert str(doc) == toml_literal("""
+            # added
+            [section]
+            x = 1
+        """)
         assert doc["section"].comment == "# added"
 
     def test_set_table_comment_from_scratch(self) -> None:
         doc = Document()
         doc["foo"] = {"this": "that"}
         doc["foo"].comment = "# Hello"
-        assert str(doc) == '# Hello\n[foo]\nthis = "that"\n'
+        assert str(doc) == toml_literal("""
+            # Hello
+            [foo]
+            this = "that"
+        """)
         doc2 = Document.parse(str(doc))
         assert doc2["foo"]["this"] == "that"
         assert doc2["foo"].comment == "# Hello"
@@ -447,7 +518,11 @@ class TestComment:
     def test_replace_table_comment(self) -> None:
         doc = Document.parse("# old\n[section]\nx = 1\n")
         doc["section"].comment = "# new"
-        assert str(doc) == "# new\n[section]\nx = 1\n"
+        assert str(doc) == toml_literal("""
+            # new
+            [section]
+            x = 1
+        """)
         assert doc["section"].comment == "# new"
 
     def test_clear_table_comment(self) -> None:
@@ -459,7 +534,12 @@ class TestComment:
     def test_multiline_table_comment(self) -> None:
         doc = Document.parse("[section]\nx = 1\n")
         doc["section"].comment = "# line A\n# line B"
-        assert str(doc) == "# line A\n# line B\n[section]\nx = 1\n"
+        assert str(doc) == toml_literal("""
+            # line A
+            # line B
+            [section]
+            x = 1
+        """)
         assert doc["section"].comment == "# line A\n# line B"
 
     def test_table_comment_roundtrip(self) -> None:
@@ -472,7 +552,11 @@ class TestComment:
         doc = Document.parse("[section]\nx = 1\n")
         doc["section"].comment = "# above"
         doc["section"].inline_comment = "# inline"
-        assert str(doc) == "# above\n[section] # inline\nx = 1\n"
+        assert str(doc) == toml_literal("""
+            # above
+            [section] # inline
+            x = 1
+        """)
         assert doc["section"].comment == "# above"
         assert doc["section"].inline_comment == "# inline"
 
@@ -698,7 +782,14 @@ class TestComment:
         toml = "arr = [\n  1,\n  2,\n  3,\n]\n"
         doc = Document.parse(toml)
         doc["arr"][1].comment = "# middle"
-        assert str(doc) == "arr = [\n  1,\n  # middle\n  2,\n  3,\n]\n"
+        assert str(doc) == toml_literal("""
+            arr = [
+              1,
+              # middle
+              2,
+              3,
+            ]
+        """)
         assert doc["arr"][1].comment == "# middle"
 
     def test_blank_line_between_elements_no_comment(self) -> None:
@@ -722,16 +813,24 @@ class TestComment:
         doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
         doc["items"][0]["name"].inline_comment = "# first"
         assert doc["items"][0]["name"].inline_comment == "# first"
-        assert str(doc) == '[[items]]\nname = "a" # first\n[[items]]\nname = "b"\n'
+        assert str(doc) == toml_literal("""
+            [[items]]
+            name = "a" # first
+            [[items]]
+            name = "b"
+        """)
 
     def test_set_comment_on_aot_entry_child(self) -> None:
         doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
         doc["items"][1]["name"].comment = "# second item name"
         assert doc["items"][1]["name"].comment == "# second item name"
-        assert (
-            str(doc)
-            == '[[items]]\nname = "a"\n[[items]]\n# second item name\nname = "b"\n'
-        )
+        assert str(doc) == toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            # second item name
+            name = "b"
+        """)
 
     # ---- comment edge cases ----
 
@@ -757,10 +856,18 @@ class TestComment:
         toml = '[owner]\nname = "Tom"  # the owner name\nage = 30\n'
         doc = Document.parse(toml)
         doc["owner"]["name"] = "Bob"
-        assert str(doc) == '[owner]\nname = "Bob"  # the owner name\nage = 30\n'
+        assert str(doc) == toml_literal("""
+            [owner]
+            name = "Bob"  # the owner name
+            age = 30
+        """)
 
     def test_standalone_comment_preserved_on_nested_update(self) -> None:
         toml = '[owner]\n# this is the name\nname = "Tom"\n'
         doc = Document.parse(toml)
         doc["owner"]["name"] = "Bob"
-        assert str(doc) == '[owner]\n# this is the name\nname = "Bob"\n'
+        assert str(doc) == toml_literal("""
+            [owner]
+            # this is the name
+            name = "Bob"
+        """)

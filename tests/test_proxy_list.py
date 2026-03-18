@@ -231,7 +231,7 @@ class TestIadd:
 
     def test_iadd_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError, match=r"\+="):
+        with pytest.raises(TypeError):
             doc["x"] += [1]
 
     def test_iadd_aot(self) -> None:

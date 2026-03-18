@@ -34,6 +34,7 @@ impl<'py> FromPyObject<'_, 'py> for Item {
         }
 
         if (obj.is_instance_of::<PyList>() || obj.is_instance_of::<PyTuple>())
+            && obj.len().is_ok_and(|n| n > 0)
             && let Ok(array_of_tables) = ArrayOfTables::extract(obj)
         {
             return Ok(Self(ItemRs::ArrayOfTables(array_of_tables.0)));

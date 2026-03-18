@@ -482,6 +482,17 @@ fn into_value(item: Item) -> PyResult<ValueRs> {
     })
 }
 
+fn require_table(item: Item) -> PyResult<toml_edit::Table> {
+    match item.0 {
+        ItemRs::Table(t) => Ok(t),
+        ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.into_table()),
+        other => Err(PyTypeError::new_err(format!(
+            "cannot append {} to array of tables (expected a table/dict)",
+            other.type_name()
+        ))),
+    }
+}
+
 pub(crate) fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
     match item {
         ItemRs::Table(table) => Ok(table.iter().map(|(k, _)| k.to_owned()).collect()),
@@ -747,6 +758,10 @@ pub(crate) fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
         ic.push(inline);
         comments::restore_inline_comments(arr, &ic);
         Ok(())
+    } else if let ItemRs::ArrayOfTables(aot) = item {
+        let table = require_table(value)?;
+        aot.push(table);
+        Ok(())
     } else {
         Err(unsupported_op(item, "append()"))
     }
@@ -761,6 +776,18 @@ pub(crate) fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResul
         arr.insert(resolved, v);
         ic.insert(resolved, inline);
         comments::restore_inline_comments(arr, &ic);
+        Ok(())
+    } else if let ItemRs::ArrayOfTables(aot) = item {
+        let table = require_table(value)?;
+        let resolved = clamp_index(index, aot.len());
+        // AoT has no insert API; rebuild by removing the tail, pushing, and restoring.
+        let mut tail: Vec<toml_edit::Table> =
+            (resolved..aot.len()).rev().map(|i| aot.remove(i)).collect();
+        tail.reverse();
+        aot.push(table);
+        for t in tail {
+            aot.push(t);
+        }
         Ok(())
     } else {
         Err(unsupported_op(item, "insert()"))
@@ -781,6 +808,18 @@ pub(crate) fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResu
             }
         }
         Err(PyValueError::new_err("value not in array"))
+    } else if let ItemRs::ArrayOfTables(aot) = item {
+        if let Ok(other_dict) = value.cast::<PyDict>() {
+            for i in 0..aot.len() {
+                if let Some(table) = aot.get(i)
+                    && equality::table_entries_eq(table.iter(), table.len(), other_dict)?
+                {
+                    aot.remove(i);
+                    return Ok(());
+                }
+            }
+        }
+        Err(PyValueError::new_err("value not in array"))
     } else {
         Err(unsupported_op(item, "remove()"))
     }
@@ -796,6 +835,12 @@ pub(crate) fn item_extend(item: &mut ItemRs, items: Vec<Item>, op: &str) -> PyRe
             ic.push(inline);
         }
         comments::restore_inline_comments(arr, &ic);
+        Ok(())
+    } else if let ItemRs::ArrayOfTables(aot) = item {
+        for new_item in items {
+            let table = require_table(new_item)?;
+            aot.push(table);
+        }
         Ok(())
     } else {
         Err(unsupported_op(item, op))

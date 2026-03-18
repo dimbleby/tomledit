@@ -89,11 +89,86 @@ class TestProxyListMethods:
         with pytest.raises(ValueError, match="not in array"):
             doc["arr"].remove(99)
 
+    def test_remove_aot(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        doc["items"].remove({"name": "b"})
+        assert len(doc["items"]) == 2
+        assert doc["items"][0] == {"name": "a"}
+        assert doc["items"][1] == {"name": "c"}
+
+    def test_remove_aot_first_occurrence(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "a"\n'
+        )
+        doc["items"].remove({"name": "a"})
+        assert len(doc["items"]) == 2
+        assert doc["items"][0] == {"name": "b"}
+        assert doc["items"][1] == {"name": "a"}
+
+    def test_remove_aot_missing_raises(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        with pytest.raises(ValueError, match="not in array"):
+            doc["items"].remove({"name": "z"})
+
+    def test_remove_aot_non_dict_raises(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        with pytest.raises(ValueError, match="not in array"):
+            doc["items"].remove("not a dict")
+
     def test_extend(self) -> None:
         doc = Document.parse("arr = [1]\n")
         doc["arr"].extend([2, 3, 4])
         assert len(doc["arr"]) == 4
         assert doc["arr"][3] == 4
+
+    def test_append_aot(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc["items"].append({"name": "b"})
+        assert len(doc["items"]) == 2
+        assert doc["items"][1] == {"name": "b"}
+
+    def test_append_aot_inline_table(self) -> None:
+        src = Document.parse('x = {name = "b"}\n')
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc["items"].append(src["x"])
+        assert len(doc["items"]) == 2
+        assert doc["items"][1] == {"name": "b"}
+
+    def test_append_aot_non_table_raises(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        with pytest.raises(TypeError, match="cannot append"):
+            doc["items"].append(42)
+
+    def test_insert_aot_beginning(self) -> None:
+        doc = Document.parse('[[items]]\nname = "b"\n[[items]]\nname = "c"\n')
+        doc["items"].insert(0, {"name": "a"})
+        assert len(doc["items"]) == 3
+        assert doc["items"][0] == {"name": "a"}
+        assert doc["items"][1] == {"name": "b"}
+        assert doc["items"][2] == {"name": "c"}
+
+    def test_insert_aot_middle(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "c"\n')
+        doc["items"].insert(1, {"name": "b"})
+        assert len(doc["items"]) == 3
+        assert doc["items"][0] == {"name": "a"}
+        assert doc["items"][1] == {"name": "b"}
+        assert doc["items"][2] == {"name": "c"}
+
+    def test_insert_aot_end(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc["items"].insert(100, {"name": "b"})
+        assert len(doc["items"]) == 2
+        assert doc["items"][1] == {"name": "b"}
+
+    def test_extend_aot(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc["items"].extend([{"name": "b"}, {"name": "c"}])
+        assert len(doc["items"]) == 3
+        assert doc["items"][1] == {"name": "b"}
+        assert doc["items"][2] == {"name": "c"}
 
     def test_clear_array(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
@@ -158,6 +233,13 @@ class TestIadd:
         doc = Document.parse("x = 42\n")
         with pytest.raises(TypeError, match=r"\+="):
             doc["x"] += [1]
+
+    def test_iadd_aot(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc["items"] += [{"name": "b"}, {"name": "c"}]
+        assert len(doc["items"]) == 3
+        assert doc["items"][1] == {"name": "b"}
+        assert doc["items"][2] == {"name": "c"}
 
 
 # ---------------------------------------------------------------------------

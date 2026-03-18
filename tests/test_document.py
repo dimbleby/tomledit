@@ -19,7 +19,7 @@ class TestDocumentConstructor:
     def test_empty(self) -> None:
         doc = Document()
         assert len(doc) == 0
-        assert not str(doc)
+        assert not doc.as_toml()
 
     def test_empty_then_populate(self) -> None:
         doc = Document()
@@ -144,18 +144,18 @@ class TestDocumentFmt:
     def test_fmt_normalizes_root_whitespace(self) -> None:
         doc = Document.parse("  x  =  1  \n")
         doc.fmt()
-        assert str(doc) == "x = 1\n"
+        assert doc.as_toml() == "x = 1\n"
 
     def test_fmt_does_not_touch_table_internals(self) -> None:
         """fmt() only reformats root-level decor, not inside tables."""
         doc = Document.parse("[t]\n  x  =  1\n")
         doc.fmt()
-        assert str(doc) == "[t]\n  x  =  1\n"
+        assert doc.as_toml() == "[t]\n  x  =  1\n"
 
     def test_fmt_strips_comments(self) -> None:
         doc = Document.parse("# comment\na = 1 # inline\n")
         doc.fmt()
-        assert str(doc) == "a = 1\n"
+        assert doc.as_toml() == "a = 1\n"
 
 
 # ---------------------------------------------------------------------------
@@ -182,4 +182,4 @@ class TestDocumentCopy:
         text = "  x  =  1  \n\n[section]\n  key  =  'val'\n"
         doc = Document.parse(text)
         doc2 = copy.copy(doc)
-        assert str(doc2) == text
+        assert doc2.as_toml() == text

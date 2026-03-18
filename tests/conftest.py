@@ -34,14 +34,14 @@ role = "backend"
 
 
 def toml_literal(text: str) -> str:
-    """Dedent a triple-quoted TOML string for comparison with ``str(doc)``.
+    """Dedent a triple-quoted TOML string for comparison with ``doc.as_toml()``.
 
     Usage::
 
-        assert str(doc) == toml_literal(\"\"\"
+        assert doc.as_toml() == toml_literal(\"""
             [foo]
             bar = 1
-        \"\"\")
+        \""")
     """
     return textwrap.dedent(text).strip() + "\n"
 

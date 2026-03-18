@@ -165,7 +165,7 @@ pub(crate) fn item_str(item: &ItemRs, py: Python<'_>) -> PyResult<String> {
 }
 
 /// Convert a toml_edit table's entries to a Python dict.
-fn table_to_pydict<'a>(
+pub(crate) fn table_to_pydict<'a>(
     iter: impl Iterator<Item = (&'a str, &'a ItemRs)>,
     py: Python<'_>,
 ) -> PyResult<Bound<'_, PyDict>> {

@@ -593,12 +593,12 @@ class TestSliceIndexing:
     def test_setitem_slice_visible_in_output(self) -> None:
         doc = Document.parse(self.TOML)
         doc["arr"][1:4] = [20, 30, 40]
-        assert str(doc) == "arr = [1, 20, 30, 40, 5]\n"
+        assert doc.as_toml() == "arr = [1, 20, 30, 40, 5]\n"
 
     def test_delitem_slice_visible_in_output(self) -> None:
         doc = Document.parse(self.TOML)
         del doc["arr"][0:2]
-        assert str(doc) == "arr = [ 3, 4, 5]\n"
+        assert doc.as_toml() == "arr = [ 3, 4, 5]\n"
 
     # ---- additional edge cases ----
 
@@ -659,7 +659,7 @@ class TestMultilineFormatPreservation:
     def test_append_preserves_multiline(self) -> None:
         doc = Document.parse(MULTILINE_ARRAY)
         doc["arr"].append(4)
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
                 1,
                 2,
@@ -671,7 +671,7 @@ class TestMultilineFormatPreservation:
     def test_insert_at_start_preserves_multiline(self) -> None:
         doc = Document.parse(MULTILINE_ARRAY)
         doc["arr"].insert(0, 0)
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
                 0,
                 1,
@@ -683,7 +683,7 @@ class TestMultilineFormatPreservation:
     def test_insert_in_middle_preserves_multiline(self) -> None:
         doc = Document.parse(MULTILINE_ARRAY)
         doc["arr"].insert(1, 99)
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
                 1,
                 99,
@@ -695,7 +695,7 @@ class TestMultilineFormatPreservation:
     def test_extend_preserves_multiline(self) -> None:
         doc = Document.parse(MULTILINE_ARRAY)
         doc["arr"].extend([4, 5])
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
                 1,
                 2,
@@ -708,7 +708,7 @@ class TestMultilineFormatPreservation:
     def test_iadd_preserves_multiline(self) -> None:
         doc = Document.parse(MULTILINE_ARRAY)
         doc["arr"] += [4, 5]
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
                 1,
                 2,
@@ -729,7 +729,7 @@ class TestMultilineFormatPreservation:
         """)
         )
         doc["arr"].append(4)
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
                 1, # first
                 2, # second
@@ -748,7 +748,7 @@ class TestMultilineFormatPreservation:
         """)
         )
         doc["arr"].append(3)
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
               1,
               2,
@@ -766,7 +766,7 @@ class TestSetMultiline:
     def test_basic(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
         doc["arr"].set_multiline()
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
                 1,
                 2,
@@ -777,7 +777,7 @@ class TestSetMultiline:
     def test_custom_indent(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
         doc["arr"].set_multiline(indent=2)
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
               1,
               2,
@@ -788,12 +788,12 @@ class TestSetMultiline:
     def test_empty_array_is_noop(self) -> None:
         doc = Document.parse("arr = []\n")
         doc["arr"].set_multiline()
-        assert str(doc) == "arr = []\n"
+        assert doc.as_toml() == "arr = []\n"
 
     def test_single_element(self) -> None:
         doc = Document.parse("arr = [1]\n")
         doc["arr"].set_multiline()
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
                 1,
             ]
@@ -802,7 +802,7 @@ class TestSetMultiline:
     def test_string_elements(self) -> None:
         doc = Document.parse('arr = ["a", "b"]\n')
         doc["arr"].set_multiline()
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
                 "a",
                 "b",
@@ -813,13 +813,13 @@ class TestSetMultiline:
         doc = Document.parse("arr = [1, 2, 3]\n")
         doc["arr"].set_multiline()
         doc["arr"].fmt()
-        assert str(doc) == "arr = [1, 2, 3]\n"
+        assert doc.as_toml() == "arr = [1, 2, 3]\n"
 
     def test_new_array_then_multiline(self) -> None:
         doc = Document.parse("")
         doc["deps"] = ["a", "b", "c"]
         doc["deps"].set_multiline()
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             deps = [
                 "a",
                 "b",
@@ -840,7 +840,7 @@ class TestSetMultiline:
     def test_nested_array(self) -> None:
         doc = Document.parse("[pkg]\ndeps = [1, 2]\n")
         doc["pkg"]["deps"].set_multiline()
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             [pkg]
             deps = [
                 1,
@@ -851,7 +851,7 @@ class TestSetMultiline:
     def test_zero_indent(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")
         doc["arr"].set_multiline(indent=0)
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
             1,
             2,
@@ -862,7 +862,7 @@ class TestSetMultiline:
         doc = Document.parse("arr = [1, 2]\n")
         doc["arr"].set_multiline()
         doc["arr"].append(3)
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             arr = [
                 1,
                 2,

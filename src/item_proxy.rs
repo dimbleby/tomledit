@@ -12,21 +12,45 @@ use crate::item::Item;
 use crate::item_ops::{self, Key};
 use crate::views::{ItemsView, KeysView, ValuesView};
 
-/// A reference to a value inside a Document (table, array, or scalar).
+/// A live reference to a TOML value inside a Document.
 ///
-/// Items are obtained by indexing a Document or another Item — they are
-/// live views, so ``doc["server"]["port"] = 8080`` modifies the document
-/// in place.  Use ``.value`` to get a plain Python object, or dict/list
-/// methods like ``keys()``, ``append()``, etc. to edit in place.
+/// Items are obtained by indexing a Document or another Item:
 ///
-/// An Item becomes stale if the document is modified through a different
+///     port = doc["server"]["port"]
+///     doc["server"]["port"] = 8080
+///
+/// Every Item is one of three concrete subtypes — ``DictItem`` for tables,
+/// ``ListItem`` for arrays, or ``ScalarItem`` for plain values — which can
+/// be narrowed with ``isinstance`` if needed.  Without narrowing, the full
+/// set of dict-like, list-like, and scalar methods is available directly
+/// on Item and will raise at runtime if called on the wrong kind.
+///
+/// An Item becomes stale when the Document is modified through a different
 /// reference; using a stale Item raises ``RuntimeError``.
-#[pyclass(name = "Item", module = "tomledit")]
+#[pyclass(name = "Item", module = "tomledit", subclass)]
 pub(crate) struct ItemProxy {
     document: Py<Document>,
     path: Vec<Key>,
     generation: u64,
 }
+
+/// A TOML table or inline table.
+///
+/// ``isinstance(item, DictItem)`` and
+/// ``isinstance(item, MutableMapping)`` both work.
+#[pyclass(name = "DictItem", module = "tomledit", extends = ItemProxy)]
+pub(crate) struct DictProxy;
+
+/// A TOML array or array of tables.
+///
+/// ``isinstance(item, ListItem)`` and
+/// ``isinstance(item, MutableSequence)`` both work.
+#[pyclass(name = "ListItem", module = "tomledit", extends = ItemProxy)]
+pub(crate) struct ListProxy;
+
+/// A scalar TOML value (string, integer, float, boolean, datetime, date, or time).
+#[pyclass(name = "ScalarItem", module = "tomledit", extends = ItemProxy)]
+pub(crate) struct ScalarProxy;
 
 impl ItemProxy {
     pub(crate) fn new(document: Py<Document>, path: Vec<Key>, generation: u64) -> Self {
@@ -94,21 +118,36 @@ impl ItemProxy {
         item_ops::navigate_path_mut(doc, &self.path)
     }
 
-    fn child_proxy(&self, py: Python<'_>, key: Key) -> ItemProxy {
-        Self::make_child(&self.document, &self.path, self.generation, py, key)
+    /// Build a child proxy as the correct Python subclass (DictItem,
+    /// ListItem, or ScalarItem) by inspecting the TOML node type.
+    /// Returns `Py<PyAny>` since the concrete type varies.
+    fn child_proxy_typed(&self, py: Python<'_>, key: Key) -> PyResult<Py<PyAny>> {
+        Self::make_child_typed(&self.document, &self.path, self.generation, py, key)
     }
 
-    /// Build a child proxy from constituent parts. Used by views too.
-    pub(crate) fn make_child(
+    /// Build a typed child proxy from constituent parts.
+    pub(crate) fn make_child_typed(
         document: &Py<Document>,
         path: &[Key],
         generation: u64,
         py: Python<'_>,
         child_key: Key,
-    ) -> ItemProxy {
+    ) -> PyResult<Py<PyAny>> {
         let mut child_path = path.to_vec();
         child_path.push(child_key);
-        ItemProxy::new(document.clone_ref(py), child_path, generation)
+        let base = ItemProxy::new(document.clone_ref(py), child_path, generation);
+        Self::into_typed(py, base)
+    }
+
+    /// Wrap an already-constructed ItemProxy base into the right Python
+    /// subclass.  Used by Document::__getitem__ and friends.
+    pub(crate) fn into_typed(py: Python<'_>, base: ItemProxy) -> PyResult<Py<PyAny>> {
+        let kind = {
+            let doc = base.document.borrow(py);
+            let item = base.navigate(&doc.inner)?;
+            item_kind(item)
+        };
+        into_typed_proxy(py, base, kind)
     }
 
     /// Navigate to the parent item (all path segments except the last).
@@ -118,6 +157,51 @@ impl ItemProxy {
 
     fn navigate_parent_mut<'a>(&self, doc: &'a mut DocumentRs) -> PyResult<&'a mut ItemRs> {
         item_ops::navigate_path_mut(doc, &self.path[..self.path.len() - 1])
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Subclass dispatch helpers
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+enum ItemKind {
+    Dict,
+    List,
+    Scalar,
+}
+
+fn item_kind(item: &ItemRs) -> ItemKind {
+    if matches!(
+        item,
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_))
+    ) {
+        ItemKind::Dict
+    } else if matches!(
+        item,
+        ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_)
+    ) {
+        ItemKind::List
+    } else {
+        ItemKind::Scalar
+    }
+}
+
+fn into_typed_proxy(py: Python<'_>, base: ItemProxy, kind: ItemKind) -> PyResult<Py<PyAny>> {
+    use pyo3::PyClassInitializer;
+    match kind {
+        ItemKind::Dict => {
+            let init = PyClassInitializer::from(base).add_subclass(DictProxy);
+            Ok(Py::new(py, init)?.into_any())
+        }
+        ItemKind::List => {
+            let init = PyClassInitializer::from(base).add_subclass(ListProxy);
+            Ok(Py::new(py, init)?.into_any())
+        }
+        ItemKind::Scalar => {
+            let init = PyClassInitializer::from(base).add_subclass(ScalarProxy);
+            Ok(Py::new(py, init)?.into_any())
+        }
     }
 }
 
@@ -136,11 +220,11 @@ impl ItemProxy {
             let len = item_ops::require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
             let indices = item_ops::collect_slice_indices(si.start, si.stop, si.step);
-            let proxies: Vec<ItemProxy> = indices
+            let proxies: PyResult<Vec<Py<PyAny>>> = indices
                 .into_iter()
-                .map(|i| self.child_proxy(py, Key::Int(i)))
+                .map(|i| self.child_proxy_typed(py, Key::Int(i)))
                 .collect();
-            return Ok(proxies.into_pyobject(py)?.into_any().unbind());
+            return Ok(proxies?.into_pyobject(py)?.into_any().unbind());
         }
 
         let new_key = {
@@ -150,11 +234,7 @@ impl ItemProxy {
             item_ops::item_getitem(item, key)?
         };
 
-        Ok(self
-            .child_proxy(py, new_key)
-            .into_pyobject(py)?
-            .into_any()
-            .unbind())
+        self.child_proxy_typed(py, new_key)
     }
 
     pub fn __setitem__(
@@ -237,10 +317,10 @@ impl ItemProxy {
                 Ok(list.try_iter()?.unbind())
             }
             item_ops::IterKind::ArrayLen(len) => {
-                let proxies: Vec<ItemProxy> = (0..len)
-                    .map(|i| self.child_proxy(py, Key::Int(i)))
+                let proxies: PyResult<Vec<Py<PyAny>>> = (0..len)
+                    .map(|i| self.child_proxy_typed(py, Key::Int(i)))
                     .collect();
-                let list = proxies.into_pyobject(py)?;
+                let list = proxies?.into_pyobject(py)?;
                 Ok(list.try_iter()?.unbind())
             }
         }
@@ -294,19 +374,6 @@ impl ItemProxy {
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
         equality::item_eq(item, other)
-    }
-
-    pub fn __iadd__(&mut self, values: &Bound<'_, PyAny>) -> PyResult<()> {
-        let py = values.py();
-        let items: Vec<Item> = values
-            .try_iter()?
-            .map(|r| r.and_then(|v| v.extract::<Item>()))
-            .collect::<PyResult<_>>()?;
-
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_generation(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-        item_ops::item_extend(item, items, "+=")
     }
 
     /// The underlying data as a native Python object (int, str, list, dict, etc).
@@ -426,244 +493,6 @@ impl ItemProxy {
         Ok(())
     }
 
-    // ---- dict-like methods ----
-
-    pub fn keys(&self, py: Python<'_>) -> PyResult<KeysView> {
-        let doc = self.document.bind(py).borrow();
-        self.check_generation(&doc)?;
-        let item = self.navigate(&doc.inner)?;
-        if !item_ops::is_table_like(item) {
-            return Err(PyTypeError::new_err(format!(
-                "TOML {} item has no keys()",
-                item.type_name()
-            )));
-        }
-        Ok(KeysView::new(
-            self.document.clone_ref(py),
-            self.path.clone(),
-        ))
-    }
-
-    pub fn values(&self, py: Python<'_>) -> PyResult<ValuesView> {
-        let doc = self.document.bind(py).borrow();
-        self.check_generation(&doc)?;
-        let item = self.navigate(&doc.inner)?;
-        if !item_ops::is_table_like(item) {
-            return Err(PyTypeError::new_err(format!(
-                "TOML {} item has no values()",
-                item.type_name()
-            )));
-        }
-        Ok(ValuesView::new(
-            self.document.clone_ref(py),
-            self.path.clone(),
-        ))
-    }
-
-    pub fn items(&self, py: Python<'_>) -> PyResult<ItemsView> {
-        let doc = self.document.bind(py).borrow();
-        self.check_generation(&doc)?;
-        let item = self.navigate(&doc.inner)?;
-        if !item_ops::is_table_like(item) {
-            return Err(PyTypeError::new_err(format!(
-                "TOML {} item has no items()",
-                item.type_name()
-            )));
-        }
-        Ok(ItemsView::new(
-            self.document.clone_ref(py),
-            self.path.clone(),
-        ))
-    }
-
-    #[pyo3(signature = (key, default=None, /))]
-    pub fn get(
-        &self,
-        py: Python<'_>,
-        key: &str,
-        default: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Py<PyAny>> {
-        let doc = self.document.bind(py).borrow();
-        self.check_generation(&doc)?;
-        let item = self.navigate(&doc.inner)?;
-        if item_ops::item_has_key(item, key)? {
-            Ok(self
-                .child_proxy(py, Key::Str(key.to_owned()))
-                .into_pyobject(py)?
-                .into_any()
-                .unbind())
-        } else {
-            Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()))
-        }
-    }
-
-    #[pyo3(signature = (*args))]
-    pub fn pop(&mut self, py: Python<'_>, args: &Bound<'_, PyTuple>) -> PyResult<Py<PyAny>> {
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_generation(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-
-        let max_args: usize = if matches!(
-            item,
-            ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_)
-        ) {
-            1
-        } else {
-            2
-        };
-        if args.len() > max_args {
-            return Err(PyTypeError::new_err(format!(
-                "pop expected at most {} argument{}, got {}",
-                max_args,
-                if max_args == 1 { "" } else { "s" },
-                args.len()
-            )));
-        }
-
-        let key_obj = if args.is_empty() {
-            None
-        } else {
-            Some(args.get_item(0)?)
-        };
-        let default = if args.len() == 2 {
-            Some(args.get_item(1)?.unbind())
-        } else {
-            None
-        };
-
-        match item_ops::item_pop(item, key_obj.as_ref()) {
-            Ok(removed) => {
-                let result = item_ops::item_to_py(&removed.0, py)?;
-                self.bump_generation(&mut doc);
-                Ok(result)
-            }
-            Err(e) if default.is_some() && e.is_instance_of::<PyKeyError>(py) => {
-                Ok(default.unwrap())
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    #[pyo3(signature = (other=None, /, **kwargs))]
-    pub fn update(
-        &mut self,
-        py: Python<'_>,
-        other: Option<&Bound<'_, PyAny>>,
-        kwargs: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<()> {
-        let mut pairs = match other {
-            Some(obj) => item_ops::extract_update_pairs(obj)?,
-            None => Vec::new(),
-        };
-        if let Some(kw) = kwargs {
-            for (k, v) in kw.iter() {
-                let key: String = k.extract()?;
-                let val: Item = v.extract()?;
-                pairs.push((key, val));
-            }
-        }
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_generation(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-        let replaced = item_ops::apply_update_pairs(item, pairs)?;
-        if replaced {
-            self.bump_generation(&mut doc);
-        }
-        Ok(())
-    }
-
-    #[pyo3(signature = (key, default=None, /))]
-    pub fn setdefault(
-        &mut self,
-        py: Python<'_>,
-        key: &str,
-        default: Option<Item>,
-    ) -> PyResult<ItemProxy> {
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_generation(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-
-        if item_ops::item_has_key(item, key)? {
-            return Ok(self.child_proxy(py, Key::Str(key.to_owned())));
-        }
-
-        let default = default.ok_or_else(|| {
-            pyo3::exceptions::PyTypeError::new_err(
-                "setdefault() requires a default value: TOML has no null type",
-            )
-        })?;
-        item_ops::set_with_decor_preservation(item, key, default);
-
-        Ok(self.child_proxy(py, Key::Str(key.to_owned())))
-    }
-
-    // ---- list-like methods ----
-
-    #[pyo3(signature = (value, /))]
-    pub fn append(&mut self, py: Python<'_>, value: Item) -> PyResult<()> {
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_generation(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-        item_ops::item_append(item, value)?;
-        Ok(())
-    }
-
-    #[pyo3(signature = (index, value, /))]
-    pub fn insert(&mut self, py: Python<'_>, index: i64, value: Item) -> PyResult<()> {
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_generation(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-        item_ops::item_insert(item, index, value)?;
-        self.bump_generation(&mut doc);
-        Ok(())
-    }
-
-    #[pyo3(signature = (value, /))]
-    pub fn remove(&mut self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_generation(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-        item_ops::item_remove(item, value)?;
-        self.bump_generation(&mut doc);
-        Ok(())
-    }
-
-    #[pyo3(signature = (values, /))]
-    pub fn extend(&mut self, py: Python<'_>, values: &Bound<'_, PyAny>) -> PyResult<()> {
-        let items: Vec<Item> = values
-            .try_iter()?
-            .map(|r| r.and_then(|v| v.extract::<Item>()))
-            .collect::<PyResult<_>>()?;
-
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_generation(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-        item_ops::item_extend(item, items, "extend()")?;
-        Ok(())
-    }
-
-    #[pyo3(signature = (value, /))]
-    pub fn count(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<usize> {
-        let doc = self.document.bind(py).borrow();
-        self.check_generation(&doc)?;
-        let item = self.navigate(&doc.inner)?;
-        item_ops::item_count(item, value)
-    }
-
-    #[pyo3(signature = (value, start=None, stop=None, /))]
-    pub fn index(
-        &self,
-        py: Python<'_>,
-        value: &Bound<'_, PyAny>,
-        start: Option<i64>,
-        stop: Option<i64>,
-    ) -> PyResult<usize> {
-        let doc = self.document.bind(py).borrow();
-        self.check_generation(&doc)?;
-        let item = self.navigate(&doc.inner)?;
-        item_ops::item_index(item, value, start, stop)
-    }
-
     // ---- shared methods ----
 
     pub fn clear(&mut self, py: Python<'_>) -> PyResult<()> {
@@ -696,7 +525,7 @@ impl ItemProxy {
     ///     doc["mask"] = Item.parse("0xFF")
     ///     doc["msg"]  = Item.parse("'''multi\nline'''")
     #[staticmethod]
-    fn parse(py: Python<'_>, text: &str) -> PyResult<Self> {
+    fn parse(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
         let value: ValueRs = text
             .parse()
             .map_err(|e: toml_edit::TomlError| PyValueError::new_err(e.to_string()))?;
@@ -709,11 +538,277 @@ impl ItemProxy {
                 generation: 0,
             },
         )?;
-        let generation = 0;
-        Ok(Self {
+        let base = Self {
             document: doc,
             path: vec![Key::Str("_".to_owned())],
-            generation,
-        })
+            generation: 0,
+        };
+        Self::into_typed(py, base)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DictProxy (DictItem) — dict-like methods
+// ---------------------------------------------------------------------------
+
+#[pymethods]
+impl DictProxy {
+    pub fn keys(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<KeysView> {
+        let base = self_.as_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_generation(&doc)?;
+        Ok(KeysView::new(
+            base.document.clone_ref(py),
+            base.path.clone(),
+        ))
+    }
+
+    pub fn values(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<ValuesView> {
+        let base = self_.as_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_generation(&doc)?;
+        Ok(ValuesView::new(
+            base.document.clone_ref(py),
+            base.path.clone(),
+        ))
+    }
+
+    pub fn items(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<ItemsView> {
+        let base = self_.as_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_generation(&doc)?;
+        Ok(ItemsView::new(
+            base.document.clone_ref(py),
+            base.path.clone(),
+        ))
+    }
+
+    #[pyo3(signature = (key, default=None, /))]
+    pub fn get(
+        self_: PyRef<'_, Self>,
+        py: Python<'_>,
+        key: &str,
+        default: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let base = self_.as_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_generation(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        if item_ops::item_has_key(item, key)? {
+            base.child_proxy_typed(py, Key::Str(key.to_owned()))
+        } else {
+            Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()))
+        }
+    }
+
+    #[pyo3(signature = (key, /, *default))]
+    pub fn pop(
+        self_: PyRefMut<'_, Self>,
+        py: Python<'_>,
+        key: &Bound<'_, PyAny>,
+        default: &Bound<'_, PyTuple>,
+    ) -> PyResult<Py<PyAny>> {
+        if default.len() > 1 {
+            return Err(PyTypeError::new_err(format!(
+                "pop expected at most 2 arguments, got {}",
+                1 + default.len()
+            )));
+        }
+        let default_val = if default.is_empty() {
+            None
+        } else {
+            Some(default.get_item(0)?.unbind())
+        };
+
+        let mut base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_generation(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+
+        match item_ops::item_pop(item, Some(key)) {
+            Ok(removed) => {
+                let result = item_ops::item_to_py(&removed.0, py)?;
+                base.bump_generation(&mut doc);
+                Ok(result)
+            }
+            Err(e) if default_val.is_some() && e.is_instance_of::<PyKeyError>(py) => {
+                Ok(default_val.unwrap())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    #[pyo3(signature = (other=None, /, **kwargs))]
+    pub fn update(
+        self_: PyRefMut<'_, Self>,
+        py: Python<'_>,
+        other: Option<&Bound<'_, PyAny>>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let mut pairs = match other {
+            Some(obj) => item_ops::extract_update_pairs(obj)?,
+            None => Vec::new(),
+        };
+        if let Some(kw) = kwargs {
+            for (k, v) in kw.iter() {
+                let key: String = k.extract()?;
+                let val: Item = v.extract()?;
+                pairs.push((key, val));
+            }
+        }
+        let mut base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_generation(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        let replaced = item_ops::apply_update_pairs(item, pairs)?;
+        if replaced {
+            base.bump_generation(&mut doc);
+        }
+        Ok(())
+    }
+
+    #[pyo3(signature = (key, default=None, /))]
+    pub fn setdefault(
+        self_: PyRefMut<'_, Self>,
+        py: Python<'_>,
+        key: &str,
+        default: Option<Item>,
+    ) -> PyResult<Py<PyAny>> {
+        let base = self_.into_super();
+        {
+            let mut doc = base.document.bind(py).borrow_mut();
+            base.check_generation(&doc)?;
+            let item = base.navigate_mut(&mut doc.inner)?;
+
+            if !item_ops::item_has_key(item, key)? {
+                let default = default.ok_or_else(|| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "setdefault() requires a default value: TOML has no null type",
+                    )
+                })?;
+                item_ops::set_with_decor_preservation(item, key, default);
+            }
+        }
+        base.child_proxy_typed(py, Key::Str(key.to_owned()))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ListProxy (ListItem) — list-like methods
+// ---------------------------------------------------------------------------
+
+#[pymethods]
+impl ListProxy {
+    pub fn __iadd__(self_: PyRefMut<'_, Self>, values: &Bound<'_, PyAny>) -> PyResult<()> {
+        Self::extend(self_, values.py(), values)
+    }
+
+    #[pyo3(signature = (index=None, /))]
+    pub fn pop(
+        self_: PyRefMut<'_, Self>,
+        py: Python<'_>,
+        index: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let mut base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_generation(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+
+        match item_ops::item_pop(item, index) {
+            Ok(removed) => {
+                let result = item_ops::item_to_py(&removed.0, py)?;
+                base.bump_generation(&mut doc);
+                Ok(result)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    #[pyo3(signature = (value, /))]
+    pub fn append(self_: PyRefMut<'_, Self>, py: Python<'_>, value: Item) -> PyResult<()> {
+        let base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_generation(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        item_ops::item_append(item, value)?;
+        Ok(())
+    }
+
+    #[pyo3(signature = (index, value, /))]
+    pub fn insert(
+        self_: PyRefMut<'_, Self>,
+        py: Python<'_>,
+        index: i64,
+        value: Item,
+    ) -> PyResult<()> {
+        let mut base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_generation(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        item_ops::item_insert(item, index, value)?;
+        base.bump_generation(&mut doc);
+        Ok(())
+    }
+
+    #[pyo3(signature = (value, /))]
+    pub fn remove(
+        self_: PyRefMut<'_, Self>,
+        py: Python<'_>,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let mut base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_generation(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        item_ops::item_remove(item, value)?;
+        base.bump_generation(&mut doc);
+        Ok(())
+    }
+
+    #[pyo3(signature = (values, /))]
+    pub fn extend(
+        self_: PyRefMut<'_, Self>,
+        py: Python<'_>,
+        values: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let items: Vec<Item> = values
+            .try_iter()?
+            .map(|r| r.and_then(|v| v.extract::<Item>()))
+            .collect::<PyResult<_>>()?;
+
+        let base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_generation(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        item_ops::item_extend(item, items)?;
+        Ok(())
+    }
+
+    #[pyo3(signature = (value, /))]
+    pub fn count(
+        self_: PyRef<'_, Self>,
+        py: Python<'_>,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<usize> {
+        let base = self_.as_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_generation(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        item_ops::item_count(item, value)
+    }
+
+    #[pyo3(signature = (value, start=None, stop=None, /))]
+    pub fn index(
+        self_: PyRef<'_, Self>,
+        py: Python<'_>,
+        value: &Bound<'_, PyAny>,
+        start: Option<i64>,
+        stop: Option<i64>,
+    ) -> PyResult<usize> {
+        let base = self_.as_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_generation(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        item_ops::item_index(item, value, start, stop)
     }
 }

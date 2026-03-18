@@ -112,23 +112,23 @@ impl Document {
         let py = slf.py();
         let doc = slf.borrow();
         if doc.inner.get(key).is_some() {
-            Ok(Self::make_proxy(slf, key)
-                .into_pyobject(py)?
-                .into_any()
-                .unbind())
+            let proxy = Self::make_proxy(slf, key);
+            ItemProxy::into_typed(py, proxy)
         } else {
             Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()))
         }
     }
 
-    pub fn __getitem__(slf: &Bound<'_, Self>, key: &str) -> PyResult<ItemProxy> {
-        {
+    pub fn __getitem__(slf: &Bound<'_, Self>, key: &str) -> PyResult<Py<PyAny>> {
+        let proxy = {
             let doc = slf.borrow();
             if !doc.inner.contains_key(key) {
                 return Err(PyKeyError::new_err(key.to_owned()));
             }
-        }
-        Ok(Self::make_proxy(slf, key))
+            Self::make_proxy(slf, key)
+        };
+        let py = slf.py();
+        ItemProxy::into_typed(py, proxy)
     }
 
     pub fn __setitem__(slf: &Bound<'_, Self>, key: &str, value: Item) {
@@ -210,11 +210,13 @@ impl Document {
         slf: &Bound<'_, Self>,
         key: &str,
         default: Option<Item>,
-    ) -> PyResult<ItemProxy> {
+    ) -> PyResult<Py<PyAny>> {
+        let py = slf.py();
         {
             let doc = slf.borrow();
             if doc.inner.contains_key(key) {
-                return Ok(Self::make_proxy(slf, key));
+                let proxy = Self::make_proxy(slf, key);
+                return ItemProxy::into_typed(py, proxy);
             }
         }
         let default = default.ok_or_else(|| {
@@ -226,7 +228,8 @@ impl Document {
             let mut doc = slf.borrow_mut();
             item_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, default);
         }
-        Ok(Self::make_proxy(slf, key))
+        let proxy = Self::make_proxy(slf, key);
+        ItemProxy::into_typed(py, proxy)
     }
 
     pub fn clear(&mut self) {

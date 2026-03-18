@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping, MutableSequence
 from datetime import date, datetime, time, timezone
 
 import pytest
 
 from tests.conftest import SAMPLE, toml_literal
-from tomledit import Document
+from tomledit import Document, Item
 
 # ---------------------------------------------------------------------------
 # Item: __len__
@@ -500,3 +501,89 @@ class TestProxyFmt:
         doc = Document.parse("[t]\n# comment\na = 1 # inline\n")
         doc["t"].fmt()
         assert str(doc) == "[t]\na = 1\n"
+
+
+# ---------------------------------------------------------------------------
+# Subclass types (DictItem / ListItem / ScalarItem)
+# ---------------------------------------------------------------------------
+
+
+class TestSubclassTypes:
+    """__getitem__ returns the correct subclass."""
+
+    def test_table_returns_dict_item(self) -> None:
+        doc = Document.parse("[server]\nhost = 'localhost'")
+        assert type(doc["server"]).__name__ == "DictItem"
+
+    def test_array_returns_list_item(self) -> None:
+        doc = Document.parse("ports = [80, 443]")
+        assert type(doc["ports"]).__name__ == "ListItem"
+
+    def test_scalar_returns_scalar_item(self) -> None:
+        doc = Document.parse("name = 'hello'")
+        assert type(doc["name"]).__name__ == "ScalarItem"
+
+    def test_nested_table(self) -> None:
+        doc = Document.parse("[a]\n[a.b]\nc = 1")
+        assert type(doc["a"]["b"]).__name__ == "DictItem"
+
+    def test_nested_scalar(self) -> None:
+        doc = Document.parse("[a]\nb = 42")
+        assert type(doc["a"]["b"]).__name__ == "ScalarItem"
+
+    def test_get_returns_typed(self) -> None:
+        doc = Document.parse("[server]\nhost = 'localhost'")
+        assert type(doc["server"].get("host")).__name__ == "ScalarItem"
+
+    def test_iteration_returns_typed(self) -> None:
+        doc = Document.parse("ports = [80, 443]")
+        for item in doc["ports"]:
+            assert type(item).__name__ == "ScalarItem"
+
+    def test_values_view_returns_typed(self) -> None:
+        doc = Document.parse("[server]\nhost = 'localhost'\nport = 8080")
+        for v in doc["server"].values():
+            assert isinstance(v, Item)
+            assert type(v).__name__ == "ScalarItem"
+
+    def test_items_view_returns_typed(self) -> None:
+        doc = Document.parse("[server]\nhost = 'localhost'\nport = 8080")
+        for k, v in doc["server"].items():
+            assert isinstance(k, str)
+            assert isinstance(v, Item)
+
+    def test_setitem_then_get_typed(self) -> None:
+        doc = Document.parse("[server]\nhost = 'localhost'")
+        doc["server"]["port"] = 8080
+        assert type(doc["server"]["port"]).__name__ == "ScalarItem"
+
+    def test_slice_returns_typed(self) -> None:
+        doc = Document.parse("ports = [80, 443, 8080]")
+        for item in doc["ports"][0:2]:
+            assert type(item).__name__ == "ScalarItem"
+
+    def test_parse_returns_typed(self) -> None:
+        assert type(Item.parse("0xFF")).__name__ == "ScalarItem"
+
+
+class TestIsinstance:
+    """ABC registration gives isinstance() support."""
+
+    def test_dict_item_is_mutable_mapping(self) -> None:
+        doc = Document.parse("[server]\nhost = 'localhost'")
+        assert isinstance(doc["server"], MutableMapping)
+
+    def test_list_item_is_mutable_sequence(self) -> None:
+        doc = Document.parse("ports = [80, 443]")
+        assert isinstance(doc["ports"], MutableSequence)
+
+    def test_scalar_is_not_mapping_or_sequence(self) -> None:
+        doc = Document.parse("name = 'hello'")
+        assert not isinstance(doc["name"], MutableMapping)
+        assert not isinstance(doc["name"], MutableSequence)
+
+    def test_all_are_item(self) -> None:
+        doc = Document.parse("[server]\nhost = 'localhost'\nports = [80]")
+        assert isinstance(doc["server"], Item)
+        assert isinstance(doc["server"]["ports"], Item)
+        assert isinstance(doc["server"]["host"], Item)

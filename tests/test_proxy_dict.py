@@ -90,7 +90,7 @@ class TestProxyDictMethods:
     def test_pop_too_many_args(self) -> None:
         doc = Document.parse("[owner]\nname = 'Tom'\n")
         with pytest.raises(TypeError, match="at most 2 arguments"):
-            doc["owner"].pop("name", 1, 2)  # type: ignore[call-overload]
+            doc["owner"].pop("name", 1, 2)
 
     def test_pop_by_key_returns_native(self) -> None:
         doc = Document.parse("[t]\na = 1\nb = 2\n")
@@ -176,7 +176,7 @@ class TestProxyDictMethods:
     # -- errors --
 
     def test_keys_on_scalar_raises(self, doc: Document) -> None:
-        with pytest.raises(TypeError):
+        with pytest.raises(AttributeError):
             doc["title"].keys()
 
 

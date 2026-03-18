@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyAttributeError, PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyIterator, PySlice, PyTuple};
 use toml_edit::DocumentMut as DocumentRs;
@@ -810,5 +810,38 @@ impl ListProxy {
         base.check_generation(&doc)?;
         let item = base.navigate(&doc.inner)?;
         item_ops::item_index(item, value, start, stop)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ScalarProxy (ScalarItem) — forward attribute access to the Python value
+// ---------------------------------------------------------------------------
+
+#[pymethods]
+impl ScalarProxy {
+    /// Forward attribute access to the underlying Python value.
+    ///
+    /// This makes scalar items feel like their native Python types:
+    /// a string item supports `.upper()`, `.startswith()`, etc.; an int item
+    /// supports `.bit_length()`; a datetime supports `.isoformat()`.
+    ///
+    /// Only triggered as a fallback — Item-level attributes like `.value`,
+    /// `.comment`, and `.inline_comment` are resolved through normal lookup
+    /// first and are never forwarded.
+    fn __getattr__(self_: PyRef<'_, Self>, name: &str) -> PyResult<Py<PyAny>> {
+        let py = self_.py();
+        let base = self_.as_super();
+        let py_value = base.value(py)?;
+        let bound = py_value.bind(py);
+        bound.getattr(name).map(|a| a.unbind()).map_err(|_| {
+            let type_name = bound
+                .get_type()
+                .name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|_| "unknown".to_owned());
+            PyAttributeError::new_err(format!(
+                "'ScalarItem' wrapping {type_name} has no attribute '{name}'"
+            ))
+        })
     }
 }

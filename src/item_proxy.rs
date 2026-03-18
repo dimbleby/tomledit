@@ -811,6 +811,23 @@ impl ListProxy {
         let item = base.navigate(&doc.inner)?;
         item_ops::item_index(item, value, start, stop)
     }
+
+    /// Format the array as multiline.
+    ///
+    /// Each element is placed on its own line, indented by *indent*
+    /// spaces, with a trailing comma after the last element.
+    /// Use ``.fmt()`` to collapse back to a single line.
+    ///
+    /// No-op on empty arrays.  Any comments on the array elements will
+    /// be removed.
+    #[pyo3(signature = (*, indent=4))]
+    pub fn set_multiline(self_: PyRefMut<'_, Self>, py: Python<'_>, indent: usize) -> PyResult<()> {
+        let base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_generation(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        item_ops::item_set_multiline(item, indent)
+    }
 }
 
 // ---------------------------------------------------------------------------

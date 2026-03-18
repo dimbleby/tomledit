@@ -741,11 +741,33 @@ pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) 
 // Mutation: list-like
 // ---------------------------------------------------------------------------
 
+/// Detect whether an array uses multiline formatting and return the element
+/// decor prefix if so (e.g. `"\n    "`).  Returns `None` for single-line arrays.
+fn multiline_prefix(arr: &toml_edit::Array) -> Option<String> {
+    let first = arr.get(0)?;
+    let raw = first.decor().prefix()?.as_str()?;
+    if raw.contains('\n') {
+        Some(raw.to_owned())
+    } else {
+        None
+    }
+}
+
+/// Apply multiline decor to a newly created value, matching the array's style.
+fn apply_multiline_decor(arr: &toml_edit::Array, v: &mut ValueRs) {
+    if let Some(prefix) = multiline_prefix(arr) {
+        let decor = v.decor_mut();
+        decor.set_prefix(prefix);
+        decor.set_suffix("");
+    }
+}
+
 pub(crate) fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
         let mut ic = comments::save_inline_comments(arr);
         let mut v = into_value(value)?;
         let inline = comments::take_inline_comment(&mut v);
+        apply_multiline_decor(arr, &mut v);
         arr.push(v);
         ic.push(inline);
         comments::restore_inline_comments(arr, &ic);
@@ -765,6 +787,7 @@ pub(crate) fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResul
         let mut ic = comments::save_inline_comments(arr);
         let mut v = into_value(value)?;
         let inline = comments::take_inline_comment(&mut v);
+        apply_multiline_decor(arr, &mut v);
         arr.insert(resolved, v);
         ic.insert(resolved, inline);
         comments::restore_inline_comments(arr, &ic);
@@ -823,6 +846,7 @@ pub(crate) fn item_extend(item: &mut ItemRs, items: Vec<Item>) -> PyResult<()> {
         for new_item in items {
             let mut v = into_value(new_item)?;
             let inline = comments::take_inline_comment(&mut v);
+            apply_multiline_decor(arr, &mut v);
             arr.push(v);
             ic.push(inline);
         }
@@ -945,6 +969,27 @@ pub(crate) fn item_fmt(item: &mut ItemRs) {
         ItemRs::Value(ValueRs::InlineTable(it)) => it.fmt(),
         ItemRs::Value(ValueRs::Array(arr)) => arr.fmt(),
         _ => {} // ArrayOfTables, scalars: no-op
+    }
+}
+
+/// Format an array as multiline, with each element on its own line.
+/// No-op on empty arrays.
+pub(crate) fn item_set_multiline(item: &mut ItemRs, indent: usize) -> PyResult<()> {
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => {
+            if !arr.is_empty() {
+                let prefix = format!("\n{}", " ".repeat(indent));
+                for val in arr.iter_mut() {
+                    let decor = val.decor_mut();
+                    decor.set_prefix(&prefix);
+                    decor.set_suffix("");
+                }
+                arr.set_trailing_comma(true);
+                arr.set_trailing("\n");
+            }
+            Ok(())
+        }
+        _ => Err(unsupported_op(item, "set_multiline()")),
     }
 }
 

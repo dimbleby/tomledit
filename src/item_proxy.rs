@@ -355,6 +355,14 @@ impl ItemProxy {
         Ok(item_ops::item_repr(item))
     }
 
+    /// Return the TOML representation of this item.
+    pub fn as_toml(&self, py: Python<'_>) -> PyResult<String> {
+        let doc = self.document.bind(py).borrow();
+        self.check_generation(&doc)?;
+        let item = self.navigate(&doc.inner)?;
+        Ok(item.to_string().trim().to_owned())
+    }
+
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = other.py();
 

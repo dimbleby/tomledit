@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Support `__contains__` on `ScalarItem` (for strings)
+- **Breaking:** `str(Document)` now returns a Python dict-like representation
+  instead of TOML text.  Use the new `as_toml()` method on `Document` and
+  `Item` for TOML serialisation.
+- Support `__contains__` on `ScalarItem` (for strings).
 
 ## 0.10.0 (18 March 2026)
 

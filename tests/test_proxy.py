@@ -278,7 +278,11 @@ class TestProxyRepr:
 class TestStr:
     def test_document_roundtrip(self) -> None:
         doc = Document.parse(SAMPLE)
-        assert str(doc) == SAMPLE
+        assert doc.as_toml() == SAMPLE
+
+    def test_document_str_is_dict_like(self) -> None:
+        doc = Document.parse("x = 1\n")
+        assert str(doc) == "{'x': 1}"
 
     def test_proxy_str_scalar(self) -> None:
         doc = Document.parse("x = 42\n")
@@ -302,6 +306,42 @@ class TestStr:
     def test_proxy_str_bool(self) -> None:
         doc = Document.parse("x = true\n")
         assert str(doc["x"]) == "True"
+
+
+# ---------------------------------------------------------------------------
+# as_toml
+# ---------------------------------------------------------------------------
+
+
+class TestAsToml:
+    def test_document_as_toml(self) -> None:
+        text = 'name = "hello"\nage = 42\n'
+        doc = Document.parse(text)
+        assert doc.as_toml() == text
+
+    def test_scalar_as_toml(self) -> None:
+        doc = Document.parse('name = "hello"\n')
+        assert doc["name"].as_toml() == '"hello"'
+
+    def test_int_as_toml(self) -> None:
+        doc = Document.parse("x = 42\n")
+        assert doc["x"].as_toml() == "42"
+
+    def test_bool_as_toml(self) -> None:
+        doc = Document.parse("x = true\n")
+        assert doc["x"].as_toml() == "true"
+
+    def test_table_as_toml(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        assert doc["t"].as_toml() == "a = 1\nb = 2"
+
+    def test_array_as_toml(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        assert doc["arr"].as_toml() == "[1, 2, 3]"
+
+    def test_inline_table_as_toml(self) -> None:
+        doc = Document.parse("meta = {x = 1, y = 2}\n")
+        assert doc["meta"].as_toml() == "{x = 1, y = 2}"
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +512,7 @@ class TestProxyFmt:
     def test_fmt_table(self) -> None:
         doc = Document.parse("[t]\na   =   1\nb   =   2\n")
         doc["t"].fmt()
-        assert str(doc) == toml_literal("""
+        assert doc.as_toml() == toml_literal("""
             [t]
             a = 1
             b = 2
@@ -482,23 +522,23 @@ class TestProxyFmt:
         doc = Document.parse("meta = {x = 1 }\n")
         doc["meta"]["y"] = 2
         doc["meta"].fmt()
-        assert str(doc) == "meta = { x = 1, y = 2 }\n"
+        assert doc.as_toml() == "meta = { x = 1, y = 2 }\n"
 
     def test_fmt_array(self) -> None:
         doc = Document.parse("arr = [  1,  2,  3  ]\n")
         doc["arr"].fmt()
-        assert str(doc) == "arr = [1, 2, 3]\n"
+        assert doc.as_toml() == "arr = [1, 2, 3]\n"
 
     def test_fmt_array_of_tables_is_noop(self) -> None:
         text = "[[t]]\na   =   1\n[[t]]\nb   =   2\n"
         doc = Document.parse(text)
         doc["t"].fmt()
-        assert str(doc) == text
+        assert doc.as_toml() == text
 
     def test_fmt_scalar_is_noop(self) -> None:
         doc = Document.parse("x = 1\n")
         doc["x"].fmt()
-        assert str(doc) == "x = 1\n"
+        assert doc.as_toml() == "x = 1\n"
 
     def test_fmt_does_not_invalidate_proxies(self) -> None:
         doc = Document.parse("[t]\na = 1\nb = 2\n")
@@ -510,7 +550,7 @@ class TestProxyFmt:
     def test_fmt_table_strips_comments_on_entries(self) -> None:
         doc = Document.parse("[t]\n# comment\na = 1 # inline\n")
         doc["t"].fmt()
-        assert str(doc) == "[t]\na = 1\n"
+        assert doc.as_toml() == "[t]\na = 1\n"
 
 
 # ---------------------------------------------------------------------------

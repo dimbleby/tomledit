@@ -6,7 +6,7 @@ use toml_edit::DocumentMut as DocumentRs;
 
 use crate::equality;
 use crate::item::Item;
-use crate::item_ops::{self, Key};
+use crate::item_ops::{self, Key, table_to_pydict};
 use crate::item_proxy::ItemProxy;
 use crate::value::Table;
 use crate::views::{ItemsView, KeysView, ValuesView};
@@ -237,12 +237,18 @@ impl Document {
         self.bump();
     }
 
-    pub fn __str__(&self) -> String {
-        self.inner.to_string()
+    pub fn __str__(&self, py: Python<'_>) -> PyResult<String> {
+        let dict = table_to_pydict(self.inner.iter(), py)?;
+        dict.str().map(|s| s.to_string())
     }
 
     pub fn __repr__(&self) -> String {
         format!("Document({} keys)", self.inner.len())
+    }
+
+    /// Return the document serialised as a TOML string.
+    pub fn as_toml(&self) -> String {
+        self.inner.to_string()
     }
 
     pub fn __bool__(&self) -> bool {

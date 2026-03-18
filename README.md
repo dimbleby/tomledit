@@ -39,7 +39,7 @@ doc["project"]["version"] = "2.0.0"
 doc["project"]["keywords"].append("important-keyword")
 doc["project"]["keywords"].inline_comment = "# updated"
 
-Path("pyproject.toml").write_text(str(doc), encoding="utf-8")
+Path("pyproject.toml").write_text(doc.as_toml(), encoding="utf-8")
 ```
 
 The result:

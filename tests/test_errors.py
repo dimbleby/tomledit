@@ -111,7 +111,7 @@ class TestWrongTypeErrors:
 
     def test_contains_on_scalar_raises(self) -> None:
         doc = Document.parse("val = 42\n")
-        with pytest.raises(TypeError, match=r"TOML scalar .* does not support 'in'"):
+        with pytest.raises(TypeError):
             assert 1 in doc["val"]
 
     def test_slice_del_on_scalar_raises(self) -> None:

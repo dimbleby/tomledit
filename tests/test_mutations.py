@@ -325,6 +325,12 @@ class TestAssignTableToKey:
         assert 'name = "alpha"' in result
         assert 'name = "beta"' in result
 
+    def test_assign_empty_list_creates_regular_array(self) -> None:
+        """Assigning [] produces an inline array, not an empty AoT."""
+        doc = Document()
+        doc["items"] = []
+        assert str(doc) == "items = []\n"
+
     def test_assign_nested_list_of_dicts_creates_dotted_aot(self) -> None:
         """Assigning a list of dicts inside a table creates [[parent.child]]."""
         doc = Document.parse('[project]\nname = "foo"\n')

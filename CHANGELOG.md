@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Support `__contains__` on `ScalarItem` (for strings)
+
 ## 0.10.0 (18 March 2026)
 
 - Split `Item` into `DictItem`, `ListItem`, and `ScalarItem` subclasses.

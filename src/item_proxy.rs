@@ -891,6 +891,14 @@ impl ScalarProxy {
         })
     }
 
+    // ---- containment ----
+
+    fn __contains__(self_: PyRef<'_, Self>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let py = self_.py();
+        let resolved = Self::resolve(&self_)?;
+        py_binop(py, "contains", resolved.bind(py), value)?.extract::<bool>(py)
+    }
+
     // ---- comparison ----
 
     fn __eq__(self_: PyRef<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<bool> {

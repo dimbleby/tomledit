@@ -123,6 +123,16 @@ class TestProxyContains:
         doc = Document.parse('[[items]]\nname = "a"\n')
         assert "not a dict" not in doc["items"]
 
+    def test_scalar_string_contains(self) -> None:
+        doc = Document.parse('msg = "hello world"\n')
+        assert "world" in doc["msg"]
+        assert "xyz" not in doc["msg"]
+
+    def test_scalar_contains_non_string_raises(self) -> None:
+        doc = Document.parse("val = 42\n")
+        with pytest.raises(TypeError):
+            assert 1 in doc["val"]
+
 
 # ---------------------------------------------------------------------------
 # Item: __bool__

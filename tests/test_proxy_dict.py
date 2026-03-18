@@ -591,8 +591,8 @@ class TestViews:
 
     def test_proxy_items_view_contains(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
-        assert ("a", 1) in doc["t"].items()  # type: ignore[comparison-overlap]
-        assert ("z", 1) not in doc["t"].items()  # type: ignore[comparison-overlap]
+        assert ("a", 1) in doc["t"].items()
+        assert ("z", 1) not in doc["t"].items()
 
     def test_proxy_items_view_repr(self) -> None:
         doc = Document.parse("[t]\na = 1\n")

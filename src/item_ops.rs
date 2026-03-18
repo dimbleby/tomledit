@@ -506,14 +506,6 @@ pub(crate) fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
     }
 }
 
-/// Cheap check that `item` is a table or inline table.
-pub(crate) fn is_table_like(item: &ItemRs) -> bool {
-    matches!(
-        item,
-        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_))
-    )
-}
-
 pub(crate) fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
     match item {
         ItemRs::Table(table) => Ok(table.contains_key(key)),
@@ -825,7 +817,7 @@ pub(crate) fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResu
     }
 }
 
-pub(crate) fn item_extend(item: &mut ItemRs, items: Vec<Item>, op: &str) -> PyResult<()> {
+pub(crate) fn item_extend(item: &mut ItemRs, items: Vec<Item>) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
         let mut ic = comments::save_inline_comments(arr);
         for new_item in items {
@@ -843,7 +835,7 @@ pub(crate) fn item_extend(item: &mut ItemRs, items: Vec<Item>, op: &str) -> PyRe
         }
         Ok(())
     } else {
-        Err(unsupported_op(item, op))
+        Err(unsupported_op(item, "extend()"))
     }
 }
 

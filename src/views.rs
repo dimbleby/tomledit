@@ -206,12 +206,11 @@ impl ValuesView {
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
         let keys = get_keys(&doc.inner, &self.path)?;
+        let generation = doc.generation;
         let proxies: Vec<Py<PyAny>> = keys
             .into_iter()
             .map(|k| {
-                ItemProxy::make_child(&self.document, &self.path, doc.generation, py, Key::Str(k))
-                    .into_pyobject(py)
-                    .map(|b| b.into_any().unbind())
+                ItemProxy::make_child_typed(&self.document, &self.path, generation, py, Key::Str(k))
             })
             .collect::<PyResult<_>>()?;
         let list = proxies.into_pyobject(py)?;
@@ -291,17 +290,17 @@ impl ItemsView {
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
         let keys = get_keys(&doc.inner, &self.path)?;
+        let generation = doc.generation;
         let pairs: Vec<(String, Py<PyAny>)> = keys
             .into_iter()
             .map(|k| {
-                let proxy = ItemProxy::make_child(
+                let obj = ItemProxy::make_child_typed(
                     &self.document,
                     &self.path,
-                    doc.generation,
+                    generation,
                     py,
                     Key::Str(k.clone()),
-                );
-                let obj = proxy.into_pyobject(py)?.into_any().unbind();
+                )?;
                 Ok((k, obj))
             })
             .collect::<PyResult<_>>()?;

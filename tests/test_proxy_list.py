@@ -55,8 +55,8 @@ class TestProxyListMethods:
 
     def test_pop_with_explicit_none_default_raises_type_error(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
-        with pytest.raises(TypeError, match="at most 1 argument"):
-            doc["arr"].pop(0, None)  # type: ignore[call-overload]
+        with pytest.raises(TypeError, match="positional arguments"):
+            doc["arr"].pop(0, None)
 
     def test_pop_aot_last(self) -> None:
         doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
@@ -176,7 +176,7 @@ class TestProxyListMethods:
         assert len(doc["arr"]) == 0
 
     def test_append_on_table_raises(self, doc: Document) -> None:
-        with pytest.raises(TypeError):
+        with pytest.raises(AttributeError):
             doc["owner"].append(1)
 
     def test_remove_string(self) -> None:
@@ -271,12 +271,12 @@ class TestCount:
         assert doc["arr"].count(True) == 1
 
     def test_count_on_table_raises(self, doc: Document) -> None:
-        with pytest.raises(TypeError):
+        with pytest.raises(AttributeError):
             doc["owner"].count("name")
 
     def test_count_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError):
+        with pytest.raises(AttributeError):
             doc["x"].count(42)
 
     def test_count_aot(self) -> None:
@@ -332,12 +332,12 @@ class TestIndex:
         assert doc["arr"].index("z") == 2
 
     def test_index_on_table_raises(self, doc: Document) -> None:
-        with pytest.raises(TypeError):
+        with pytest.raises(AttributeError):
             doc["owner"].index("name")
 
     def test_index_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError):
+        with pytest.raises(AttributeError):
             doc["x"].index(42)
 
     def test_index_aot(self) -> None:

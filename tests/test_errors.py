@@ -177,69 +177,69 @@ class TestWrongTypeErrors:
 
     def test_keys_on_array_raises(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")
-        with pytest.raises(TypeError, match="keys"):
+        with pytest.raises(AttributeError):
             doc["arr"].keys()
 
     def test_get_on_array_raises(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
-        with pytest.raises(TypeError, match="integers, not strings"):
+        with pytest.raises(AttributeError):
             doc["arr"].get("x")
 
     def test_get_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError, match="get"):
+        with pytest.raises(AttributeError):
             doc["x"].get("y")
 
     def test_pop_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError, match="pop"):
+        with pytest.raises(AttributeError):
             doc["x"].pop("y")
 
     def test_pop_noarg_on_table_raises(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
-        with pytest.raises(TypeError, match=r"pop\(\) with no argument"):
+        with pytest.raises(TypeError, match="missing 1 required positional argument"):
             doc["t"].pop()
 
     def test_pop_noarg_on_inline_table_raises(self) -> None:
         doc = Document.parse("t = {a = 1}\n")
-        with pytest.raises(TypeError, match=r"pop\(\) with no argument"):
+        with pytest.raises(TypeError, match="missing 1 required positional argument"):
             doc["t"].pop()
 
     def test_update_on_array_raises(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")
-        with pytest.raises(TypeError, match="update"):
+        with pytest.raises(AttributeError):
             doc["arr"].update({"a": 1})
 
     # -- list methods on wrong types --
 
     def test_insert_on_table_raises(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
-        with pytest.raises(TypeError, match="insert"):
+        with pytest.raises(AttributeError):
             doc["t"].insert(0, 99)
 
     def test_remove_on_table_raises(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
-        with pytest.raises(TypeError, match="remove"):
+        with pytest.raises(AttributeError):
             doc["t"].remove(1)
 
     def test_extend_on_table_raises(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
-        with pytest.raises(TypeError, match="extend"):
+        with pytest.raises(AttributeError):
             doc["t"].extend([1, 2])
 
     # -- view methods on wrong types --
 
     def test_keys_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 1\n")
-        with pytest.raises(TypeError, match="has no keys"):
+        with pytest.raises(AttributeError):
             doc["x"].keys()
 
     def test_values_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 1\n")
-        with pytest.raises(TypeError, match="has no values"):
+        with pytest.raises(AttributeError):
             doc["x"].values()
 
     def test_items_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 1\n")
-        with pytest.raises(TypeError, match="has no items"):
+        with pytest.raises(AttributeError):
             doc["x"].items()

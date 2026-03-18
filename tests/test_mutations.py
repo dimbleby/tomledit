@@ -232,8 +232,6 @@ class TestInlineTableMutation:
         assert doc["owner"]["email"] == "alice@example.com"
 
     def test_assign_dict_to_inline_table_key(self) -> None:
-        """Assigning a dict into an inline table must produce a nested inline
-        table."""
         doc = Document.parse("it = { a = 1 }\n")
         doc["it"]["b"] = {"foo": "bar"}
         assert doc["it"]["b"]["foo"] == "bar"
@@ -252,8 +250,6 @@ class TestNestedArrayNavigation:
     """Exercise the Key::Int branch in navigate_parent / navigate_parent_mut."""
 
     def test_read_value_from_nested_array_element(self) -> None:
-        """doc["arr"][0] navigates to an array element; accessing a child
-        of that element uses navigate_parent with int key in path."""
         doc = Document.parse("arr = [{x = 1}, {x = 2}]\n")
         assert doc["arr"][0]["x"] == 1
         assert doc["arr"][1]["x"] == 2
@@ -276,25 +272,21 @@ class TestNestedArrayNavigation:
 
 class TestAssignTableToKey:
     def test_assign_dict_to_existing_scalar(self) -> None:
-        """Assigning a dict to a key that was a scalar converts it to a table."""
         doc = Document.parse("[section]\nx = 1\n")
         doc["section"]["x"] = {"nested": "value"}
         assert doc["section"]["x"]["nested"] == "value"
 
     def test_assign_dict_to_existing_table_key(self) -> None:
-        """Assigning a dict to a key that was already a table replaces it."""
         doc = Document.parse("[s]\n[s.inner]\na = 1\n")
         doc["s"]["inner"] = {"b": 2}
         assert doc["s"]["inner"]["b"] == 2
 
     def test_assign_empty_dict_creates_standard_table(self) -> None:
-        """Assigning {} to a top-level key produces a [table] header, not inline."""
         doc = Document()
         doc["foo"] = {}
         assert doc.as_toml() == "[foo]\n"
 
     def test_assign_dict_creates_standard_table(self) -> None:
-        """Assigning a dict with values produces a [table] section."""
         doc = Document()
         doc["foo"] = {"bar": 1, "baz": "hello"}
         result = doc.as_toml()
@@ -303,7 +295,6 @@ class TestAssignTableToKey:
         assert 'baz = "hello"' in result
 
     def test_assign_nested_dict_creates_dotted_table(self) -> None:
-        """Assigning a dict inside a table creates a dotted [parent.child] header."""
         doc = Document.parse("[existing]\nkey = 1\n")
         doc["existing"]["nested"] = {"a": 2}
         result = doc.as_toml()
@@ -311,13 +302,11 @@ class TestAssignTableToKey:
         assert "a = 2" in result
 
     def test_existing_inline_table_stays_inline(self) -> None:
-        """Mutating an already-inline table preserves inline format."""
         doc = Document.parse("foo = { bar = 1 }\n")
         doc["foo"]["bar"] = 2
         assert doc.as_toml() == "foo = { bar = 2 }\n"
 
     def test_assign_list_of_dicts_creates_array_of_tables(self) -> None:
-        """Assigning a list of dicts produces [[table]] headers, not inline."""
         doc = Document()
         doc["servers"] = [{"name": "alpha"}, {"name": "beta"}]
         result = doc.as_toml()
@@ -326,13 +315,11 @@ class TestAssignTableToKey:
         assert 'name = "beta"' in result
 
     def test_assign_empty_list_creates_regular_array(self) -> None:
-        """Assigning [] produces an inline array, not an empty AoT."""
         doc = Document()
         doc["items"] = []
         assert doc.as_toml() == "items = []\n"
 
     def test_assign_nested_list_of_dicts_creates_dotted_aot(self) -> None:
-        """Assigning a list of dicts inside a table creates [[parent.child]]."""
         doc = Document.parse('[project]\nname = "foo"\n')
         doc["project"]["authors"] = [{"name": "Alice"}, {"name": "Bob"}]
         result = doc.as_toml()
@@ -407,39 +394,47 @@ class TestAssignItemProxy:
         assert doc["dst"]["x"] == 1
         assert doc["dst"]["y"] == 2
 
+    def test_copy_table_from_another_doc_has_blank_line(self) -> None:
+        src = Document.parse("[t]\na = 1\n")
+        dst = Document.parse("[existing]\nkey = 1\n")
+        dst["t"] = src["t"]
+        expected = "[existing]\nkey = 1\n\n[t]\na = 1\n"
+        assert dst.as_toml() == expected
+
+    def test_copy_aot_from_another_doc_has_blank_line(self) -> None:
+        src = Document.parse("[[items]]\nx = 1\n\n[[items]]\nx = 2\n")
+        dst = Document.parse("[existing]\nkey = 1\n")
+        dst["items"] = src["items"]
+        expected = "[existing]\nkey = 1\n\n[[items]]\nx = 1\n\n[[items]]\nx = 2\n"
+        assert dst.as_toml() == expected
+
     def test_copy_is_independent(self) -> None:
-        """After copying, changes to the original don't affect the copy."""
         doc = Document.parse("a = 1\n")
         doc["b"] = doc["a"]
         doc["a"] = 99
         assert doc["b"] == 1
 
     def test_proxy_setitem_on_nested_key(self) -> None:
-        """doc["t"]["x"] = doc["t"]["y"] - proxy on both sides of nested setitem."""
         doc = Document.parse("[t]\nx = 1\ny = 2\n")
         doc["t"]["x"] = doc["t"]["y"]
         assert doc["t"]["x"] == 2
 
     def test_slice_assign_from_proxy(self) -> None:
-        """Slice assignment with proxy values from the same document."""
         doc = Document.parse("a = [1, 2, 3]\nb = [10, 20]\n")
         doc["a"][0:1] = doc["b"]
         assert doc["a"] == [10, 20, 2, 3]
 
     def test_update_with_proxy_values(self) -> None:
-        """update() where dict values are proxies into the same document."""
         doc = Document.parse("[t]\nx = 1\ny = 2\n")
         doc["t"].update({"z": doc["t"]["x"]})
         assert doc["t"]["z"] == 1
 
     def test_doc_update_with_proxy_values(self) -> None:
-        """Document.update() where dict values are proxies into the same document."""
         doc = Document.parse("a = 1\nb = 2\n")
         doc.update({"c": doc["a"]})
         assert doc["c"] == 1
 
     def test_copy_from_another_document(self) -> None:
-        """Proxies from a different document can be assigned too."""
         src = Document.parse("[t]\nfoo = 42\n")
         dst = Document.parse("[s]\nbar = 0\n")
         dst["s"]["bar"] = src["t"]["foo"]
@@ -447,7 +442,6 @@ class TestAssignItemProxy:
         assert src["t"]["foo"] == 42
 
     def test_assign_document_as_table(self) -> None:
-        """A whole Document can be assigned as a table under a key."""
         doc = Document.parse("x = 1\n")
         other = Document.parse("a = 10\nb = 20\n")
         doc["foo"] = other
@@ -455,7 +449,6 @@ class TestAssignItemProxy:
         assert doc["foo"]["b"] == 20
 
     def test_assign_document_to_itself(self) -> None:
-        """doc['foo'] = doc snapshots the current contents."""
         doc = Document.parse("a = 1\nb = 2\n")
         doc["foo"] = doc
         assert doc["foo"] == {"a": 1, "b": 2}

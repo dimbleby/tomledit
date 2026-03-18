@@ -35,7 +35,22 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
     // a standard Table ([foo]) into an InlineTable (foo = {}).
     // Exception: inside inline tables, nested dicts MUST become inline tables.
     if (value.0.is_table() || value.0.is_array_of_tables()) && !item.is_inline_table() {
-        item[key] = value.0;
+        let mut val = value.0;
+        // Clear position-specific decor so toml_edit applies its default
+        // blank-line-before-header formatting.  Without this, a table
+        // cloned from another document would carry the source's decor
+        // (e.g. no leading newline when it was the first table there).
+        if let Some(t) = val.as_table_mut() {
+            t.decor_mut().clear();
+            t.set_position(None);
+        }
+        if let Some(aot) = val.as_array_of_tables_mut() {
+            for t in aot.iter_mut() {
+                t.decor_mut().clear();
+                t.set_position(None);
+            }
+        }
+        item[key] = val;
         return;
     }
 

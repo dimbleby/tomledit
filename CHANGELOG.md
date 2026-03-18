@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.0 (18 March 2026)
+
+- Split `Item` into `DictItem`, `ListItem`, and `ScalarItem` subclasses.
+  `isinstance` checks and `MutableMapping`/`MutableSequence` protocols now work.
+- Forward arithmetic, comparison, and type-conversion dunder methods on
+  `ScalarItem` to the underlying Python value.
+- Add `ListItem.set_multiline()` to format an array with one element per line.
+- Preserve multiline formatting when appending, inserting, or extending arrays.
+- Add `KeysView`, `ValuesView`, `ItemsView` for dict-like views.
+- Add missing methods: `setdefault()`, `get()` with default, array-of-tables
+  indexing and iteration.
+- Prefer standard `[table]` over inline tables when assigning dicts.
+
 ## 0.9.5 (15 March 2026)
 
 - Fix insertion of dictionaries into inline tables

@@ -365,11 +365,15 @@ pub(crate) fn item_delitem_slice(item: &mut ItemRs, indices: &[usize]) -> PyResu
     match item {
         ItemRs::Value(ValueRs::Array(arr)) => {
             let mut ic = comments::save_inline_comments(arr);
+            let removing_first = sorted.last() == Some(&0);
+            let removing_last = sorted.first() == Some(&(arr.len() - 1));
+            let decor = save_removal_decor(arr, removing_first, removing_last);
             for idx in sorted {
                 arr.remove(idx);
                 ic.remove(idx);
             }
             comments::restore_inline_comments(arr, &ic);
+            apply_removal_decor(arr, &decor);
             Ok(())
         }
         ItemRs::ArrayOfTables(aot) => {
@@ -403,6 +407,13 @@ pub(crate) fn item_setitem_slice(
         let stop_idx = stop as usize;
 
         let mut ic = comments::save_inline_comments(arr);
+        let removes_first = start_idx == 0 && stop_idx > 0;
+        let removes_last = stop_idx == arr.len() && stop_idx > start_idx;
+        let decor = save_removal_decor(
+            arr,
+            removes_first && values.is_empty(),
+            removes_last && values.is_empty(),
+        );
 
         // Remove old elements from back to front.
         for i in (start_idx..stop_idx).rev() {
@@ -423,6 +434,7 @@ pub(crate) fn item_setitem_slice(
             ic.insert(idx, inline);
         }
         comments::restore_inline_comments(arr, &ic);
+        apply_removal_decor(arr, &decor);
         Ok(())
     } else {
         // Extended slice: replacement must match the slice length.
@@ -443,6 +455,90 @@ pub(crate) fn item_setitem_slice(
             }
         }
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Array boundary-element decoration repair
+// ---------------------------------------------------------------------------
+
+/// Decoration state captured before an array removal so that the opening and
+/// closing brackets stay in their original positions.
+struct RemovalDecor {
+    /// Prefix of the old first element (between `[` and the value).
+    first_prefix: Option<String>,
+    /// Suffix of the old last element (between the value and `]`).
+    last_suffix: Option<String>,
+}
+
+/// Snapshot the decorations that would be lost when the first and/or last
+/// element of an array is removed.
+///
+/// `removing_first` / `removing_last` indicate whether the removal will
+/// affect element 0 or element `len − 1`.  Returns `None` fields when the
+/// corresponding boundary is unaffected or the array is too small to need
+/// repair (single-element arrays becoming empty).
+fn save_removal_decor(
+    arr: &toml_edit::Array,
+    removing_first: bool,
+    removing_last: bool,
+) -> RemovalDecor {
+    let at_least_two = arr.len() >= 2;
+    RemovalDecor {
+        first_prefix: (removing_first && at_least_two).then(|| {
+            arr.get(0)
+                .and_then(|v| v.decor().prefix().and_then(|r| r.as_str()))
+                .unwrap_or_default()
+                .to_owned()
+        }),
+        last_suffix: (removing_last && at_least_two).then(|| {
+            let last = arr.len() - 1;
+            arr.get(last)
+                .and_then(|v| v.decor().suffix().and_then(|r| r.as_str()))
+                .unwrap_or_default()
+                .to_owned()
+        }),
+    }
+}
+
+/// Apply saved decoration fixes after a removal + `restore_inline_comments`.
+fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDecor) {
+    // --- First-element prefix ---
+    // The new first element inherits a prefix meant to follow a comma (e.g.
+    // `" "` in `[1, 2]` or `" # note\n    "` in multiline arrays).  Replace
+    // it with the old first element's prefix so `[1, 2, 3]` becomes `[2, 3]`
+    // instead of `[ 2, 3]`.
+    if let Some(ref old_first_prefix) = decor.first_prefix
+        && let Some(new_first) = arr.get_mut(0)
+    {
+        let cur = new_first
+            .decor()
+            .prefix()
+            .and_then(|r| r.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        let fixed = if let Some((_inline, rest)) = cur.split_once('\n') {
+            // Multiline: drop the removed element's inline-comment line,
+            // keep block comments + indentation that belong to this element.
+            format!("\n{rest}")
+        } else {
+            // Single-line: use the original first element's prefix.
+            old_first_prefix.clone()
+        };
+        new_first.decor_mut().set_prefix(&fixed);
+    }
+
+    // --- Last-element suffix ---
+    // The old last element's suffix (whitespace between the value and `]`) is
+    // discarded by toml_edit when that element is removed.  Transfer it to the
+    // array's trailing string so the closing bracket stays in place, e.g.
+    // `[ 1, 2, 3 ]` becomes `[ 1, 2 ]` instead of `[ 1, 2]`.
+    if let Some(ref old_last_suffix) = decor.last_suffix
+        && !old_last_suffix.is_empty()
+        && !arr.is_empty()
+    {
+        let trailing = arr.trailing().as_str().unwrap_or_default().to_owned();
+        arr.set_trailing(format!("{trailing}{old_last_suffix}"));
     }
 }
 
@@ -614,9 +710,11 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
         ItemRs::Value(ValueRs::Array(array)) => {
             let idx = resolve_index(require_int_key(key)?, array.len())?;
             let mut ic = comments::save_inline_comments(array);
+            let decor = save_removal_decor(array, idx == 0, idx == array.len() - 1);
             array.remove(idx);
             ic.remove(idx);
             comments::restore_inline_comments(array, &ic);
+            apply_removal_decor(array, &decor);
             Ok(())
         }
         ItemRs::ArrayOfTables(aot) => {
@@ -654,9 +752,11 @@ pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyR
             ItemRs::Value(ValueRs::Array(arr)) => {
                 let idx = resolve_index(key_obj.extract::<i64>()?, arr.len())?;
                 let mut ic = comments::save_inline_comments(arr);
+                let decor = save_removal_decor(arr, idx == 0, idx == arr.len() - 1);
                 let removed = arr.remove(idx);
                 ic.remove(idx);
                 comments::restore_inline_comments(arr, &ic);
+                apply_removal_decor(arr, &decor);
                 Ok(Item(ItemRs::Value(removed)))
             }
             ItemRs::ArrayOfTables(aot) => {
@@ -672,9 +772,11 @@ pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyR
                 }
                 let last = arr.len() - 1;
                 let mut ic = comments::save_inline_comments(arr);
+                let decor = save_removal_decor(arr, false, true);
                 let removed = arr.remove(last);
                 ic.remove(last);
                 comments::restore_inline_comments(arr, &ic);
+                apply_removal_decor(arr, &decor);
                 Ok(Item(ItemRs::Value(removed)))
             }
             ItemRs::ArrayOfTables(aot) => {
@@ -827,13 +929,23 @@ pub(crate) fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResul
 pub(crate) fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResult<()> {
     if let Some(arr) = item.as_array_mut() {
         let mut ic = comments::save_inline_comments(arr);
+        // We don't know which element will match, so snapshot both boundaries.
+        let mut decor = save_removal_decor(arr, true, true);
         for i in 0..arr.len() {
             if let Some(v) = arr.get(i)
                 && equality::value_eq(v, value)?
             {
+                let last = arr.len() - 1;
+                if i != 0 {
+                    decor.first_prefix = None;
+                }
+                if i != last {
+                    decor.last_suffix = None;
+                }
                 arr.remove(i);
                 ic.remove(i);
                 comments::restore_inline_comments(arr, &ic);
+                apply_removal_decor(arr, &decor);
                 return Ok(());
             }
         }

@@ -118,6 +118,38 @@ class TestProxyListMethods:
         with pytest.raises(ValueError, match="not in array"):
             doc["items"].remove("not a dict")
 
+    # -- boundary-decoration preservation on removal --------------------------
+
+    def test_remove_first_preserves_prefix(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        doc["arr"].remove(1)
+        assert doc.as_toml() == "arr = [2, 3]\n"
+
+    def test_remove_first_preserves_padded_prefix(self) -> None:
+        doc = Document.parse("arr = [ 1, 2, 3 ]\n")
+        doc["arr"].remove(1)
+        assert doc.as_toml() == "arr = [ 2, 3 ]\n"
+
+    def test_remove_last_preserves_padded_suffix(self) -> None:
+        doc = Document.parse("arr = [ 1, 2, 3 ]\n")
+        doc["arr"].remove(3)
+        assert doc.as_toml() == "arr = [ 1, 2 ]\n"
+
+    def test_pop_last_preserves_padded_suffix(self) -> None:
+        doc = Document.parse("arr = [ 1, 2, 3 ]\n")
+        doc["arr"].pop()
+        assert doc.as_toml() == "arr = [ 1, 2 ]\n"
+
+    def test_del_first_preserves_prefix(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        del doc["arr"][0]
+        assert doc.as_toml() == "arr = [2, 3]\n"
+
+    def test_del_last_preserves_padded_suffix(self) -> None:
+        doc = Document.parse("arr = [ 1, 2, 3 ]\n")
+        del doc["arr"][-1]
+        assert doc.as_toml() == "arr = [ 1, 2 ]\n"
+
     def test_extend(self) -> None:
         doc = Document.parse("arr = [1]\n")
         doc["arr"].extend([2, 3, 4])
@@ -598,7 +630,27 @@ class TestSliceIndexing:
     def test_delitem_slice_visible_in_output(self) -> None:
         doc = Document.parse(self.TOML)
         del doc["arr"][0:2]
-        assert doc.as_toml() == "arr = [ 3, 4, 5]\n"
+        assert doc.as_toml() == "arr = [3, 4, 5]\n"
+
+    def test_delitem_slice_preserves_padded_first(self) -> None:
+        doc = Document.parse("arr = [ 1, 2, 3, 4, 5 ]\n")
+        del doc["arr"][0:2]
+        assert doc.as_toml() == "arr = [ 3, 4, 5 ]\n"
+
+    def test_delitem_slice_preserves_padded_last(self) -> None:
+        doc = Document.parse("arr = [ 1, 2, 3, 4, 5 ]\n")
+        del doc["arr"][3:5]
+        assert doc.as_toml() == "arr = [ 1, 2, 3 ]\n"
+
+    def test_setitem_slice_empty_preserves_padded_first(self) -> None:
+        doc = Document.parse("arr = [ 1, 2, 3, 4, 5 ]\n")
+        doc["arr"][0:2] = []
+        assert doc.as_toml() == "arr = [ 3, 4, 5 ]\n"
+
+    def test_setitem_slice_empty_preserves_padded_last(self) -> None:
+        doc = Document.parse("arr = [ 1, 2, 3, 4, 5 ]\n")
+        doc["arr"][3:5] = []
+        assert doc.as_toml() == "arr = [ 1, 2, 3 ]\n"
 
     # ---- additional edge cases ----
 

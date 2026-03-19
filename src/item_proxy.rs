@@ -561,6 +561,19 @@ impl ItemProxy {
 
 #[pymethods]
 impl DictProxy {
+    #[staticmethod]
+    fn parse(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
+        let result = ItemProxy::parse(py, text)?;
+        if result.bind(py).is_instance_of::<DictProxy>() {
+            Ok(result)
+        } else {
+            Err(PyValueError::new_err(format!(
+                "DictItem.parse() requires a table value, got {}",
+                result.bind(py).get_type().qualname()?,
+            )))
+        }
+    }
+
     pub fn keys(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<KeysView> {
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
@@ -707,6 +720,19 @@ impl DictProxy {
 
 #[pymethods]
 impl ListProxy {
+    #[staticmethod]
+    fn parse(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
+        let result = ItemProxy::parse(py, text)?;
+        if result.bind(py).is_instance_of::<ListProxy>() {
+            Ok(result)
+        } else {
+            Err(PyValueError::new_err(format!(
+                "ListItem.parse() requires an array value, got {}",
+                result.bind(py).get_type().qualname()?,
+            )))
+        }
+    }
+
     pub fn __iadd__(self_: PyRefMut<'_, Self>, values: &Bound<'_, PyAny>) -> PyResult<()> {
         Self::extend(self_, values.py(), values)
     }
@@ -872,6 +898,19 @@ impl ScalarProxy {
 
 #[pymethods]
 impl ScalarProxy {
+    #[staticmethod]
+    fn parse(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
+        let result = ItemProxy::parse(py, text)?;
+        if result.bind(py).is_instance_of::<ScalarProxy>() {
+            Ok(result)
+        } else {
+            Err(PyValueError::new_err(format!(
+                "ScalarItem.parse() requires a scalar value, got {}",
+                result.bind(py).get_type().qualname()?,
+            )))
+        }
+    }
+
     // ---- attribute forwarding ----
 
     /// Forward attribute access to the underlying Python value.

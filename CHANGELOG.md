@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `DictItem.parse()`, `ListItem.parse()`, and `ScalarItem.parse()` now validate
+  that the parsed value matches the expected type, raising `ValueError` on
+  mismatch.
+
 ## 0.11.0 (19 March 2026)
 
 - **Breaking:** `str(Document)` now returns a Python dict-like representation

@@ -8,7 +8,7 @@ from datetime import date, datetime, time, timezone
 import pytest
 
 from tests.conftest import SAMPLE, toml_literal
-from tomledit import Document, Item
+from tomledit import DictItem, Document, Item, ListItem, ScalarItem
 
 # ---------------------------------------------------------------------------
 # Item: __len__
@@ -614,6 +614,50 @@ class TestSubclassTypes:
 
     def test_parse_returns_typed(self) -> None:
         assert type(Item.parse("0xFF")).__name__ == "ScalarItem"
+
+    def test_dict_item_parse_inline_table(self) -> None:
+        item = DictItem.parse("{a = 1}")
+        assert isinstance(item, DictItem)
+        assert item.value == {"a": 1}
+
+    def test_list_item_parse_array(self) -> None:
+        item = ListItem.parse("[1, 2]")
+        assert isinstance(item, ListItem)
+        assert item.value == [1, 2]
+
+    def test_scalar_item_parse_int(self) -> None:
+        item = ScalarItem.parse("42")
+        assert isinstance(item, ScalarItem)
+        assert item.value == 42
+
+    def test_scalar_item_parse_string(self) -> None:
+        item = ScalarItem.parse("'hello'")
+        assert isinstance(item, ScalarItem)
+        assert item.value == "hello"
+
+    def test_dict_item_parse_rejects_array(self) -> None:
+        with pytest.raises(ValueError, match=r"DictItem\.parse.*table.*ListItem"):
+            DictItem.parse("[]")
+
+    def test_dict_item_parse_rejects_scalar(self) -> None:
+        with pytest.raises(ValueError, match=r"DictItem\.parse.*table.*ScalarItem"):
+            DictItem.parse("42")
+
+    def test_list_item_parse_rejects_table(self) -> None:
+        with pytest.raises(ValueError, match=r"ListItem\.parse.*array.*DictItem"):
+            ListItem.parse("{}")
+
+    def test_list_item_parse_rejects_scalar(self) -> None:
+        with pytest.raises(ValueError, match=r"ListItem\.parse.*array.*ScalarItem"):
+            ListItem.parse("42")
+
+    def test_scalar_item_parse_rejects_array(self) -> None:
+        with pytest.raises(ValueError, match=r"ScalarItem\.parse.*scalar.*ListItem"):
+            ScalarItem.parse("[]")
+
+    def test_scalar_item_parse_rejects_table(self) -> None:
+        with pytest.raises(ValueError, match=r"ScalarItem\.parse.*scalar.*DictItem"):
+            ScalarItem.parse("{}")
 
 
 class TestIsinstance:

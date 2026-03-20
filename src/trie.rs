@@ -34,22 +34,17 @@ impl MutationTrie {
     /// Walks the trie from root along `path`. If any node along the way has
     /// `version > generation`, the proxy is stale.
     pub(crate) fn is_valid(&self, path: &[Key], generation: u64) -> bool {
-        if self.root.version > generation {
-            return false;
-        }
         let mut node = &self.root;
-        for key in path {
-            match node.children.get(key) {
-                Some(child) => {
-                    if child.version > generation {
-                        return false;
-                    }
-                    node = child;
-                }
-                None => break,
+        let mut keys = path.iter();
+        loop {
+            if node.version > generation {
+                return false;
+            }
+            match keys.next().and_then(|k| node.children.get(k)) {
+                Some(child) => node = child,
+                None => return true,
             }
         }
-        true
     }
 
     /// Record a mutation at the given path. Creates intermediate nodes as

@@ -1,4 +1,4 @@
-"""Tests for proxy generation counter (stale-proxy detection)."""
+"""Tests for stale-proxy detection."""
 
 from __future__ import annotations
 
@@ -227,8 +227,8 @@ class TestFreshProxiesAfterMutation:
             _ = old_a.value
 
 
-class TestReadMethodsCheckGeneration:
-    """All read-path methods should check the generation counter."""
+class TestReadMethodsCheckFreshness:
+    """All read-path methods should check that the proxy is fresh."""
 
     @pytest.fixture
     def stale_proxy(self) -> tuple[Item, Item]:

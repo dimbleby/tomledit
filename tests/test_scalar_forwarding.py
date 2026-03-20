@@ -127,7 +127,7 @@ class TestExistingAttrsNotShadowed:
         assert bool(doc["name"]) is True
 
 
-class TestErrorCases:
+class TestForwardingErrors:
     def test_nonexistent_attr(self, doc: Document) -> None:
         with pytest.raises(AttributeError, match=r"ScalarItem.*str.*nonexistent"):
             _ = doc["name"].nonexistent
@@ -135,12 +135,6 @@ class TestErrorCases:
     def test_wrong_type_method(self, doc: Document) -> None:
         with pytest.raises(AttributeError, match=r"ScalarItem.*int.*upper"):
             doc["port"].upper()
-
-    def test_stale_proxy(self, doc: Document) -> None:
-        name = doc["name"]
-        doc["name"] = "Bob"
-        with pytest.raises(RuntimeError, match="stale"):
-            name.upper()
 
 
 class TestDictListNotAffected:

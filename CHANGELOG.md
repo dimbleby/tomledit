@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Proxy invalidation is now path-precise.
+  Mutating one part of a document no longer invalidates `Item` references to
+  unrelated subtrees.
 - `DictItem.parse()`, `ListItem.parse()`, and `ScalarItem.parse()` now validate
   that the parsed value matches the expected type, raising `ValueError` on
   mismatch.

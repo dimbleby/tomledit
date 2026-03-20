@@ -657,13 +657,13 @@ pub(crate) fn item_setitem(
     item: &mut ItemRs,
     key: &Bound<'_, PyAny>,
     value: Item,
-) -> PyResult<bool> {
+) -> PyResult<Option<Key>> {
     match item {
         ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
             let k = require_str_key(key)?;
             let replaced = item.get(k.as_str()).is_some();
             set_with_decor_preservation(item, &k, value);
-            Ok(replaced)
+            Ok(if replaced { Some(Key::Str(k)) } else { None })
         }
         ItemRs::Value(ValueRs::Array(array)) => {
             let idx = resolve_index(require_int_key(key)?, array.len())?;
@@ -673,12 +673,12 @@ pub(crate) fn item_setitem(
             if !inline.is_empty() {
                 comments::set_array_item_comment(array, idx, &inline);
             }
-            Ok(true)
+            Ok(Some(Key::Int(idx)))
         }
         ItemRs::ArrayOfTables(aot) => {
             let idx = resolve_index(require_int_key(key)?, aot.len())?;
             item[idx] = value.0;
-            Ok(true)
+            Ok(Some(Key::Int(idx)))
         }
         _ => Err(PyTypeError::new_err(format!(
             "'{}' is not subscriptable",
@@ -691,21 +691,21 @@ pub(crate) fn item_setitem(
 // Delitem
 // ---------------------------------------------------------------------------
 
-pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<()> {
+pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Key> {
     match item {
         ItemRs::Table(table) => {
             let k = require_str_key(key)?;
             if table.remove(&k).is_none() {
                 return Err(PyKeyError::new_err(k));
             }
-            Ok(())
+            Ok(Key::Str(k))
         }
         ItemRs::Value(ValueRs::InlineTable(it)) => {
             let k = require_str_key(key)?;
             if it_remove_preserving(it, &k).is_none() {
                 return Err(PyKeyError::new_err(k));
             }
-            Ok(())
+            Ok(Key::Str(k))
         }
         ItemRs::Value(ValueRs::Array(array)) => {
             let idx = resolve_index(require_int_key(key)?, array.len())?;
@@ -715,12 +715,12 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
             ic.remove(idx);
             comments::restore_inline_comments(array, &ic);
             apply_removal_decor(array, &decor);
-            Ok(())
+            Ok(Key::Int(idx))
         }
         ItemRs::ArrayOfTables(aot) => {
             let idx = resolve_index(require_int_key(key)?, aot.len())?;
             aot.remove(idx);
-            Ok(())
+            Ok(Key::Int(idx))
         }
         _ => Err(PyTypeError::new_err(format!(
             "TOML {} item is not subscriptable",
@@ -839,19 +839,23 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
 /// Apply pre-extracted update pairs to an item.
 ///
 /// Returns `true` if any key replaced an entry that existed before the update.
-pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) -> PyResult<bool> {
+pub(crate) fn apply_update_pairs(
+    item: &mut ItemRs,
+    pairs: Vec<(String, Item)>,
+) -> PyResult<Vec<String>> {
     if !(item.is_table() || item.is_inline_table()) {
         return Err(unsupported_op(item, "update()"));
     }
-    let mut replaced = false;
+    let mut replaced_keys = Vec::new();
     for (key, val) in pairs {
-        if !replaced {
-            replaced = item.as_table().is_some_and(|t| t.contains_key(&key))
-                || item.as_inline_table().is_some_and(|t| t.contains_key(&key));
+        let exists = item.as_table().is_some_and(|t| t.contains_key(&key))
+            || item.as_inline_table().is_some_and(|t| t.contains_key(&key));
+        if exists {
+            replaced_keys.push(key.clone());
         }
         set_with_decor_preservation(item, &key, val);
     }
-    Ok(replaced)
+    Ok(replaced_keys)
 }
 
 // ---------------------------------------------------------------------------
@@ -1124,7 +1128,7 @@ pub(crate) fn item_set_multiline(item: &mut ItemRs, indent: usize) -> PyResult<(
 // Key type (shared with item_proxy)
 // ---------------------------------------------------------------------------
 
-#[derive(Clone)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub(crate) enum Key {
     Str(String),
     Int(usize),

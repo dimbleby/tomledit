@@ -4,6 +4,7 @@ mod equality;
 mod item;
 mod item_ops;
 mod item_proxy;
+mod trie;
 mod value;
 mod views;
 

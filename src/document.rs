@@ -8,6 +8,7 @@ use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{self, Key, table_to_pydict};
 use crate::item_proxy::ItemProxy;
+use crate::trie::MutationTrie;
 use crate::value::Table;
 use crate::views::{ItemsView, KeysView, ValuesView};
 
@@ -19,19 +20,14 @@ use crate::views::{ItemsView, KeysView, ValuesView};
 #[pyclass(mapping, module = "tomledit")]
 pub(crate) struct Document {
     pub(crate) inner: DocumentRs,
-    pub(crate) generation: u64,
+    pub(crate) trie: MutationTrie,
 }
 
 impl Document {
     fn make_proxy(slf: &Bound<'_, Self>, key: &str) -> ItemProxy {
         let doc = slf.borrow();
         let document_py: Py<Document> = slf.clone().unbind();
-        ItemProxy::new(document_py, vec![Key::Str(key.to_owned())], doc.generation)
-    }
-
-    /// Bump the generation counter. Call this on every mutation.
-    pub(crate) fn bump(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
+        ItemProxy::new(document_py, vec![Key::Str(key.to_owned())], doc.trie.clock)
     }
 }
 
@@ -43,14 +39,14 @@ impl Document {
         match data {
             None => Ok(Self {
                 inner: DocumentRs::new(),
-                generation: 0,
+                trie: MutationTrie::new(),
             }),
             Some(obj) => {
                 if let Ok(dict) = obj.cast::<PyDict>() {
                     let table: Table = dict.extract()?;
                     Ok(Self {
                         inner: DocumentRs::from(table.0),
-                        generation: 0,
+                        trie: MutationTrie::new(),
                     })
                 } else {
                     Err(PyTypeError::new_err(
@@ -73,7 +69,7 @@ impl Document {
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self {
             inner: document_rs,
-            generation: 0,
+            trie: MutationTrie::new(),
         })
     }
 
@@ -136,7 +132,7 @@ impl Document {
         let replaced = doc.inner.contains_key(key);
         item_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, value);
         if replaced {
-            doc.bump();
+            doc.trie.bump_at(&[Key::Str(key.to_owned())]);
         }
     }
 
@@ -144,7 +140,7 @@ impl Document {
         if self.inner.remove(key).is_none() {
             return Err(PyKeyError::new_err(key.to_owned()));
         }
-        self.bump();
+        self.trie.bump_at(&[Key::Str(key.to_owned())]);
         Ok(())
     }
 
@@ -170,7 +166,7 @@ impl Document {
 
         match self.inner.remove(key) {
             Some(item) => {
-                self.bump();
+                self.trie.bump_at(&[Key::Str(key.to_owned())]);
                 item_ops::item_to_py(&item, py)
             }
             None => match default {
@@ -198,9 +194,9 @@ impl Document {
             }
         }
         let mut doc = slf.borrow_mut();
-        let replaced = item_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
-        if replaced {
-            doc.bump();
+        let replaced_keys = item_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
+        for key in replaced_keys {
+            doc.trie.bump_at(&[Key::Str(key)]);
         }
         Ok(())
     }
@@ -234,7 +230,7 @@ impl Document {
 
     pub fn clear(&mut self) {
         self.inner.clear();
-        self.bump();
+        self.trie.bump_root();
     }
 
     pub fn __str__(&self, py: Python<'_>) -> PyResult<String> {
@@ -272,7 +268,7 @@ impl Document {
     pub fn __copy__(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            generation: 0,
+            trie: MutationTrie::new(),
         }
     }
 

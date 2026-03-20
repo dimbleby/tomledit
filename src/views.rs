@@ -206,7 +206,7 @@ impl ValuesView {
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
         let keys = get_keys(&doc.inner, &self.path)?;
-        let generation = doc.generation;
+        let generation = doc.trie.clock;
         let proxies: Vec<Py<PyAny>> = keys
             .into_iter()
             .map(|k| {
@@ -290,7 +290,7 @@ impl ItemsView {
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
         let keys = get_keys(&doc.inner, &self.path)?;
-        let generation = doc.generation;
+        let generation = doc.trie.clock;
         let pairs: Vec<(String, Py<PyAny>)> = keys
             .into_iter()
             .map(|k| {

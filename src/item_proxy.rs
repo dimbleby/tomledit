@@ -25,8 +25,10 @@ use crate::views::{ItemsView, KeysView, ValuesView};
 /// set of dict-like, list-like, and scalar methods is available directly
 /// on Item and will raise at runtime if called on the wrong kind.
 ///
-/// An Item becomes stale when the Document is modified through a different
-/// reference; using a stale Item raises ``RuntimeError``.
+/// An Item becomes stale when the part of the Document it points to (or an
+/// ancestor) is modified through a different reference; using a stale Item
+/// raises ``RuntimeError``.  Mutations to unrelated subtrees do **not**
+/// invalidate this Item.
 #[pyclass(name = "Item", module = "tomledit", subclass)]
 pub(crate) struct ItemProxy {
     document: Py<Document>,
@@ -61,9 +63,10 @@ impl ItemProxy {
         }
     }
 
-    /// Check that the document hasn't been mutated since this proxy was created.
+    /// Check that no mutation has occurred along this proxy's path since
+    /// it was created.
     fn check_generation(&self, doc: &Document) -> PyResult<()> {
-        if self.generation != doc.generation {
+        if !doc.trie.is_valid(&self.path, self.generation) {
             Err(PyRuntimeError::new_err(
                 "this Item is stale: the document has been modified since it was created",
             ))
@@ -72,11 +75,19 @@ impl ItemProxy {
         }
     }
 
-    /// Bump the document's generation and update our own snapshot,
-    /// so this proxy remains valid after its own mutation.
-    fn bump_generation(&mut self, doc: &mut Document) {
-        doc.bump();
-        self.generation = doc.generation;
+    /// Record a mutation at a child key under this proxy's path.
+    /// The proxy itself stays valid (only the child node is bumped).
+    fn bump_child(&self, doc: &mut Document, child_key: Key) {
+        let mut child_path = self.path.clone();
+        child_path.push(child_key);
+        doc.trie.bump_at(&child_path);
+    }
+
+    /// Record a structural mutation at this proxy's own path (e.g. clear,
+    /// array insert/remove). The proxy self-updates to stay valid.
+    fn bump_self(&mut self, doc: &mut Document) {
+        doc.trie.bump_at(&self.path);
+        self.generation = doc.trie.clock;
     }
 
     /// Clone the toml_edit item at this proxy's path.
@@ -122,7 +133,11 @@ impl ItemProxy {
     /// ListItem, or ScalarItem) by inspecting the TOML node type.
     /// Returns `Py<PyAny>` since the concrete type varies.
     fn child_proxy_typed(&self, py: Python<'_>, key: Key) -> PyResult<Py<PyAny>> {
-        Self::make_child_typed(&self.document, &self.path, self.generation, py, key)
+        let generation = {
+            let doc = self.document.bind(py).borrow();
+            doc.trie.clock
+        };
+        Self::make_child_typed(&self.document, &self.path, generation, py, key)
     }
 
     /// Build a typed child proxy from constituent parts.
@@ -256,7 +271,7 @@ impl ItemProxy {
             let len = item_ops::require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
             item_ops::item_setitem_slice(item, si.start, si.stop, si.step, values)?;
-            self.bump_generation(&mut doc);
+            self.bump_self(&mut doc);
             return Ok(());
         }
 
@@ -264,9 +279,8 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        let replaced = item_ops::item_setitem(item, key, value)?;
-        if replaced {
-            self.bump_generation(&mut doc);
+        if let Some(replaced_key) = item_ops::item_setitem(item, key, value)? {
+            self.bump_child(&mut doc, replaced_key);
         }
         Ok(())
     }
@@ -282,15 +296,18 @@ impl ItemProxy {
             let si = slice.indices(len as isize)?;
             let indices = item_ops::collect_slice_indices(si.start, si.stop, si.step);
             item_ops::item_delitem_slice(item, &indices)?;
-            self.bump_generation(&mut doc);
+            self.bump_self(&mut doc);
             return Ok(());
         }
 
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
-        item_ops::item_delitem(item, key)?;
-        self.bump_generation(&mut doc);
+        let deleted_key = item_ops::item_delitem(item, key)?;
+        match deleted_key {
+            Key::Str(_) => self.bump_child(&mut doc, deleted_key),
+            Key::Int(_) => self.bump_self(&mut doc),
+        }
         Ok(())
     }
 
@@ -508,7 +525,7 @@ impl ItemProxy {
         self.check_generation(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
         item_ops::item_clear(item)?;
-        self.bump_generation(&mut doc);
+        self.bump_self(&mut doc);
         Ok(())
     }
 
@@ -543,7 +560,7 @@ impl ItemProxy {
             py,
             Document {
                 inner: doc_rs,
-                generation: 0,
+                trie: crate::trie::MutationTrie::new(),
             },
         )?;
         let base = Self {
@@ -641,7 +658,7 @@ impl DictProxy {
             Some(default.get_item(0)?.unbind())
         };
 
-        let mut base = self_.into_super();
+        let base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_generation(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
@@ -649,7 +666,8 @@ impl DictProxy {
         match item_ops::item_pop(item, Some(key)) {
             Ok(removed) => {
                 let result = item_ops::item_to_py(&removed.0, py)?;
-                base.bump_generation(&mut doc);
+                let popped_key: String = key.extract()?;
+                base.bump_child(&mut doc, Key::Str(popped_key));
                 Ok(result)
             }
             Err(e) if default_val.is_some() && e.is_instance_of::<PyKeyError>(py) => {
@@ -677,13 +695,13 @@ impl DictProxy {
                 pairs.push((key, val));
             }
         }
-        let mut base = self_.into_super();
+        let base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_generation(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        let replaced = item_ops::apply_update_pairs(item, pairs)?;
-        if replaced {
-            base.bump_generation(&mut doc);
+        let replaced_keys = item_ops::apply_update_pairs(item, pairs)?;
+        for key in replaced_keys {
+            base.bump_child(&mut doc, Key::Str(key));
         }
         Ok(())
     }
@@ -751,7 +769,7 @@ impl ListProxy {
         match item_ops::item_pop(item, index) {
             Ok(removed) => {
                 let result = item_ops::item_to_py(&removed.0, py)?;
-                base.bump_generation(&mut doc);
+                base.bump_self(&mut doc);
                 Ok(result)
             }
             Err(e) => Err(e),
@@ -780,7 +798,7 @@ impl ListProxy {
         base.check_generation(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
         item_ops::item_insert(item, index, value)?;
-        base.bump_generation(&mut doc);
+        base.bump_self(&mut doc);
         Ok(())
     }
 
@@ -795,7 +813,7 @@ impl ListProxy {
         base.check_generation(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
         item_ops::item_remove(item, value)?;
-        base.bump_generation(&mut doc);
+        base.bump_self(&mut doc);
         Ok(())
     }
 

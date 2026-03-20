@@ -20,14 +20,34 @@ use crate::views::{ItemsView, KeysView, ValuesView};
 #[pyclass(mapping, module = "tomledit")]
 pub(crate) struct Document {
     pub(crate) inner: DocumentRs,
-    pub(crate) trie: MutationTrie,
+    pub(crate) revision: u64,
+    trie: MutationTrie,
 }
 
 impl Document {
+    pub(crate) fn from_inner(inner: DocumentRs) -> Self {
+        Self {
+            inner,
+            revision: 0,
+            trie: MutationTrie::new(),
+        }
+    }
+
     fn make_proxy(slf: &Bound<'_, Self>, key: &str) -> ItemProxy {
         let doc = slf.borrow();
         let document_py: Py<Document> = slf.clone().unbind();
-        ItemProxy::new(document_py, vec![Key::Str(key.to_owned())], doc.trie.clock)
+        ItemProxy::new(document_py, vec![Key::Str(key.to_owned())], doc.revision)
+    }
+
+    /// Record a mutation at the given path, incrementing the document revision.
+    pub(crate) fn bump_at(&mut self, path: &[Key]) {
+        self.revision += 1;
+        self.trie.stamp(path, self.revision);
+    }
+
+    /// Check whether a proxy at `path` created at `revision` is still fresh.
+    pub(crate) fn is_fresh(&self, path: &[Key], revision: u64) -> bool {
+        self.trie.is_valid(path, revision)
     }
 }
 
@@ -37,17 +57,11 @@ impl Document {
     #[pyo3(signature = (data=None))]
     fn new(data: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         match data {
-            None => Ok(Self {
-                inner: DocumentRs::new(),
-                trie: MutationTrie::new(),
-            }),
+            None => Ok(Self::from_inner(DocumentRs::new())),
             Some(obj) => {
                 if let Ok(dict) = obj.cast::<PyDict>() {
                     let table: Table = dict.extract()?;
-                    Ok(Self {
-                        inner: DocumentRs::from(table.0),
-                        trie: MutationTrie::new(),
-                    })
+                    Ok(Self::from_inner(DocumentRs::from(table.0)))
                 } else {
                     Err(PyTypeError::new_err(
                         "Document() argument must be a dict or None",
@@ -67,10 +81,7 @@ impl Document {
         let document_rs = text
             .parse::<DocumentRs>()
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(Self {
-            inner: document_rs,
-            trie: MutationTrie::new(),
-        })
+        Ok(Self::from_inner(document_rs))
     }
 
     pub fn __contains__(&self, key: &str) -> bool {
@@ -132,7 +143,7 @@ impl Document {
         let replaced = doc.inner.contains_key(key);
         item_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, value);
         if replaced {
-            doc.trie.bump_at(&[Key::Str(key.to_owned())]);
+            doc.bump_at(&[Key::Str(key.to_owned())]);
         }
     }
 
@@ -140,7 +151,7 @@ impl Document {
         if self.inner.remove(key).is_none() {
             return Err(PyKeyError::new_err(key.to_owned()));
         }
-        self.trie.bump_at(&[Key::Str(key.to_owned())]);
+        self.bump_at(&[Key::Str(key.to_owned())]);
         Ok(())
     }
 
@@ -166,7 +177,7 @@ impl Document {
 
         match self.inner.remove(key) {
             Some(item) => {
-                self.trie.bump_at(&[Key::Str(key.to_owned())]);
+                self.bump_at(&[Key::Str(key.to_owned())]);
                 item_ops::item_to_py(&item, py)
             }
             None => match default {
@@ -196,7 +207,7 @@ impl Document {
         let mut doc = slf.borrow_mut();
         let replaced_keys = item_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
         for key in replaced_keys {
-            doc.trie.bump_at(&[Key::Str(key)]);
+            doc.bump_at(&[Key::Str(key)]);
         }
         Ok(())
     }
@@ -230,7 +241,7 @@ impl Document {
 
     pub fn clear(&mut self) {
         self.inner.clear();
-        self.trie.bump_at(&[]);
+        self.bump_at(&[]);
     }
 
     pub fn __str__(&self, py: Python<'_>) -> PyResult<String> {
@@ -266,10 +277,7 @@ impl Document {
     }
 
     pub fn __copy__(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            trie: MutationTrie::new(),
-        }
+        Self::from_inner(self.inner.clone())
     }
 
     #[pyo3(signature = (_memo=None))]

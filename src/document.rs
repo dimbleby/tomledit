@@ -230,7 +230,7 @@ impl Document {
 
     pub fn clear(&mut self) {
         self.inner.clear();
-        self.trie.bump_root();
+        self.trie.bump_at(&[]);
     }
 
     pub fn __str__(&self, py: Python<'_>) -> PyResult<String> {

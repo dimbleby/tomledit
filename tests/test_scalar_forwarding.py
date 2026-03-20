@@ -230,6 +230,10 @@ class TestArithmetic:
         doc = Document.parse("n = 3")
         assert 2 ** doc["n"] == 8
 
+    def test_rpow_with_modulo(self) -> None:
+        doc = Document.parse("x = 3")
+        assert pow(2, doc["x"], 5) == 3  # type: ignore[misc]  # 2**3 % 5 = 3
+
     def test_pow_modulo(self) -> None:
         doc = Document.parse("n = 5")
         assert pow(doc["n"], 3, 7) == pow(5, 3, 7)

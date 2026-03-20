@@ -68,14 +68,6 @@ impl MutationTrie {
         node.version = self.clock;
         node.children.clear();
     }
-
-    /// Record a mutation at the document root (used by `doc.clear()`).
-    /// Prunes the entire trie — root version alone invalidates everything.
-    pub(crate) fn bump_root(&mut self) {
-        self.clock += 1;
-        self.root = TrieNode::new();
-        self.root.version = self.clock;
-    }
 }
 
 impl TrieNode {
@@ -153,10 +145,10 @@ mod tests {
     }
 
     #[test]
-    fn bump_root_invalidates_everything() {
+    fn bump_empty_path_invalidates_everything() {
         let mut trie = MutationTrie::new();
         let created_at = trie.clock;
-        trie.bump_root();
+        trie.bump_at(&[]);
         assert!(!trie.is_valid(&[], created_at));
         assert!(!trie.is_valid(&[str_key("x")], created_at));
         assert!(!trie.is_valid(&[str_key("a"), str_key("b")], created_at));
@@ -189,7 +181,7 @@ mod tests {
         let created_at = trie.clock;
         assert!(trie.is_valid(&[str_key("t")], created_at));
         // Now root is bumped (doc.clear())
-        trie.bump_root();
+        trie.bump_at(&[]);
         assert!(!trie.is_valid(&[str_key("t")], created_at));
     }
 

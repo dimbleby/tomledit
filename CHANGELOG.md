@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.12.0 (20 March 2026)
+
 - Proxy invalidation is now path-precise.
   Mutating one part of a document no longer invalidates `Item` references to
   unrelated subtrees.

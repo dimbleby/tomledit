@@ -238,7 +238,7 @@ checksum = "f17aaa1c6e3dc22b1da4b6bba97d066e354c7945cac2f7852d4e4e7ca7a6b56d"
 
 [[package]]
 name = "tomledit"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "pyo3",
  "toml_edit",

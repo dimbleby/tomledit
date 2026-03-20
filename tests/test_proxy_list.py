@@ -388,6 +388,75 @@ class TestIndex:
 
 
 # ---------------------------------------------------------------------------
+# Proxy arguments (ItemProxy passed to remove / __contains__ / count / index)
+# ---------------------------------------------------------------------------
+
+
+class TestProxyArguments:
+    """Operations that compare values should accept ItemProxy (ScalarItem) args."""
+
+    def test_remove_scalar_proxy_int(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        proxy = doc["arr"][1]
+        doc["arr"].remove(proxy)
+        assert doc["arr"] == [1, 3]
+
+    def test_remove_scalar_proxy_string(self) -> None:
+        doc = Document.parse('arr = ["a", "b", "c"]\n')
+        proxy = doc["arr"][1]
+        doc["arr"].remove(proxy)
+        assert doc["arr"] == ["a", "c"]
+
+    def test_remove_scalar_proxy_bool(self) -> None:
+        doc = Document.parse("arr = [true, false, true]\n")
+        proxy = doc["arr"][1]
+        doc["arr"].remove(proxy)
+        assert doc["arr"] == [True, True]
+
+    def test_remove_proxy_preserves_formatting(self) -> None:
+        doc = Document.parse("arr = [ 1, 2, 3 ]\n")
+        proxy = doc["arr"][1]
+        doc["arr"].remove(proxy)
+        assert doc.as_toml() == "arr = [ 1, 3 ]\n"
+
+    def test_contains_scalar_proxy_string(self) -> None:
+        doc = Document.parse('arr = ["x", "y", "z"]\n')
+        proxy = doc["arr"][1]
+        assert proxy in doc["arr"]
+
+    def test_contains_scalar_proxy_int(self) -> None:
+        doc = Document.parse("arr = [10, 20, 30]\n")
+        proxy = doc["arr"][2]
+        assert proxy in doc["arr"]
+
+    def test_contains_scalar_proxy_missing(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        other = Document.parse("x = 99\n")
+        assert other["x"] not in doc["arr"]
+
+    def test_count_scalar_proxy(self) -> None:
+        doc = Document.parse('arr = ["a", "b", "a", "c"]\n')
+        proxy = doc["arr"][0]
+        assert doc["arr"].count(proxy) == 2
+
+    def test_index_scalar_proxy(self) -> None:
+        doc = Document.parse('arr = ["x", "y", "z"]\n')
+        proxy = doc["arr"][2]
+        assert doc["arr"].index(proxy) == 2
+
+    def test_index_scalar_proxy_with_start(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 2, 5]\n")
+        proxy = doc["arr"][1]  # value 2
+        assert doc["arr"].index(proxy, 2) == 3
+
+    def test_remove_cross_document_proxy(self) -> None:
+        doc1 = Document.parse("arr = [1, 2, 3]\n")
+        doc2 = Document.parse("x = 2\n")
+        doc1["arr"].remove(doc2["x"])
+        assert doc1["arr"] == [1, 3]
+
+
+# ---------------------------------------------------------------------------
 # Negative indexing
 # ---------------------------------------------------------------------------
 

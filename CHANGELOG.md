@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix `ListItem.remove()` panic when passed an `Item` proxy (e.g.
+  a `ScalarItem` obtained by indexing).
+  Also fix `__contains__`, `count()`, and `index()` returning wrong results for
+  non-integer proxy arguments.
+
 ## 0.12.0 (20 March 2026)
 
 - Proxy invalidation is now path-precise.

@@ -77,11 +77,21 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Python (needed by PyO3 for cargo test)
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+
       - name: cargo fmt
         run: cargo fmt --check
 
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test
+        env:
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
 
   coverage:
     name: Rust coverage

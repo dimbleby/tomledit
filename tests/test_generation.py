@@ -15,26 +15,17 @@ if TYPE_CHECKING:
 class TestStaleProxyDetection:
     """Proxies created before a mutation raise RuntimeError on access."""
 
-    def test_stale_after_setitem_on_doc(self) -> None:
-        doc = Document.parse("x = 1\ny = 2")
-        proxy = doc["x"]
-        doc["x"] = 99
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = proxy.value
-
-    def test_stale_after_delitem_on_doc(self) -> None:
+    def test_sibling_valid_after_delitem_on_doc(self) -> None:
         doc = Document.parse("x = 1\ny = 2")
         proxy = doc["y"]
         del doc["x"]
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = proxy.value
+        assert proxy.value == 2
 
-    def test_stale_after_pop_on_doc(self) -> None:
+    def test_sibling_valid_after_pop_on_doc(self) -> None:
         doc = Document.parse("x = 1\ny = 2")
         proxy = doc["y"]
         doc.pop("x")
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = proxy.value
+        assert proxy.value == 2
 
     def test_valid_after_additive_update_on_doc(self) -> None:
         doc = Document.parse("x = 1")
@@ -46,13 +37,6 @@ class TestStaleProxyDetection:
         doc = Document.parse("x = 1")
         proxy = doc["x"]
         doc.update({"x": 2})
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = proxy.value
-
-    def test_stale_after_clear_on_doc(self) -> None:
-        doc = Document.parse("x = 1")
-        proxy = doc["x"]
-        doc.clear()
         with pytest.raises(RuntimeError, match="stale"):
             _ = proxy.value
 
@@ -73,21 +57,12 @@ class TestStaleProxyDetection:
 class TestStaleProxyViaProxy:
     """Mutations through a proxy invalidate sibling proxies."""
 
-    def test_sibling_proxy_stale_after_setitem(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2")
-        b = doc["t"]["b"]
-        a_table = doc["t"]
-        a_table["a"] = 99
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = b.value
-
-    def test_sibling_proxy_stale_after_delitem(self) -> None:
+    def test_sibling_proxy_valid_after_delitem(self) -> None:
         doc = Document.parse("[t]\na = 1\nb = 2")
         b = doc["t"]["b"]
         t = doc["t"]
         del t["a"]
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = b.value
+        assert b.value == 2
 
     def test_valid_after_array_append(self) -> None:
         """append doesn't invalidate siblings — no paths break."""
@@ -105,22 +80,6 @@ class TestStaleProxyViaProxy:
         assert last.value == 3
         doc["arr"].append(4)
         assert last.value == 3  # still index 2, not shifted to 4
-
-    def test_stale_after_array_insert(self) -> None:
-        doc = Document.parse("arr = [1, 2]")
-        item = doc["arr"][0]
-        arr = doc["arr"]
-        arr.insert(0, 99)
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = item.value
-
-    def test_stale_after_array_remove(self) -> None:
-        doc = Document.parse("arr = [1, 2, 3]")
-        item = doc["arr"][2]
-        arr = doc["arr"]
-        arr.remove(1)
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = item.value
 
     def test_valid_after_array_extend(self) -> None:
         """extend doesn't invalidate siblings — no paths break."""
@@ -153,14 +112,6 @@ class TestStaleProxyViaProxy:
         t = doc["t"]
         t.update({"b": 2})
         assert a.value == 1
-
-    def test_stale_after_replacing_proxy_update(self) -> None:
-        doc = Document.parse("[t]\na = 1")
-        a = doc["t"]["a"]
-        t = doc["t"]
-        t.update({"a": 2})
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = a.value
 
 
 class TestMutatorProxyStaysValid:
@@ -284,7 +235,8 @@ class TestReadMethodsCheckGeneration:
         doc = Document.parse("arr = [1, 2]\n\n[t]\na = 1\nb = 2")
         proxy_t = doc["t"]
         proxy_arr = doc["arr"]
-        doc["t"]["a"] = 99  # replace existing value to invalidate all other proxies
+        doc["t"] = {"c": 3}  # replace entire table → proxy_t is stale
+        doc["arr"] = [10, 20]  # replace entire array → proxy_arr is stale
         return proxy_t, proxy_arr
 
     def test_getitem(self, stale_proxy: tuple[Item, Item]) -> None:
@@ -376,6 +328,90 @@ class TestReadMethodsCheckGeneration:
         t, _ = stale_proxy
         with pytest.raises(RuntimeError, match="stale"):
             t.fmt()
+
+
+class TestPreciseInvalidation:
+    """Path-based trie only invalidates proxies at or below the mutated path."""
+
+    def test_top_level_sibling_unaffected(self) -> None:
+        doc = Document.parse("x = 1\ny = 2\nz = 3")
+        px = doc["x"]
+        py = doc["y"]
+        pz = doc["z"]
+        doc["x"] = 99
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = px.value
+        assert py.value == 2
+        assert pz.value == 3
+
+    def test_nested_sibling_unaffected(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\nc = 3")
+        pa = doc["t"]["a"]
+        pb = doc["t"]["b"]
+        pc = doc["t"]["c"]
+        doc["t"]["a"] = 99
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = pa.value
+        assert pb.value == 2
+        assert pc.value == 3
+
+    def test_replacing_table_invalidates_descendants(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2")
+        pa = doc["t"]["a"]
+        pb = doc["t"]["b"]
+        pt = doc["t"]
+        doc["t"] = {"c": 3}
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = pt.value
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = pa.value
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = pb.value
+
+    def test_array_structural_change_invalidates_elements(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        e0 = doc["arr"][0]
+        e1 = doc["arr"][1]
+        arr = doc["arr"]
+        arr.insert(0, 99)
+        # array proxy itself stays valid (self-update)
+        assert len(arr) == 4
+        # element proxies are stale
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = e0.value
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = e1.value
+
+    def test_array_remove_invalidates_elements(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        e0 = doc["arr"][0]
+        arr = doc["arr"]
+        arr.remove(2)
+        assert len(arr) == 2
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = e0.value
+
+    def test_clear_invalidates_everything(self) -> None:
+        doc = Document.parse("x = 1\ny = 2\n[t]\na = 1")
+        px = doc["x"]
+        py = doc["y"]
+        pa = doc["t"]["a"]
+        pt = doc["t"]
+        doc.clear()
+        for proxy in (px, py, pa, pt):
+            with pytest.raises(RuntimeError, match="stale"):
+                _ = proxy.value
+
+    def test_update_only_invalidates_replaced_keys(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2")
+        pa = doc["t"]["a"]
+        pb = doc["t"]["b"]
+        t = doc["t"]
+        t.update({"a": 99, "c": 3})  # replaces "a", adds "c"
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = pa.value
+        assert pb.value == 2  # "b" untouched
+        assert t["c"] == 3  # new key accessible
 
 
 class TestDocumentFmtPreservesProxies:

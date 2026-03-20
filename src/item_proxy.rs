@@ -12,6 +12,18 @@ use crate::item::Item;
 use crate::item_ops::{self, Key};
 use crate::views::{ItemsView, KeysView, ValuesView};
 
+/// If `value` is an [`ItemProxy`] (or subclass such as `ScalarItem`), resolve
+/// it to its underlying Python value so that subsequent operations can compare
+/// plain Python objects without re-borrowing the document through dunder
+/// methods. Returns `None` when `value` is not a proxy.
+fn resolve_proxy(_py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<Option<Py<PyAny>>> {
+    if let Ok(proxy) = value.cast::<ItemProxy>() {
+        Ok(Some(proxy.borrow().value(value.py())?))
+    } else {
+        Ok(None)
+    }
+}
+
 /// A live reference to a TOML value inside a Document.
 ///
 /// Items are obtained by indexing a Document or another Item:
@@ -345,6 +357,10 @@ impl ItemProxy {
 
     pub fn __contains__(&self, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = value.py();
+        // Resolve ItemProxy to its Python value so equality comparison doesn't
+        // re-borrow the document through dunder methods.
+        let resolved = resolve_proxy(py, value)?;
+        let value = resolved.as_ref().map_or(value, |v| v.bind(py));
         let doc = self.document.bind(py).borrow();
         self.check_generation(&doc)?;
         let item = self.navigate(&doc.inner)?;
@@ -808,6 +824,11 @@ impl ListProxy {
         py: Python<'_>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
+        // Resolve ItemProxy to its Python value before taking the mutable
+        // borrow — otherwise equality comparison triggers dunder methods on the
+        // proxy that try to re-borrow the same document and panic.
+        let resolved = resolve_proxy(py, value)?;
+        let value = resolved.as_ref().map_or(value, |v| v.bind(py));
         let mut base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_generation(&doc)?;
@@ -842,6 +863,8 @@ impl ListProxy {
         py: Python<'_>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<usize> {
+        let resolved = resolve_proxy(py, value)?;
+        let value = resolved.as_ref().map_or(value, |v| v.bind(py));
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
         base.check_generation(&doc)?;
@@ -857,6 +880,8 @@ impl ListProxy {
         start: Option<i64>,
         stop: Option<i64>,
     ) -> PyResult<usize> {
+        let resolved = resolve_proxy(py, value)?;
+        let value = resolved.as_ref().map_or(value, |v| v.bind(py));
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
         base.check_generation(&doc)?;

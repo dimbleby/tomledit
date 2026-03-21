@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 
+from tests.conftest import toml_literal
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -59,11 +60,22 @@ class TestEquality:
         assert doc["arr"] == []
 
     def test_table_equals_dict(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         assert doc["t"] == {"a": 1, "b": 2}
 
     def test_table_not_equals_different_dict(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         assert doc["t"] != {"a": 2}
 
     def test_inline_table_equals_dict(self) -> None:
@@ -85,7 +97,12 @@ class TestEquality:
 
     def test_bool_not_equal_to_int(self) -> None:
         """TOML types are strict: bool != int, even though Python's True == 1."""
-        doc = Document.parse("count = 1\nflag = true\n")
+        doc = Document.parse(
+            toml_literal("""
+            count = 1
+            flag = true
+        """)
+        )
         assert doc["count"] != True  # noqa: E712
         assert doc["flag"] != 1
 
@@ -95,11 +112,21 @@ class TestEquality:
 
     def test_proxy_vs_proxy_same_value(self) -> None:
         """Two proxies pointing at equal values should compare equal."""
-        doc = Document.parse("a = 42\nb = 42\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 42
+            b = 42
+        """)
+        )
         assert doc["a"] == doc["b"]
 
     def test_proxy_vs_proxy_different_value(self) -> None:
-        doc = Document.parse("a = 42\nb = 99\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 42
+            b = 99
+        """)
+        )
         assert doc["a"] != doc["b"]
 
     def test_proxy_self_equality(self) -> None:
@@ -107,12 +134,25 @@ class TestEquality:
         assert doc["a"] == doc["a"]
 
     def test_proxy_vs_proxy_nested(self) -> None:
-        doc = Document.parse("[t1]\nx = 1\n\n[t2]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t1]
+            x = 1
+
+            [t2]
+            x = 1
+        """)
+        )
         assert doc["t1"] == doc["t2"]
 
     def test_proxy_vs_proxy_type_strict(self) -> None:
         """Proxy-vs-proxy should preserve TOML type strictness."""
-        doc = Document.parse("count = 1\nflag = true\n")
+        doc = Document.parse(
+            toml_literal("""
+            count = 1
+            flag = true
+        """)
+        )
         assert doc["count"] != doc["flag"]
 
 
@@ -125,76 +165,165 @@ class TestProxyStructuralEquality:
     """Exercise values_structural_eq for types beyond integers."""
 
     def test_proxy_vs_proxy_bool(self) -> None:
-        doc = Document.parse("a = true\nb = true\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = true
+            b = true
+        """)
+        )
         assert doc["a"] == doc["b"]
 
     def test_proxy_vs_proxy_bool_different(self) -> None:
-        doc = Document.parse("a = true\nb = false\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = true
+            b = false
+        """)
+        )
         assert doc["a"] != doc["b"]
 
     def test_proxy_vs_proxy_float(self) -> None:
-        doc = Document.parse("a = 1.5\nb = 1.5\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1.5
+            b = 1.5
+        """)
+        )
         assert doc["a"] == doc["b"]
 
     def test_proxy_vs_proxy_float_different(self) -> None:
-        doc = Document.parse("a = 1.5\nb = 2.5\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1.5
+            b = 2.5
+        """)
+        )
         assert doc["a"] != doc["b"]
 
     def test_proxy_vs_proxy_string(self) -> None:
-        doc = Document.parse('a = "hi"\nb = "hi"\n')
+        doc = Document.parse(
+            toml_literal("""
+            a = "hi"
+            b = "hi"
+        """)
+        )
         assert doc["a"] == doc["b"]
 
     def test_proxy_vs_proxy_string_different(self) -> None:
-        doc = Document.parse('a = "hi"\nb = "bye"\n')
+        doc = Document.parse(
+            toml_literal("""
+            a = "hi"
+            b = "bye"
+        """)
+        )
         assert doc["a"] != doc["b"]
 
     def test_proxy_vs_proxy_datetime(self) -> None:
         doc = Document.parse(
-            "a = 2024-01-15T10:30:00Z\nb = 2024-01-15T10:30:00+00:00\n"
+            toml_literal("""
+                a = 2024-01-15T10:30:00Z
+                b = 2024-01-15T10:30:00+00:00
+            """)
         )
         assert doc["a"] == doc["b"]
 
     def test_proxy_vs_proxy_datetime_different(self) -> None:
-        doc = Document.parse("a = 2024-01-15T10:30:00Z\nb = 2025-01-01T00:00:00Z\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 2024-01-15T10:30:00Z
+            b = 2025-01-01T00:00:00Z
+        """)
+        )
         assert doc["a"] != doc["b"]
 
     def test_proxy_vs_proxy_date_only(self) -> None:
-        doc = Document.parse("a = 2024-01-15\nb = 2024-01-15\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 2024-01-15
+            b = 2024-01-15
+        """)
+        )
         assert doc["a"] == doc["b"]
 
     def test_proxy_vs_proxy_date_only_different(self) -> None:
-        doc = Document.parse("a = 2024-01-15\nb = 2025-06-01\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 2024-01-15
+            b = 2025-06-01
+        """)
+        )
         assert doc["a"] != doc["b"]
 
     def test_proxy_vs_proxy_array(self) -> None:
-        doc = Document.parse("a = [1, 2, 3]\nb = [1, 2, 3]\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = [1, 2, 3]
+            b = [1, 2, 3]
+        """)
+        )
         assert doc["a"] == doc["b"]
 
     def test_proxy_vs_proxy_array_different(self) -> None:
-        doc = Document.parse("a = [1, 2, 3]\nb = [1, 2, 4]\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = [1, 2, 3]
+            b = [1, 2, 4]
+        """)
+        )
         assert doc["a"] != doc["b"]
 
     def test_proxy_vs_proxy_inline_table(self) -> None:
-        doc = Document.parse("a = {x = 1}\nb = {x = 1}\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = {x = 1}
+            b = {x = 1}
+        """)
+        )
         assert doc["a"] == doc["b"]
 
     def test_proxy_vs_proxy_inline_table_different(self) -> None:
-        doc = Document.parse("a = {x = 1}\nb = {x = 2}\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = {x = 1}
+            b = {x = 2}
+        """)
+        )
         assert doc["a"] != doc["b"]
 
     def test_proxy_vs_proxy_array_of_tables(self) -> None:
-        toml = "[[a]]\nx = 1\n[[a]]\nx = 2\n[[b]]\nx = 1\n[[b]]\nx = 2\n"
+        toml = toml_literal("""
+            [[a]]
+            x = 1
+            [[a]]
+            x = 2
+            [[b]]
+            x = 1
+            [[b]]
+            x = 2
+        """)
         doc = Document.parse(toml)
         assert doc["a"] == doc["b"]
 
     def test_proxy_vs_proxy_array_of_tables_different(self) -> None:
-        toml = "[[a]]\nx = 1\n[[b]]\nx = 2\n"
+        toml = toml_literal("""
+            [[a]]
+            x = 1
+            [[b]]
+            x = 2
+        """)
         doc = Document.parse(toml)
         assert doc["a"] != doc["b"]
 
     def test_proxy_vs_proxy_different_types(self) -> None:
         """Table vs ArrayOfTables should not be equal."""
-        doc = Document.parse("[a]\nx = 1\n[[b]]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [a]
+            x = 1
+            [[b]]
+            x = 1
+        """)
+        )
         assert doc["a"] != doc["b"]
 
 
@@ -206,11 +335,22 @@ class TestProxyStructuralEquality:
 class TestEqualityEdgeCases:
     def test_table_extra_key_not_equal(self) -> None:
         """Table with keys {a, b} should != dict with keys {a, c}."""
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         assert doc["t"] != {"a": 1, "c": 2}
 
     def test_table_vs_non_dict(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         assert doc["t"] != [1, 2]
         assert doc["t"] != "hello"
         assert doc["t"] != 42
@@ -233,27 +373,59 @@ class TestEqualityEdgeCases:
 
     def test_aot_equality_with_list_of_dicts(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\nvalue = 1\n[[items]]\nname = "b"\nvalue = 2\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                value = 1
+                [[items]]
+                name = "b"
+                value = 2
+            """)
         )
         expected = [{"name": "a", "value": 1}, {"name": "b", "value": 2}]
         assert doc["items"] == expected
 
     def test_aot_inequality_with_wrong_list(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\nvalue = 1\n[[items]]\nname = "b"\nvalue = 2\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                value = 1
+                [[items]]
+                name = "b"
+                value = 2
+            """)
         )
         assert doc["items"] != [{"name": "a", "value": 1}]
 
     def test_aot_inequality_with_non_list(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\nvalue = 1\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            value = 1
+        """)
+        )
         assert doc["items"] != "not a list"
 
     def test_aot_entry_value_mismatch(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
         assert doc["items"] != [{"name": "a"}, {"name": "WRONG"}]
 
     def test_aot_entry_non_dict_in_list(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         assert doc["items"] != ["not a dict"]
 
     def test_float_not_equal_to_string(self) -> None:
@@ -323,12 +495,22 @@ class TestEqualityEdgeCases:
 
     def test_proxy_date_only_ne_proxy_full_datetime(self) -> None:
         """Proxy-vs-proxy: date-only != full datetime even with same date."""
-        doc = Document.parse("d = 2024-01-15\ndt = 2024-01-15T10:30:00Z\n")
+        doc = Document.parse(
+            toml_literal("""
+            d = 2024-01-15
+            dt = 2024-01-15T10:30:00Z
+        """)
+        )
         assert doc["d"] != doc["dt"]
 
     def test_proxy_time_only_ne_proxy_full_datetime(self) -> None:
         """Proxy-vs-proxy: time-only != full datetime even with same time."""
-        doc = Document.parse("t = 10:30:00\ndt = 2024-01-15T10:30:00\n")
+        doc = Document.parse(
+            toml_literal("""
+            t = 10:30:00
+            dt = 2024-01-15T10:30:00
+        """)
+        )
         assert doc["t"] != doc["dt"]
 
 
@@ -367,6 +549,11 @@ class TestNumericTowerEquality:
 
     def test_cross_type_proxy_eq(self) -> None:
         """Two proxies: int 1 vs float 1.0 — structural eq stays strict."""
-        doc = Document.parse("x = 1\ny = 1.0\n")
+        doc = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 1.0
+        """)
+        )
         # Proxy-to-proxy uses TOML structural equality (type-aware)
         assert doc["x"] != doc["y"]

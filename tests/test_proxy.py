@@ -36,7 +36,14 @@ class TestProxyLen:
 
     def test_aot_len(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         assert len(doc["items"]) == 3
 
@@ -79,7 +86,14 @@ class TestProxyIter:
 
     def test_aot_iter(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         names = [entry["name"].value for entry in doc["items"]]
         assert names == ["a", "b", "c"]
@@ -110,17 +124,35 @@ class TestProxyContains:
         assert "z" not in doc["arr"]
 
     def test_array_of_tables_contains_matching_dict(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
         assert {"name": "a"} in doc["items"]
         assert {"name": "b"} in doc["items"]
         assert {"name": "c"} not in doc["items"]
 
     def test_array_of_tables_not_contains_partial(self) -> None:
-        doc = Document.parse("[[items]]\nx = 1\ny = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            x = 1
+            y = 2
+        """)
+        )
         assert {"x": 1} not in doc["items"]
 
     def test_array_of_tables_not_contains_non_dict(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         assert "not a dict" not in doc["items"]
 
     def test_scalar_string_contains(self) -> None:
@@ -189,7 +221,12 @@ class TestProxyBool:
         assert bool(doc[key]) is expected
 
     def test_aot_bool(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         assert bool(doc["items"]) is True
 
     def test_datetime_truthy(self) -> None:
@@ -234,13 +271,27 @@ class TestProxyDelitem:
             del doc["database"]["ports"][99]
 
     def test_del_aot_first(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
         del doc["items"][0]
         assert len(doc["items"]) == 1
         assert doc["items"][0]["name"] == "b"
 
     def test_del_aot_negative(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
         del doc["items"][-1]
         assert len(doc["items"]) == 1
         assert doc["items"][0]["name"] == "a"
@@ -265,7 +316,12 @@ class TestProxyRepr:
         assert "30" in r
 
     def test_aot_repr(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         r = repr(doc["items"])
         assert "Item(" in r
 
@@ -315,7 +371,10 @@ class TestStr:
 
 class TestAsToml:
     def test_document_as_toml(self) -> None:
-        text = 'name = "hello"\nage = 42\n'
+        text = toml_literal("""
+            name = "hello"
+            age = 42
+        """)
         doc = Document.parse(text)
         assert doc.as_toml() == text
 
@@ -332,7 +391,13 @@ class TestAsToml:
         assert doc["x"].as_toml() == "true"
 
     def test_table_as_toml(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         assert doc["t"].as_toml() == "a = 1\nb = 2"
 
     def test_array_as_toml(self) -> None:
@@ -412,7 +477,13 @@ y = 2
         assert v == [[1, 2], [3, 4]]
 
     def test_nested_table(self) -> None:
-        doc = Document.parse("[a]\n[a.b]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [a]
+            [a.b]
+            x = 1
+        """)
+        )
         v = doc["a"].value
         assert v == {"b": {"x": 1}}
 
@@ -449,7 +520,14 @@ y = 2
 
     def test_aot_value(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\nvalue = 1\n[[items]]\nname = "b"\nvalue = 2\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                value = 1
+                [[items]]
+                name = "b"
+                value = 2
+            """)
         )
         v = doc["items"].value
         assert isinstance(v, list)
@@ -482,24 +560,48 @@ y = 2
 class TestArrayOfTablesAccess:
     def test_getitem_int(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         assert doc["items"][0]["name"] == "a"
         assert doc["items"][2]["name"] == "c"
 
     def test_getitem_negative(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         assert doc["items"][-1]["name"] == "c"
 
     def test_getitem_out_of_range(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         with pytest.raises(IndexError):
             doc["items"][99]
 
     def test_aot_str(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         assert str(doc["items"]) == "[{'name': 'a'}]"
 
 
@@ -510,7 +612,13 @@ class TestArrayOfTablesAccess:
 
 class TestProxyFmt:
     def test_fmt_table(self) -> None:
-        doc = Document.parse("[t]\na   =   1\nb   =   2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a   =   1
+            b   =   2
+        """)
+        )
         doc["t"].fmt()
         assert doc.as_toml() == toml_literal("""
             [t]
@@ -530,7 +638,12 @@ class TestProxyFmt:
         assert doc.as_toml() == "arr = [1, 2, 3]\n"
 
     def test_fmt_array_of_tables_is_noop(self) -> None:
-        text = "[[t]]\na   =   1\n[[t]]\nb   =   2\n"
+        text = toml_literal("""
+            [[t]]
+            a   =   1
+            [[t]]
+            b   =   2
+        """)
         doc = Document.parse(text)
         doc["t"].fmt()
         assert doc.as_toml() == text
@@ -541,16 +654,31 @@ class TestProxyFmt:
         assert doc.as_toml() == "x = 1\n"
 
     def test_fmt_does_not_invalidate_proxies(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         t = doc["t"]
         b = doc["t"]["b"]
         t.fmt()
         assert b.value == 2
 
     def test_fmt_table_strips_comments_on_entries(self) -> None:
-        doc = Document.parse("[t]\n# comment\na = 1 # inline\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            # comment
+            a = 1 # inline
+        """)
+        )
         doc["t"].fmt()
-        assert doc.as_toml() == "[t]\na = 1\n"
+        assert doc.as_toml() == toml_literal("""
+            [t]
+            a = 1
+        """)
 
 
 # ---------------------------------------------------------------------------
@@ -562,7 +690,12 @@ class TestSubclassTypes:
     """__getitem__ returns the correct subclass."""
 
     def test_table_returns_dict_item(self) -> None:
-        doc = Document.parse("[server]\nhost = 'localhost'")
+        doc = Document.parse(
+            toml_literal("""
+            [server]
+            host = 'localhost'
+        """)
+        )
         assert type(doc["server"]).__name__ == "DictItem"
 
     def test_array_returns_list_item(self) -> None:
@@ -574,15 +707,31 @@ class TestSubclassTypes:
         assert type(doc["name"]).__name__ == "ScalarItem"
 
     def test_nested_table(self) -> None:
-        doc = Document.parse("[a]\n[a.b]\nc = 1")
+        doc = Document.parse(
+            toml_literal("""
+            [a]
+            [a.b]
+            c = 1
+        """)
+        )
         assert type(doc["a"]["b"]).__name__ == "DictItem"
 
     def test_nested_scalar(self) -> None:
-        doc = Document.parse("[a]\nb = 42")
+        doc = Document.parse(
+            toml_literal("""
+            [a]
+            b = 42
+        """)
+        )
         assert type(doc["a"]["b"]).__name__ == "ScalarItem"
 
     def test_get_returns_typed(self) -> None:
-        doc = Document.parse("[server]\nhost = 'localhost'")
+        doc = Document.parse(
+            toml_literal("""
+            [server]
+            host = 'localhost'
+        """)
+        )
         assert type(doc["server"].get("host")).__name__ == "ScalarItem"
 
     def test_iteration_returns_typed(self) -> None:
@@ -591,19 +740,36 @@ class TestSubclassTypes:
             assert type(item).__name__ == "ScalarItem"
 
     def test_values_view_returns_typed(self) -> None:
-        doc = Document.parse("[server]\nhost = 'localhost'\nport = 8080")
+        doc = Document.parse(
+            toml_literal("""
+            [server]
+            host = 'localhost'
+            port = 8080
+        """)
+        )
         for v in doc["server"].values():
             assert isinstance(v, Item)
             assert type(v).__name__ == "ScalarItem"
 
     def test_items_view_returns_typed(self) -> None:
-        doc = Document.parse("[server]\nhost = 'localhost'\nport = 8080")
+        doc = Document.parse(
+            toml_literal("""
+            [server]
+            host = 'localhost'
+            port = 8080
+        """)
+        )
         for k, v in doc["server"].items():
             assert isinstance(k, str)
             assert isinstance(v, Item)
 
     def test_setitem_then_get_typed(self) -> None:
-        doc = Document.parse("[server]\nhost = 'localhost'")
+        doc = Document.parse(
+            toml_literal("""
+            [server]
+            host = 'localhost'
+        """)
+        )
         doc["server"]["port"] = 8080
         assert type(doc["server"]["port"]).__name__ == "ScalarItem"
 
@@ -664,7 +830,12 @@ class TestIsinstance:
     """ABC registration gives isinstance() support."""
 
     def test_dict_item_is_mutable_mapping(self) -> None:
-        doc = Document.parse("[server]\nhost = 'localhost'")
+        doc = Document.parse(
+            toml_literal("""
+            [server]
+            host = 'localhost'
+        """)
+        )
         assert isinstance(doc["server"], MutableMapping)
 
     def test_list_item_is_mutable_sequence(self) -> None:
@@ -677,7 +848,13 @@ class TestIsinstance:
         assert not isinstance(doc["name"], MutableSequence)
 
     def test_all_are_item(self) -> None:
-        doc = Document.parse("[server]\nhost = 'localhost'\nports = [80]")
+        doc = Document.parse(
+            toml_literal("""
+            [server]
+            host = 'localhost'
+            ports = [80]
+        """)
+        )
         assert isinstance(doc["server"], Item)
         assert isinstance(doc["server"]["ports"], Item)
         assert isinstance(doc["server"]["host"], Item)

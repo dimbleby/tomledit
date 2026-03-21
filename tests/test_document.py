@@ -6,6 +6,7 @@ import copy
 
 import pytest
 
+from tests.conftest import toml_literal
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -34,7 +35,13 @@ class TestDocumentConstructor:
         assert doc["b"] == "two"
 
     def test_from_popped_table(self) -> None:
-        src = Document.parse("[project]\nname = 'hello'\nversion = '1.0'\n")
+        src = Document.parse(
+            toml_literal("""
+            [project]
+            name = 'hello'
+            version = '1.0'
+        """)
+        )
         data = src.pop("project")
         doc = Document(data)
         assert doc["name"] == "hello"
@@ -58,13 +65,24 @@ class TestDocumentValue:
     """Document.value returns the entire document as a native Python dict."""
 
     def test_value_returns_flat_native_dict(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         v = doc.value
         assert v == {"a": 1, "b": 2}
         assert type(v) is dict
 
     def test_value_with_nested_table(self) -> None:
-        doc = Document.parse("[section]\nx = 1\ny = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [section]
+            x = 1
+            y = 2
+        """)
+        )
         assert doc.value == {"section": {"x": 1, "y": 2}}
 
     def test_empty(self) -> None:
@@ -93,7 +111,12 @@ class TestDocumentIdentity:
     """Document repr, bool, and equality."""
 
     def test_repr(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         assert repr(doc) == "Document(2 keys)"
 
     def test_repr_empty(self) -> None:
@@ -109,8 +132,18 @@ class TestDocumentIdentity:
         assert bool(doc) is False
 
     def test_eq_same_content(self) -> None:
-        a = Document.parse("x = 1\ny = 2\n")
-        b = Document.parse("x = 1\ny = 2\n")
+        a = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+        """)
+        )
+        b = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+        """)
+        )
         assert a == b
 
     def test_eq_different_content(self) -> None:
@@ -119,7 +152,12 @@ class TestDocumentIdentity:
         assert a != b
 
     def test_eq_dict(self) -> None:
-        doc = Document.parse("x = 1\ny = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+        """)
+        )
         assert doc == {"x": 1, "y": 2}
         assert doc != {"x": 1}
 
@@ -148,12 +186,25 @@ class TestDocumentFmt:
 
     def test_fmt_does_not_touch_table_internals(self) -> None:
         """fmt() only reformats root-level decor, not inside tables."""
-        doc = Document.parse("[t]\n  x  =  1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+              x  =  1
+        """)
+        )
         doc.fmt()
-        assert doc.as_toml() == "[t]\n  x  =  1\n"
+        assert doc.as_toml() == toml_literal("""
+            [t]
+              x  =  1
+        """)
 
     def test_fmt_strips_comments(self) -> None:
-        doc = Document.parse("# comment\na = 1 # inline\n")
+        doc = Document.parse(
+            toml_literal("""
+            # comment
+            a = 1 # inline
+        """)
+        )
         doc.fmt()
         assert doc.as_toml() == "a = 1\n"
 
@@ -172,7 +223,12 @@ class TestDocumentCopy:
         assert doc2["x"] == 2
 
     def test_deepcopy_produces_independent_document(self) -> None:
-        doc = Document.parse('[t]\nk = "v"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            k = "v"
+        """)
+        )
         doc2 = copy.deepcopy(doc)
         doc2["t"]["k"] = "changed"
         assert doc["t"]["k"] == "v"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.conftest import toml_literal
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -22,7 +23,12 @@ class TestParseErrors:
 
     def test_duplicate_key_raises(self) -> None:
         with pytest.raises(ValueError, match="duplicate"):
-            Document.parse("x = 1\nx = 2\n")
+            Document.parse(
+                toml_literal("""
+                x = 1
+                x = 2
+            """)
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -127,12 +133,22 @@ class TestWrongTypeErrors:
     # -- wrong key type --
 
     def test_getitem_float_key_raises(self) -> None:
-        doc = Document.parse("[tbl]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [tbl]
+            x = 1
+        """)
+        )
         with pytest.raises(TypeError, match="indices must be integers or strings"):
             doc["tbl"][1.5]  # type: ignore[call-overload]
 
     def test_setitem_int_key_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         with pytest.raises(TypeError, match="strings, not integers"):
             doc["t"][0] = 99
 
@@ -142,7 +158,12 @@ class TestWrongTypeErrors:
             doc["arr"]["x"] = 99
 
     def test_delitem_int_key_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         with pytest.raises(TypeError, match="strings, not integers"):
             del doc["t"][0]
 
@@ -152,7 +173,12 @@ class TestWrongTypeErrors:
             del doc["arr"]["x"]
 
     def test_setitem_float_key_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         with pytest.raises(TypeError, match="indices must be integers or strings"):
             doc["t"][1.5] = 99  # type: ignore[index]
 
@@ -164,7 +190,12 @@ class TestWrongTypeErrors:
     # -- missing keys --
 
     def test_getitem_missing_nested_key_raises(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         with pytest.raises(KeyError, match="nonexistent"):
             doc["t"]["nonexistent"]
 
@@ -196,7 +227,12 @@ class TestWrongTypeErrors:
             doc["x"].pop("y")
 
     def test_pop_noarg_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         with pytest.raises(TypeError, match="missing 1 required positional argument"):
             doc["t"].pop()
 
@@ -213,17 +249,32 @@ class TestWrongTypeErrors:
     # -- list methods on wrong types --
 
     def test_insert_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         with pytest.raises(AttributeError):
             doc["t"].insert(0, 99)
 
     def test_remove_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         with pytest.raises(AttributeError):
             doc["t"].remove(1)
 
     def test_extend_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         with pytest.raises(AttributeError):
             doc["t"].extend([1, 2])
 

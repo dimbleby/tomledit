@@ -8,6 +8,7 @@ from types import MappingProxyType
 
 import pytest
 
+from tests.conftest import toml_literal
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -22,24 +23,48 @@ class TestProxyDictMethods:
         assert set(doc["owner"].keys()) == {"name", "age", "active"}
 
     def test_values(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         vals = doc["t"].values()
         assert len(vals) == 2
 
     def test_values_are_live_proxies(self) -> None:
-        doc = Document.parse("[t]\n[t.inner]\nval = 10\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            [t.inner]
+            val = 10
+        """)
+        )
         vals = list(doc["t"].values())
         vals[0]["val"] = 99
         assert doc["t"]["inner"]["val"] == 99
 
     def test_items(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         pairs = doc["t"].items()
         keys = [k for k, v in pairs]
         assert set(keys) == {"a", "b"}
 
     def test_items_returns_live_proxies(self) -> None:
-        doc = Document.parse("[t]\n[t.inner]\nval = 10\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            [t.inner]
+            val = 10
+        """)
+        )
         for key, proxy in doc["t"].items():
             if key == "inner":
                 proxy["val"] = 99
@@ -48,22 +73,43 @@ class TestProxyDictMethods:
     # -- get --
 
     def test_get_returns_live_proxy(self) -> None:
-        doc = Document.parse("[t]\n[t.inner]\nval = 10\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            [t.inner]
+            val = 10
+        """)
+        )
         inner = doc["t"].get("inner")
         assert inner is not None
         inner["val"] = 42
         assert doc["t"]["inner"]["val"] == 42
 
     def test_get_existing(self) -> None:
-        doc = Document.parse("[tbl]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [tbl]
+            x = 1
+        """)
+        )
         assert doc["tbl"].get("x") == 1
 
     def test_get_missing_no_default(self) -> None:
-        doc = Document.parse("[tbl]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [tbl]
+            x = 1
+        """)
+        )
         assert doc["tbl"].get("y") is None
 
     def test_get_missing_with_default(self) -> None:
-        doc = Document.parse("[tbl]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [tbl]
+            x = 1
+        """)
+        )
         assert doc["tbl"].get("y", "fallback") == "fallback"
 
     # -- pop --
@@ -88,12 +134,23 @@ class TestProxyDictMethods:
         assert "age" not in doc["owner"]
 
     def test_pop_too_many_args(self) -> None:
-        doc = Document.parse("[owner]\nname = 'Tom'\n")
+        doc = Document.parse(
+            toml_literal("""
+            [owner]
+            name = 'Tom'
+        """)
+        )
         with pytest.raises(TypeError, match="at most 2 arguments"):
             doc["owner"].pop("name", 1, 2)
 
     def test_pop_by_key_returns_native(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         v = doc["t"].pop("a")
         assert v == 1
         assert "a" not in doc["t"]
@@ -232,7 +289,12 @@ class TestDocumentDictMethods:
     # -- delitem --
 
     def test_delitem_existing_key(self) -> None:
-        doc = Document.parse("x = 1\ny = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+        """)
+        )
         del doc["x"]
         assert "x" not in doc
         assert "y" in doc
@@ -245,7 +307,12 @@ class TestDocumentDictMethods:
     # -- pop argument handling --
 
     def test_pop_existing(self) -> None:
-        doc = Document.parse("x = 1\ny = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+        """)
+        )
         val = doc.pop("x")
         assert val == 1
         assert "x" not in doc
@@ -307,7 +374,13 @@ class TestDocumentDictMethods:
         assert type(v) is datetime
 
     def test_pop_nested_table(self) -> None:
-        doc = Document.parse("[a]\n[a.b]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [a]
+            [a.b]
+            x = 1
+        """)
+        )
         assert doc.pop("a") == {"b": {"x": 1}}
 
     # -- items / values return live proxies --
@@ -320,7 +393,12 @@ class TestDocumentDictMethods:
         assert doc["owner"]["name"] == "Charlie"
 
     def test_values_returns_live_proxies(self) -> None:
-        doc = Document.parse("[section]\nval = 10\n")
+        doc = Document.parse(
+            toml_literal("""
+            [section]
+            val = 10
+        """)
+        )
         vals = list(doc.values())
         assert len(vals) == 1
         vals[0]["val"] = 99
@@ -402,21 +480,36 @@ class TestViews:
     # -- KeysView --
 
     def test_keys_view_is_live(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         kv = doc.keys()
         assert set(kv) == {"a", "b"}
         doc["c"] = 3
         assert set(kv) == {"a", "b", "c"}
 
     def test_keys_view_len(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         kv = doc.keys()
         assert len(kv) == 2
         doc["c"] = 3
         assert len(kv) == 3
 
     def test_keys_view_contains(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         kv = doc.keys()
         assert "a" in kv
         assert "z" not in kv
@@ -428,7 +521,13 @@ class TestViews:
         assert "'a'" in repr(kv)
 
     def test_keys_view_set_intersection(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\nc = 3\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+            c = 3
+        """)
+        )
         assert doc.keys() & {"a", "c"} == {"a", "c"}
 
     def test_keys_view_set_union(self) -> None:
@@ -436,11 +535,22 @@ class TestViews:
         assert doc.keys() | {"b"} == {"a", "b"}
 
     def test_keys_view_set_difference(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         assert doc.keys() - {"b"} == {"a"}
 
     def test_keys_view_reversed(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\nc = 3\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+            c = 3
+        """)
+        )
         assert list(reversed(doc.keys())) == ["c", "b", "a"]
 
     # -- ValuesView --
@@ -453,13 +563,23 @@ class TestViews:
         assert len(vv) == 2
 
     def test_values_view_iter(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         vals = list(doc.values())
         assert vals[0] == 1
         assert vals[1] == 2
 
     def test_values_view_contains(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         assert 1 in doc.values()
         assert 99 not in doc.values()
 
@@ -473,13 +593,23 @@ class TestViews:
         assert len(iv) == 2
 
     def test_items_view_iter(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         pairs = list(doc.items())
         assert pairs[0][0] == "a"
         assert pairs[0][1] == 1
 
     def test_items_view_contains(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         assert ("a", 1) in doc.items()  # type: ignore[comparison-overlap]
         assert ("a", 99) not in doc.items()  # type: ignore[comparison-overlap]
         assert ("z", 1) not in doc.items()  # type: ignore[comparison-overlap]
@@ -487,7 +617,12 @@ class TestViews:
     # -- Proxy (nested) views --
 
     def test_proxy_keys_view_is_live(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         kv = doc["t"].keys()
         assert set(kv) == {"a"}
         doc["t"]["b"] = 2
@@ -495,12 +630,24 @@ class TestViews:
         assert set(kv2) == {"a", "b"}
 
     def test_proxy_values_view(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         vals = list(doc["t"].values())
         assert len(vals) == 2
 
     def test_proxy_items_view(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         pairs = dict(doc["t"].items())
         assert pairs["a"] == 1
         assert pairs["b"] == 2
@@ -526,24 +673,44 @@ class TestViews:
     # -- KeysView: xor and eq --
 
     def test_keys_view_set_xor(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         assert doc.keys() ^ {"b", "c"} == {"a", "c"}
 
     def test_keys_view_eq(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         assert doc.keys() == {"a", "b"}
         assert doc.keys() != {"a"}
 
     # -- ValuesView: repr and eq --
 
     def test_values_view_repr(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         r = repr(doc.values())
         assert "ValuesView" in r
         assert "2 values" in r
 
     def test_values_view_eq(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         vals = list(doc.values())
         assert doc.values() == vals
         assert doc.values() != [1]
@@ -553,13 +720,23 @@ class TestViews:
     # -- ItemsView: repr and eq --
 
     def test_items_view_repr(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         r = repr(doc.items())
         assert "ItemsView" in r
         assert "2 items" in r
 
     def test_items_view_eq(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         pairs = list(doc.items())
         assert doc.items() == pairs
         assert doc.items() != [("a", 1)]
@@ -574,28 +751,55 @@ class TestViews:
     # -- Nested (non-root path) view operations --
 
     def test_proxy_keys_view_contains(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         kv = doc["t"].keys()
         assert "a" in kv
         assert "z" not in kv
 
     def test_proxy_values_view_contains(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         assert 1 in doc["t"].values()
         assert 99 not in doc["t"].values()
 
     def test_proxy_values_view_repr(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         r = repr(doc["t"].values())
         assert "ValuesView" in r
 
     def test_proxy_items_view_contains(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         assert ("a", 1) in doc["t"].items()
         assert ("z", 1) not in doc["t"].items()
 
     def test_proxy_items_view_repr(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         r = repr(doc["t"].items())
         assert "ItemsView" in r
 
@@ -608,5 +812,10 @@ class TestViews:
         assert doc.items() != [("a", 1), ("b", 2)]
 
     def test_values_view_eq_element_mismatch(self) -> None:
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         assert doc.values() != [1, 99]

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.conftest import toml_literal
 from tomledit import Document
 
 if TYPE_CHECKING:
@@ -16,13 +17,23 @@ class TestStaleProxyDetection:
     """Proxies created before a mutation raise RuntimeError on access."""
 
     def test_sibling_valid_after_delitem_on_doc(self) -> None:
-        doc = Document.parse("x = 1\ny = 2")
+        doc = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+        """)
+        )
         proxy = doc["y"]
         del doc["x"]
         assert proxy.value == 2
 
     def test_sibling_valid_after_pop_on_doc(self) -> None:
-        doc = Document.parse("x = 1\ny = 2")
+        doc = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+        """)
+        )
         proxy = doc["y"]
         doc.pop("x")
         assert proxy.value == 2
@@ -58,7 +69,13 @@ class TestStaleProxyViaProxy:
     """Mutations through a proxy invalidate sibling proxies."""
 
     def test_sibling_proxy_valid_after_delitem(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         b = doc["t"]["b"]
         t = doc["t"]
         del t["a"]
@@ -91,7 +108,12 @@ class TestStaleProxyViaProxy:
         assert arr.value == [1, 2, 3]
 
     def test_stale_after_proxy_clear(self) -> None:
-        doc = Document.parse("[t]\na = 1")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         a = doc["t"]["a"]
         t = doc["t"]
         t.clear()
@@ -107,7 +129,12 @@ class TestStaleProxyViaProxy:
             _ = item.value
 
     def test_valid_after_additive_proxy_update(self) -> None:
-        doc = Document.parse("[t]\na = 1")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         a = doc["t"]["a"]
         t = doc["t"]
         t.update({"b": 2})
@@ -118,13 +145,25 @@ class TestMutatorProxyStaysValid:
     """The proxy that performs a mutation stays valid afterward."""
 
     def test_setitem_through_proxy(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         t = doc["t"]
         t["a"] = 99
         assert t["a"] == 99  # mutating proxy is still valid
 
     def test_delitem_through_proxy(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         t = doc["t"]
         del t["a"]
         assert t["b"] == 2
@@ -142,13 +181,24 @@ class TestMutatorProxyStaysValid:
         assert len(arr) == 2
 
     def test_clear_through_proxy(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         t = doc["t"]
         t.clear()
         assert len(t) == 0
 
     def test_update_through_proxy(self) -> None:
-        doc = Document.parse("[t]\na = 1")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         t = doc["t"]
         t.update({"b": 2})
         assert t["b"] == 2
@@ -162,7 +212,12 @@ class TestMutatorProxyStaysValid:
         assert len(arr) == 4
 
     def test_setdefault_through_proxy(self) -> None:
-        doc = Document.parse("[t]\na = 1")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         t = doc["t"]
         t.setdefault("b", 42)
         assert t["b"] == 42
@@ -190,14 +245,24 @@ class TestCommentMutationsPreserveProxies:
     """Setting comments is decoration-only, so proxies stay valid."""
 
     def test_set_comment_does_not_invalidate_sibling(self) -> None:
-        doc = Document.parse("a = 1\nb = 2")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         b = doc["b"]
         a = doc["a"]
         a.comment = "# hello"
         assert b.value == 2
 
     def test_set_inline_comment_does_not_invalidate_sibling(self) -> None:
-        doc = Document.parse("a = 1\nb = 2")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         b = doc["b"]
         a = doc["a"]
         a.inline_comment = "# hello"
@@ -208,7 +273,12 @@ class TestFreshProxiesAfterMutation:
     """New proxies created after a mutation work fine."""
 
     def test_new_proxy_after_doc_mutation(self) -> None:
-        doc = Document.parse("x = 1\ny = 2")
+        doc = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+        """)
+        )
         old = doc["x"]
         doc["x"] = 99
         new = doc["x"]
@@ -217,7 +287,13 @@ class TestFreshProxiesAfterMutation:
             _ = old.value
 
     def test_new_child_after_proxy_mutation(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         t = doc["t"]
         old_a = doc["t"]["a"]
         t["a"] = 99
@@ -232,7 +308,15 @@ class TestReadMethodsCheckFreshness:
 
     @pytest.fixture
     def stale_proxy(self) -> tuple[Item, Item]:
-        doc = Document.parse("arr = [1, 2]\n\n[t]\na = 1\nb = 2")
+        doc = Document.parse(
+            toml_literal("""
+            arr = [1, 2]
+
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         proxy_t = doc["t"]
         proxy_arr = doc["arr"]
         doc["t"] = {"c": 3}  # replace entire table → proxy_t is stale
@@ -334,7 +418,13 @@ class TestPreciseInvalidation:
     """Path-based trie only invalidates proxies at or below the mutated path."""
 
     def test_top_level_sibling_unaffected(self) -> None:
-        doc = Document.parse("x = 1\ny = 2\nz = 3")
+        doc = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+            z = 3
+        """)
+        )
         px = doc["x"]
         py = doc["y"]
         pz = doc["z"]
@@ -345,7 +435,14 @@ class TestPreciseInvalidation:
         assert pz.value == 3
 
     def test_nested_sibling_unaffected(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2\nc = 3")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+            c = 3
+        """)
+        )
         pa = doc["t"]["a"]
         pb = doc["t"]["b"]
         pc = doc["t"]["c"]
@@ -356,7 +453,13 @@ class TestPreciseInvalidation:
         assert pc.value == 3
 
     def test_replacing_table_invalidates_descendants(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         pa = doc["t"]["a"]
         pb = doc["t"]["b"]
         pt = doc["t"]
@@ -392,7 +495,14 @@ class TestPreciseInvalidation:
             _ = e0.value
 
     def test_clear_invalidates_everything(self) -> None:
-        doc = Document.parse("x = 1\ny = 2\n[t]\na = 1")
+        doc = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+            [t]
+            a = 1
+        """)
+        )
         px = doc["x"]
         py = doc["y"]
         pa = doc["t"]["a"]
@@ -403,7 +513,13 @@ class TestPreciseInvalidation:
                 _ = proxy.value
 
     def test_update_only_invalidates_replaced_keys(self) -> None:
-        doc = Document.parse("[t]\na = 1\nb = 2")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
         pa = doc["t"]["a"]
         pb = doc["t"]["b"]
         t = doc["t"]

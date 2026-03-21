@@ -321,6 +321,16 @@ class TestEqualityEdgeCases:
         expected = datetime(2024, 1, 15, 10, 30, 0, tzinfo=tz)
         assert doc["dt"] == expected
 
+    def test_proxy_date_only_ne_proxy_full_datetime(self) -> None:
+        """Proxy-vs-proxy: date-only != full datetime even with same date."""
+        doc = Document.parse("d = 2024-01-15\ndt = 2024-01-15T10:30:00Z\n")
+        assert doc["d"] != doc["dt"]
+
+    def test_proxy_time_only_ne_proxy_full_datetime(self) -> None:
+        """Proxy-vs-proxy: time-only != full datetime even with same time."""
+        doc = Document.parse("t = 10:30:00\ndt = 2024-01-15T10:30:00\n")
+        assert doc["t"] != doc["dt"]
+
 
 class TestNumericTowerEquality:
     """Python's numeric tower: 1 == 1.0 == True.

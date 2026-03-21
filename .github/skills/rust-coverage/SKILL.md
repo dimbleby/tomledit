@@ -20,15 +20,16 @@ RUSTFLAGS="-Cinstrument-coverage" \
   uv run --reinstall-package tomledit pytest -q
 
 # Merge profiles and generate report
-LLVM_TOOLS_PATH="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin"
+HOST_TRIPLE="$(rustc -vV | sed -n 's/host: //p')"
+LLVM_TOOLS_PATH="$(rustc --print sysroot)/lib/rustlib/${HOST_TRIPLE}/bin"
 "$LLVM_TOOLS_PATH/llvm-profdata" merge -sparse target/tomledit-*.profraw -o target/tomledit.profdata
 "$LLVM_TOOLS_PATH/llvm-cov" report \
-  target/x86_64-unknown-linux-gnu/release/libtomledit.so \
+  target/${HOST_TRIPLE}/release/libtomledit.so \
   --instr-profile=target/tomledit.profdata --sources src/
 
 # Per-file detail (uncovered lines)
 "$LLVM_TOOLS_PATH/llvm-cov" show \
-  target/x86_64-unknown-linux-gnu/release/libtomledit.so \
+  target/${HOST_TRIPLE}/release/libtomledit.so \
   --instr-profile=target/tomledit.profdata \
   --sources src/item_proxy.rs --show-line-counts-or-regions
 ```

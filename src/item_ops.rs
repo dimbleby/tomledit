@@ -6,6 +6,7 @@ use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
 use crate::comments;
+use crate::dict_ops;
 use crate::equality;
 use crate::item::Item;
 
@@ -24,71 +25,6 @@ fn it_remove_preserving(it: &mut toml_edit::InlineTable, key: &str) -> Option<to
     }
     comments::restore_it_inline_comments(it, &ic);
     Some(removed)
-}
-
-// ---------------------------------------------------------------------------
-// Decor preservation
-// ---------------------------------------------------------------------------
-
-pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: Item) {
-    // Tables and ArrayOfTables must stay as-is; into_value() would convert
-    // a standard Table ([foo]) into an InlineTable (foo = {}).
-    // Exception: inside inline tables, nested dicts MUST become inline tables.
-    if (value.0.is_table() || value.0.is_array_of_tables()) && !item.is_inline_table() {
-        let mut val = value.0;
-        // Clear position-specific decor so toml_edit applies its default
-        // blank-line-before-header formatting.  Without this, a table
-        // cloned from another document would carry the source's decor
-        // (e.g. no leading newline when it was the first table there).
-        if let Some(t) = val.as_table_mut() {
-            t.decor_mut().clear();
-            t.set_position(None);
-        }
-        if let Some(aot) = val.as_array_of_tables_mut() {
-            for t in aot.iter_mut() {
-                t.decor_mut().clear();
-                t.set_position(None);
-            }
-        }
-        item[key] = val;
-        return;
-    }
-
-    // For new keys in inline tables, preserve sibling inline comments
-    // (existing keys don't change key order, so no save/restore needed).
-    let saved_ic = item
-        .as_inline_table()
-        .filter(|it| !it.contains_key(key))
-        .map(comments::save_it_inline_comments);
-
-    let old_decor = item
-        .get(key)
-        .and_then(|e| e.as_value())
-        .map(|v| v.decor().clone());
-    match (old_decor, value.0.into_value()) {
-        (Some(decor), Ok(mut new_value)) => {
-            if let Some(prefix) = decor.prefix() {
-                new_value.decor_mut().set_prefix(prefix.clone());
-            }
-            if let Some(suffix) = decor.suffix() {
-                new_value.decor_mut().set_suffix(suffix.clone());
-            }
-            item[key] = ItemRs::Value(new_value);
-        }
-        (_, Ok(new_value)) => {
-            item[key] = ItemRs::Value(new_value);
-        }
-        (_, Err(new_item)) => {
-            item[key] = new_item;
-        }
-    }
-
-    if let Some(mut ic) = saved_ic {
-        ic.push(String::new());
-        if let Some(it) = item.as_inline_table_mut() {
-            comments::restore_it_inline_comments(it, &ic);
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -464,11 +400,9 @@ pub(crate) fn item_setitem_slice(
 
 /// Decoration state captured before an array removal so that the opening and
 /// closing brackets stay in their original positions.
-struct RemovalDecor {
-    /// Prefix of the old first element (between `[` and the value).
-    first_prefix: Option<String>,
-    /// Suffix of the old last element (between the value and `]`).
-    last_suffix: Option<String>,
+pub(crate) struct RemovalDecor {
+    pub(crate) first_prefix: Option<String>,
+    pub(crate) last_suffix: Option<String>,
 }
 
 /// Snapshot the decorations that would be lost when the first and/or last
@@ -478,7 +412,7 @@ struct RemovalDecor {
 /// affect element 0 or element `len − 1`.  Returns `None` fields when the
 /// corresponding boundary is unaffected or the array is too small to need
 /// repair (single-element arrays becoming empty).
-fn save_removal_decor(
+pub(crate) fn save_removal_decor(
     arr: &toml_edit::Array,
     removing_first: bool,
     removing_last: bool,
@@ -502,7 +436,7 @@ fn save_removal_decor(
 }
 
 /// Apply saved decoration fixes after a removal + `restore_inline_comments`.
-fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDecor) {
+pub(crate) fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDecor) {
     // --- First-element prefix ---
     // The new first element inherits a prefix meant to follow a comma (e.g.
     // `" "` in `[1, 2]` or `" # note\n    "` in multiline arrays).  Replace
@@ -577,14 +511,14 @@ fn require_int_key(key: &Bound<'_, PyAny>) -> PyResult<i64> {
     })
 }
 
-fn unsupported_op(item: &ItemRs, op: &str) -> PyErr {
+pub(crate) fn unsupported_op(item: &ItemRs, op: &str) -> PyErr {
     PyTypeError::new_err(format!(
         "TOML {} item does not support {op}",
         item.type_name()
     ))
 }
 
-fn into_value(item: Item) -> PyResult<ValueRs> {
+pub(crate) fn into_value(item: Item) -> PyResult<ValueRs> {
     item.0.into_value().map_err(|item| {
         PyTypeError::new_err(format!(
             "cannot convert {} to a TOML value",
@@ -593,51 +527,13 @@ fn into_value(item: Item) -> PyResult<ValueRs> {
     })
 }
 
-fn require_table(item: Item) -> PyResult<toml_edit::Table> {
-    match item.0 {
-        ItemRs::Table(t) => Ok(t),
-        ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.into_table()),
-        other => Err(PyTypeError::new_err(format!(
-            "cannot append {} to array of tables (expected a table/dict)",
-            other.type_name()
-        ))),
-    }
-}
-
-pub(crate) fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
-    match item {
-        ItemRs::Table(table) => Ok(table.iter().map(|(k, _)| k.to_owned()).collect()),
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            Ok(it.iter().map(|(k, _)| k.to_owned()).collect())
-        }
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item has no keys()",
-            item.type_name()
-        ))),
-    }
-}
-
-pub(crate) fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
-    match item {
-        ItemRs::Table(table) => Ok(table.contains_key(key)),
-        ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.contains_key(key)),
-        ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => Err(PyTypeError::new_err(
-            "TOML array indices must be integers, not strings",
-        )),
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item is not subscriptable (use .value to get the Python object)",
-            item.type_name()
-        ))),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Getitem
 // ---------------------------------------------------------------------------
 
 pub(crate) fn item_getitem(item: &ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Key> {
     if let Ok(k) = key.extract::<String>() {
-        if !item_has_key(item, &k)? {
+        if !dict_ops::item_has_key(item, &k)? {
             return Err(PyKeyError::new_err(k));
         }
         Ok(Key::Str(k))
@@ -662,7 +558,7 @@ pub(crate) fn item_setitem(
         ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
             let k = require_str_key(key)?;
             let replaced = item.get(k.as_str()).is_some();
-            set_with_decor_preservation(item, &k, value);
+            dict_ops::set_with_decor_preservation(item, &k, value);
             Ok(if replaced { Some(Key::Str(k)) } else { None })
         }
         ItemRs::Value(ValueRs::Array(array)) => {
@@ -793,284 +689,6 @@ pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyR
     }
 }
 
-/// Extract key-value pairs from a Python object for update().
-///
-/// Follows the same protocol as dict.update:
-/// - If the object is a dict, iterate its entries directly.
-/// - If the object has a `.keys()` method, iterate keys and index for values.
-/// - Otherwise, iterate as (key, value) pairs.
-///
-/// All paths pre-collect into a Vec because values may be ItemProxy objects
-/// referencing the same document, and extracting them borrows the document.
-pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Item)>> {
-    if let Ok(dict) = other.cast::<PyDict>() {
-        let mut pairs = Vec::with_capacity(dict.len());
-        for (k, v) in dict.iter() {
-            let key: String = k.extract()?;
-            let val: Item = v.extract()?;
-            pairs.push((key, val));
-        }
-        return Ok(pairs);
-    }
-
-    // Mapping with .keys()
-    if let Ok(keys_method) = other.getattr("keys") {
-        let keys = keys_method.call0()?;
-        let mut pairs = Vec::new();
-        for key_obj in keys.try_iter()? {
-            let key_obj = key_obj?;
-            let key: String = key_obj.extract()?;
-            let val: Item = other.get_item(&key_obj)?.extract()?;
-            pairs.push((key, val));
-        }
-        return Ok(pairs);
-    }
-
-    // Iterable of (key, value) pairs
-    let mut pairs = Vec::new();
-    for item in other.try_iter()? {
-        let item = item?;
-        let (key, val): (String, Item) = item.extract()?;
-        pairs.push((key, val));
-    }
-    Ok(pairs)
-}
-
-/// Apply pre-extracted update pairs to an item.
-///
-/// Returns `true` if any key replaced an entry that existed before the update.
-pub(crate) fn apply_update_pairs(
-    item: &mut ItemRs,
-    pairs: Vec<(String, Item)>,
-) -> PyResult<Vec<String>> {
-    if !(item.is_table() || item.is_inline_table()) {
-        return Err(unsupported_op(item, "update()"));
-    }
-    let mut replaced_keys = Vec::new();
-    for (key, val) in pairs {
-        let exists = item.as_table().is_some_and(|t| t.contains_key(&key))
-            || item.as_inline_table().is_some_and(|t| t.contains_key(&key));
-        if exists {
-            replaced_keys.push(key.clone());
-        }
-        set_with_decor_preservation(item, &key, val);
-    }
-    Ok(replaced_keys)
-}
-
-// ---------------------------------------------------------------------------
-// Mutation: list-like
-// ---------------------------------------------------------------------------
-
-/// Detect whether an array uses multiline formatting and return the element
-/// decor prefix if so (e.g. `"\n    "`).  Returns `None` for single-line arrays.
-fn multiline_prefix(arr: &toml_edit::Array) -> Option<String> {
-    let first = arr.get(0)?;
-    let raw = first.decor().prefix()?.as_str()?;
-    if raw.contains('\n') {
-        Some(raw.to_owned())
-    } else {
-        None
-    }
-}
-
-/// Apply multiline decor to a newly created value, matching the array's style.
-fn apply_multiline_decor(arr: &toml_edit::Array, v: &mut ValueRs) {
-    if let Some(prefix) = multiline_prefix(arr) {
-        let decor = v.decor_mut();
-        decor.set_prefix(prefix);
-        decor.set_suffix("");
-    }
-}
-
-pub(crate) fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        let mut ic = comments::save_inline_comments(arr);
-        let mut v = into_value(value)?;
-        let inline = comments::take_inline_comment(&mut v);
-        apply_multiline_decor(arr, &mut v);
-        arr.push(v);
-        ic.push(inline);
-        comments::restore_inline_comments(arr, &ic);
-        Ok(())
-    } else if let ItemRs::ArrayOfTables(aot) = item {
-        let table = require_table(value)?;
-        aot.push(table);
-        Ok(())
-    } else {
-        Err(unsupported_op(item, "append()"))
-    }
-}
-
-pub(crate) fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        let resolved = clamp_index(index, arr.len());
-        let mut ic = comments::save_inline_comments(arr);
-        let mut v = into_value(value)?;
-        let inline = comments::take_inline_comment(&mut v);
-        apply_multiline_decor(arr, &mut v);
-        arr.insert(resolved, v);
-        ic.insert(resolved, inline);
-        comments::restore_inline_comments(arr, &ic);
-        Ok(())
-    } else if let ItemRs::ArrayOfTables(aot) = item {
-        let table = require_table(value)?;
-        let resolved = clamp_index(index, aot.len());
-        // AoT has no insert API; rebuild by removing the tail, pushing, and restoring.
-        let mut tail: Vec<toml_edit::Table> =
-            (resolved..aot.len()).rev().map(|i| aot.remove(i)).collect();
-        tail.reverse();
-        aot.push(table);
-        for t in tail {
-            aot.push(t);
-        }
-        Ok(())
-    } else {
-        Err(unsupported_op(item, "insert()"))
-    }
-}
-
-pub(crate) fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        let mut ic = comments::save_inline_comments(arr);
-        // We don't know which element will match, so snapshot both boundaries.
-        let mut decor = save_removal_decor(arr, true, true);
-        for i in 0..arr.len() {
-            if let Some(v) = arr.get(i)
-                && equality::value_eq(v, value)?
-            {
-                let last = arr.len() - 1;
-                if i != 0 {
-                    decor.first_prefix = None;
-                }
-                if i != last {
-                    decor.last_suffix = None;
-                }
-                arr.remove(i);
-                ic.remove(i);
-                comments::restore_inline_comments(arr, &ic);
-                apply_removal_decor(arr, &decor);
-                return Ok(());
-            }
-        }
-        Err(PyValueError::new_err("value not in array"))
-    } else if let ItemRs::ArrayOfTables(aot) = item {
-        if let Ok(other_dict) = value.cast::<PyDict>() {
-            for i in 0..aot.len() {
-                if let Some(table) = aot.get(i)
-                    && equality::table_entries_eq(table.iter(), table.len(), other_dict)?
-                {
-                    aot.remove(i);
-                    return Ok(());
-                }
-            }
-        }
-        Err(PyValueError::new_err("value not in array"))
-    } else {
-        Err(unsupported_op(item, "remove()"))
-    }
-}
-
-pub(crate) fn item_extend(item: &mut ItemRs, items: Vec<Item>) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        let mut ic = comments::save_inline_comments(arr);
-        for new_item in items {
-            let mut v = into_value(new_item)?;
-            let inline = comments::take_inline_comment(&mut v);
-            apply_multiline_decor(arr, &mut v);
-            arr.push(v);
-            ic.push(inline);
-        }
-        comments::restore_inline_comments(arr, &ic);
-        Ok(())
-    } else if let ItemRs::ArrayOfTables(aot) = item {
-        for new_item in items {
-            let table = require_table(new_item)?;
-            aot.push(table);
-        }
-        Ok(())
-    } else {
-        Err(unsupported_op(item, "extend()"))
-    }
-}
-
-pub(crate) fn item_count(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<usize> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
-            let mut count = 0;
-            for v in arr.iter() {
-                if equality::value_eq(v, value)? {
-                    count += 1;
-                }
-            }
-            Ok(count)
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            if let Ok(other_dict) = value.cast::<PyDict>() {
-                let mut count = 0;
-                for table in aot.iter() {
-                    if equality::table_entries_eq(table.iter(), table.len(), other_dict)? {
-                        count += 1;
-                    }
-                }
-                Ok(count)
-            } else {
-                Ok(0)
-            }
-        }
-        _ => Err(unsupported_op(item, "count()")),
-    }
-}
-
-pub(crate) fn item_index(
-    item: &ItemRs,
-    value: &Bound<'_, PyAny>,
-    start: Option<i64>,
-    stop: Option<i64>,
-) -> PyResult<usize> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
-            let len = arr.len();
-            let start = clamp_index(start.unwrap_or(0), len);
-            let stop = clamp_index(stop.unwrap_or(len as i64), len);
-            for i in start..stop {
-                if let Some(v) = arr.get(i)
-                    && equality::value_eq(v, value)?
-                {
-                    return Ok(i);
-                }
-            }
-            Err(PyValueError::new_err("value not in array"))
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            let len = aot.len();
-            let start = clamp_index(start.unwrap_or(0), len);
-            let stop = clamp_index(stop.unwrap_or(len as i64), len);
-            if let Ok(other_dict) = value.cast::<PyDict>() {
-                for i in start..stop {
-                    if let Some(table) = aot.get(i)
-                        && equality::table_entries_eq(table.iter(), table.len(), other_dict)?
-                    {
-                        return Ok(i);
-                    }
-                }
-            }
-            Err(PyValueError::new_err("value not in array"))
-        }
-        _ => Err(unsupported_op(item, "index()")),
-    }
-}
-
-/// Clamp a signed index to `0..len` (negative counts from end, out-of-range clamps).
-fn clamp_index(index: i64, len: usize) -> usize {
-    let resolved = if index < 0 {
-        (len as i64 + index).max(0)
-    } else {
-        index.min(len as i64)
-    };
-    resolved as usize
-}
-
 pub(crate) fn item_clear(item: &mut ItemRs) -> PyResult<()> {
     match item {
         ItemRs::Table(table) => {
@@ -1100,27 +718,6 @@ pub(crate) fn item_fmt(item: &mut ItemRs) {
         ItemRs::Value(ValueRs::InlineTable(it)) => it.fmt(),
         ItemRs::Value(ValueRs::Array(arr)) => arr.fmt(),
         _ => {} // ArrayOfTables, scalars: no-op
-    }
-}
-
-/// Format an array as multiline, with each element on its own line.
-/// No-op on empty arrays.
-pub(crate) fn item_set_multiline(item: &mut ItemRs, indent: usize) -> PyResult<()> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
-            if !arr.is_empty() {
-                let prefix = format!("\n{}", " ".repeat(indent));
-                for val in arr.iter_mut() {
-                    let decor = val.decor_mut();
-                    decor.set_prefix(&prefix);
-                    decor.set_suffix("");
-                }
-                arr.set_trailing_comma(true);
-                arr.set_trailing("\n");
-            }
-            Ok(())
-        }
-        _ => Err(unsupported_op(item, "set_multiline()")),
     }
 }
 

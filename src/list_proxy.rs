@@ -2,8 +2,9 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::item::Item;
-use crate::item_ops::{self};
+use crate::item_ops;
 use crate::item_proxy::{ItemProxy, resolve_proxy};
+use crate::list_ops;
 
 /// A TOML array or array of tables.
 ///
@@ -58,7 +59,7 @@ impl ListProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        item_ops::item_append(item, value)?;
+        list_ops::item_append(item, value)?;
         Ok(())
     }
 
@@ -73,7 +74,7 @@ impl ListProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        item_ops::item_insert(item, index, value)?;
+        list_ops::item_insert(item, index, value)?;
         base.bump_self(&mut doc);
         Ok(())
     }
@@ -93,7 +94,7 @@ impl ListProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        item_ops::item_remove(item, value)?;
+        list_ops::item_remove(item, value)?;
         base.bump_self(&mut doc);
         Ok(())
     }
@@ -113,7 +114,7 @@ impl ListProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        item_ops::item_extend(item, items)?;
+        list_ops::item_extend(item, items)?;
         Ok(())
     }
 
@@ -129,7 +130,7 @@ impl ListProxy {
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
         let item = base.navigate(&doc.inner)?;
-        item_ops::item_count(item, value)
+        list_ops::item_count(item, value)
     }
 
     #[pyo3(signature = (value, start=None, stop=None, /))]
@@ -146,7 +147,7 @@ impl ListProxy {
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
         let item = base.navigate(&doc.inner)?;
-        item_ops::item_index(item, value, start, stop)
+        list_ops::item_index(item, value, start, stop)
     }
 
     /// Format the array as multiline.
@@ -163,6 +164,6 @@ impl ListProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        item_ops::item_set_multiline(item, indent)
+        list_ops::item_set_multiline(item, indent)
     }
 }

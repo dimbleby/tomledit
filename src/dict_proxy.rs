@@ -2,6 +2,7 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
+use crate::dict_ops;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
 use crate::item_proxy::ItemProxy;
@@ -70,7 +71,7 @@ impl DictProxy {
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
         let item = base.navigate(&doc.inner)?;
-        if item_ops::item_has_key(item, key)? {
+        if dict_ops::item_has_key(item, key)? {
             base.child_proxy_typed(py, Key::Str(key.to_owned()))
         } else {
             Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()))
@@ -126,7 +127,7 @@ impl DictProxy {
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let mut pairs = match other {
-            Some(obj) => item_ops::extract_update_pairs(obj)?,
+            Some(obj) => dict_ops::extract_update_pairs(obj)?,
             None => Vec::new(),
         };
         if let Some(kw) = kwargs {
@@ -140,7 +141,7 @@ impl DictProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        let replaced_keys = item_ops::apply_update_pairs(item, pairs)?;
+        let replaced_keys = dict_ops::apply_update_pairs(item, pairs)?;
         for key in replaced_keys {
             base.bump_child(&mut doc, Key::Str(key));
         }
@@ -160,13 +161,13 @@ impl DictProxy {
             base.check_fresh(&doc)?;
             let item = base.navigate_mut(&mut doc.inner)?;
 
-            if !item_ops::item_has_key(item, key)? {
+            if !dict_ops::item_has_key(item, key)? {
                 let default = default.ok_or_else(|| {
                     pyo3::exceptions::PyTypeError::new_err(
                         "setdefault() requires a default value: TOML has no null type",
                     )
                 })?;
-                item_ops::set_with_decor_preservation(item, key, default);
+                dict_ops::set_with_decor_preservation(item, key, default);
             }
         }
         base.child_proxy_typed(py, Key::Str(key.to_owned()))

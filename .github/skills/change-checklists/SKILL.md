@@ -17,9 +17,10 @@ description: Step-by-step checklists and Rust code patterns for adding methods, 
      `list_proxy.rs`.
    - `ScalarItem`-only methods go in `#[pymethods] impl ScalarProxy` in
      `scalar_proxy.rs`.
-   - Heavy logic should be a helper in `item_ops.rs`; the pymethod should be
-     a thin wrapper that borrows the doc, checks freshness, navigates, calls
-     the helper, and bumps.
+   - Heavy logic should be a helper in the corresponding `*_ops.rs` module
+     (`dict_ops.rs`, `list_ops.rs`, or `item_ops.rs` for shared/base
+     operations); the pymethod should be a thin wrapper that borrows the doc,
+     checks freshness, navigates, calls the helper, and bumps.
 2. **Type stub** — add the signature to `tomledit.pyi` under the right class.
 3. **Tests** — add tests in the appropriate `test_*.py` file.
 4. **Rebuild** — `uv run --reinstall-package tomledit pytest` to verify.

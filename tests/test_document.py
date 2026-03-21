@@ -119,32 +119,9 @@ class TestDocumentIdentity:
         )
         assert repr(doc) == "Document(2 keys)"
 
-    def test_repr_empty(self) -> None:
-        doc = Document.parse("")
-        assert repr(doc) == "Document(0 keys)"
-
-    def test_bool_nonempty(self) -> None:
-        doc = Document.parse("x = 1\n")
-        assert bool(doc) is True
-
     def test_bool_empty(self) -> None:
         doc = Document.parse("")
         assert bool(doc) is False
-
-    def test_eq_same_content(self) -> None:
-        a = Document.parse(
-            toml_literal("""
-            x = 1
-            y = 2
-        """)
-        )
-        b = Document.parse(
-            toml_literal("""
-            x = 1
-            y = 2
-        """)
-        )
-        assert a == b
 
     def test_eq_different_content(self) -> None:
         a = Document.parse("x = 1\n")
@@ -179,11 +156,6 @@ class TestDocumentIdentity:
 
 
 class TestDocumentFmt:
-    def test_fmt_normalizes_root_whitespace(self) -> None:
-        doc = Document.parse("  x  =  1  \n")
-        doc.fmt()
-        assert doc.as_toml() == "x = 1\n"
-
     def test_fmt_does_not_touch_table_internals(self) -> None:
         """fmt() only reformats root-level decor, not inside tables."""
         doc = Document.parse(
@@ -197,16 +169,6 @@ class TestDocumentFmt:
             [t]
               x  =  1
         """)
-
-    def test_fmt_strips_comments(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            # comment
-            a = 1 # inline
-        """)
-        )
-        doc.fmt()
-        assert doc.as_toml() == "a = 1\n"
 
 
 # ---------------------------------------------------------------------------

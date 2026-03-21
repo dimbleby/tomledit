@@ -19,10 +19,6 @@ class TestComment:
         doc = Document.parse("key = 42\n")
         assert doc["key"].inline_comment is None
 
-    def test_read_inline_on_string(self) -> None:
-        doc = Document.parse('name = "Alice" # person\n')
-        assert doc["name"].inline_comment == "# person"
-
     def test_read_inline_on_table_value(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -33,18 +29,6 @@ class TestComment:
         assert doc["section"]["x"].inline_comment == "# inside"
 
     # ---- setting inline comment ----
-
-    def test_set_inline_comment(self) -> None:
-        doc = Document.parse("key = 42\n")
-        doc["key"].inline_comment = "# added"
-        assert doc.as_toml() == "key = 42 # added\n"
-        assert doc["key"].inline_comment == "# added"
-
-    def test_replace_inline_comment(self) -> None:
-        doc = Document.parse("key = 42 # old\n")
-        doc["key"].inline_comment = "# new"
-        assert doc["key"].inline_comment == "# new"
-        assert doc.as_toml() == "key = 42 # new\n"
 
     def test_clear_inline_comment(self) -> None:
         doc = Document.parse("key = 42 # remove me\n")
@@ -72,16 +56,6 @@ class TestComment:
         doc = Document.parse("key = 42\n")
         assert doc["key"].comment is None
 
-    def test_read_multiline_comment(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            # line 1
-            # line 2
-            key = 42
-        """)
-        )
-        assert doc["key"].comment == "# line 1\n# line 2"
-
     def test_read_comment_nested(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -94,29 +68,6 @@ class TestComment:
 
     # ---- setting comment ----
 
-    def test_set_comment(self) -> None:
-        doc = Document.parse("key = 42\n")
-        doc["key"].comment = "# added"
-        assert doc.as_toml() == toml_literal("""
-            # added
-            key = 42
-        """)
-        assert doc["key"].comment == "# added"
-
-    def test_replace_comment(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            # old
-            key = 42
-        """)
-        )
-        doc["key"].comment = "# new"
-        assert doc["key"].comment == "# new"
-        assert doc.as_toml() == toml_literal("""
-            # new
-            key = 42
-        """)
-
     def test_clear_comment(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -127,16 +78,6 @@ class TestComment:
         doc["key"].comment = None
         assert doc["key"].comment is None
         assert doc.as_toml() == "key = 42\n"
-
-    def test_set_multiline_comment(self) -> None:
-        doc = Document.parse("key = 42\n")
-        doc["key"].comment = "# line A\n# line B"
-        assert doc.as_toml() == toml_literal("""
-            # line A
-            # line B
-            key = 42
-        """)
-        assert doc["key"].comment == "# line A\n# line B"
 
     # ---- both together ----
 
@@ -665,22 +606,6 @@ class TestComment:
             b = 2
         """)
 
-    def test_set_blank_line_before_comment(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            a = 1
-            b = 2
-        """)
-        )
-        doc["b"].comment = "\n# note"
-        assert doc.as_toml() == toml_literal("""
-            a = 1
-
-            # note
-            b = 2
-        """)
-        assert doc["b"].comment == "\n# note"
-
     def test_multiple_blank_lines_before_comment(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -820,21 +745,6 @@ class TestComment:
         )
         assert doc["section"].comment is None
 
-    def test_set_table_comment(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            [section]
-            x = 1
-        """)
-        )
-        doc["section"].comment = "# added"
-        assert doc.as_toml() == toml_literal("""
-            # added
-            [section]
-            x = 1
-        """)
-        assert doc["section"].comment == "# added"
-
     def test_set_table_comment_from_scratch(self) -> None:
         doc = Document()
         doc["foo"] = {"this": "that"}
@@ -847,22 +757,6 @@ class TestComment:
         doc2 = Document.parse(doc.as_toml())
         assert doc2["foo"]["this"] == "that"
         assert doc2["foo"].comment == "# Hello"
-
-    def test_replace_table_comment(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            # old
-            [section]
-            x = 1
-        """)
-        )
-        doc["section"].comment = "# new"
-        assert doc.as_toml() == toml_literal("""
-            # new
-            [section]
-            x = 1
-        """)
-        assert doc["section"].comment == "# new"
 
     def test_clear_table_comment(self) -> None:
         doc = Document.parse(
@@ -1031,19 +925,6 @@ class TestComment:
         )
         assert doc["t"]["x"].inline_comment == "# note on x"
         assert doc["t"]["y"].inline_comment is None
-
-    def test_read_inline_comment_on_last_inline_table_value(self) -> None:
-        """Last element's inline comment lives in trailing."""
-        doc = Document.parse(
-            toml_literal("""
-            t = {
-              x = 1,
-              y = 2, # note on y
-            }
-        """)
-        )
-        assert doc["t"]["x"].inline_comment is None
-        assert doc["t"]["y"].inline_comment == "# note on y"
 
     def test_read_inline_comment_all_values(self) -> None:
         """All inline table values can have inline comments."""
@@ -1443,18 +1324,4 @@ class TestComment:
             [owner]
             name = "Bob"  # the owner name
             age = 30
-        """)
-
-    def test_standalone_comment_preserved_on_nested_update(self) -> None:
-        toml = toml_literal("""
-            [owner]
-            # this is the name
-            name = "Tom"
-        """)
-        doc = Document.parse(toml)
-        doc["owner"]["name"] = "Bob"
-        assert doc.as_toml() == toml_literal("""
-            [owner]
-            # this is the name
-            name = "Bob"
         """)

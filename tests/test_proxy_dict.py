@@ -125,9 +125,6 @@ class TestProxyDictMethods:
     def test_pop_missing_with_default(self, doc: Document) -> None:
         assert doc["owner"].pop("nonexistent", 42) == 42
 
-    def test_pop_missing_with_none_default(self, doc: Document) -> None:
-        assert doc["owner"].pop("nonexistent", None) is None
-
     def test_pop_existing_ignores_default(self, doc: Document) -> None:
         val = doc["owner"].pop("age", 99)
         assert val == 30

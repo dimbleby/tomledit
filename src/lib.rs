@@ -1,17 +1,23 @@
 mod comments;
+mod dict_proxy;
 mod document;
 mod equality;
 mod item;
 mod item_ops;
 mod item_proxy;
+mod list_proxy;
+mod scalar_proxy;
 mod trie;
 mod value;
 mod views;
 
+use dict_proxy::DictProxy;
 use document::Document;
-use item_proxy::{DictProxy, ItemProxy, ListProxy, ScalarProxy};
+use item_proxy::ItemProxy;
+use list_proxy::ListProxy;
 use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
+use scalar_proxy::ScalarProxy;
 use views::{ItemsView, KeysView, ValuesView};
 
 #[pymodule]

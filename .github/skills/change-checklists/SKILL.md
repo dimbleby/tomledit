@@ -11,9 +11,12 @@ description: Step-by-step checklists and Rust code patterns for adding methods, 
    - `Document` methods go in `document.rs`.
    - `Item` base methods go in the `#[pymethods] impl ItemProxy` block in
      `item_proxy.rs`.
-   - `DictItem`-only methods go in `#[pymethods] impl DictProxy`.
-   - `ListItem`-only methods go in `#[pymethods] impl ListProxy`.
-   - `ScalarItem`-only methods go in `#[pymethods] impl ScalarProxy`.
+   - `DictItem`-only methods go in `#[pymethods] impl DictProxy` in
+     `dict_proxy.rs`.
+   - `ListItem`-only methods go in `#[pymethods] impl ListProxy` in
+     `list_proxy.rs`.
+   - `ScalarItem`-only methods go in `#[pymethods] impl ScalarProxy` in
+     `scalar_proxy.rs`.
    - Heavy logic should be a helper in `item_ops.rs`; the pymethod should be
      a thin wrapper that borrows the doc, checks freshness, navigates, calls
      the helper, and bumps.

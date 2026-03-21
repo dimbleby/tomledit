@@ -979,13 +979,28 @@ class TestComment:
         doc = Document.parse("t = {x = 1, y = 2}\n")
         doc["t"]["x"].comment = "# note"
         assert doc.as_toml() == toml_literal("""
-            t = {# note
-            x = 1, y = 2}
+            t = {
+             # note
+             x = 1, y = 2}
         """)
         doc2 = Document.parse(doc.as_toml())
         assert doc2["t"]["x"] == 1
         assert doc2["t"]["y"] == 2
         assert doc2["t"]["x"].comment == "# note"
+
+    def test_set_inline_table_non_first_key_comment(self) -> None:
+        """Block comment on a non-first inline table key."""
+        doc = Document.parse("t = {x = 1, y = 2}\n")
+        doc["t"]["y"].comment = "# note"
+        assert doc.as_toml() == toml_literal("""
+            t = {x = 1,
+             # note
+             y = 2}
+        """)
+        doc2 = Document.parse(doc.as_toml())
+        assert doc2["t"]["x"] == 1
+        assert doc2["t"]["y"] == 2
+        assert doc2["t"]["y"].comment == "# note"
 
     def test_clear_inline_table_key_comment(self) -> None:
         doc = Document.parse("t = {x = 1, y = 2}\n")

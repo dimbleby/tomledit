@@ -395,8 +395,13 @@ fn is_first_it_key(it: &toml_edit::InlineTable, key: &str) -> bool {
 fn get_it_block_comment(it: &toml_edit::InlineTable, key: &str) -> Option<String> {
     let raw = it.key(key)?.leaf_decor().prefix()?.as_str()?;
     if is_first_it_key(it, key) {
-        extract_block_comment(raw)
+        // The first key's prefix is `\n<comment>\n<indent>` (set inserts the
+        // leading `\n` so the comment starts on its own line after `{`).
+        // Strip the framing before extracting.
+        extract_block_comment(raw.strip_prefix('\n').unwrap_or(raw).trim_end())
     } else {
+        // Non-first key: the prefix mixes the previous key's inline comment
+        // with this key's block comment; split_prefix separates them.
         let parts = split_prefix(raw);
         if parts.block.is_empty() {
             None
@@ -406,6 +411,19 @@ fn get_it_block_comment(it: &toml_edit::InlineTable, key: &str) -> Option<String
     }
 }
 
+/// Derive the canonical indent for an inline table.
+///
+/// Uses the second key's prefix (e.g. `" "` from `, y`) as the reference
+/// indent, since the first key's prefix may be empty in compact tables.
+/// Falls back to the first key's own prefix if there's only one key.
+fn canonical_it_indent(it: &toml_edit::InlineTable, first_key: &str) -> String {
+    let ref_key = it.iter().nth(1).map_or(first_key, |(k, _)| k);
+    it.key(ref_key)
+        .and_then(|k| k.leaf_decor().prefix()?.as_str())
+        .unwrap_or_default()
+        .to_owned()
+}
+
 /// Set the block comment on an inline table key's prefix.
 fn set_it_block_comment(
     it: &mut toml_edit::InlineTable,
@@ -413,30 +431,37 @@ fn set_it_block_comment(
     comment: Option<&str>,
 ) -> PyResult<()> {
     let is_first = is_first_it_key(it, key);
+    let canonical = is_first.then(|| canonical_it_indent(it, key));
     let mut km = it
         .key_mut(key)
         .ok_or_else(|| PyKeyError::new_err(key.to_owned()))?;
-    if is_first {
-        match comment {
-            Some(text) => km
-                .leaf_decor_mut()
-                .set_prefix(build_block_comment(text, "")?),
-            None => km.leaf_decor_mut().set_prefix(""),
-        }
-    } else {
-        let raw = km
-            .leaf_decor()
-            .prefix()
-            .and_then(|r| r.as_str())
-            .unwrap_or_default()
-            .to_owned();
-        let mut parts = split_prefix(&raw);
-        parts.block = match comment {
-            Some(text) => build_block_comment(text, &parts.indent)?,
-            None => String::new(),
-        };
-        km.leaf_decor_mut().set_prefix(join_prefix(&parts));
+
+    let raw = km
+        .leaf_decor()
+        .prefix()
+        .and_then(|r| r.as_str())
+        .unwrap_or_default()
+        .to_owned();
+    let mut parts = split_prefix(&raw);
+
+    // First key: use canonical indent; non-first: keep existing indent.
+    if let Some(ci) = canonical.filter(|_| comment.is_some()) {
+        parts.indent = ci;
     }
+    parts.block = match comment {
+        Some(text) => build_block_comment(text, &parts.indent)?,
+        None => String::new(),
+    };
+
+    let new_prefix = if is_first && parts.block.is_empty() {
+        // Clearing the first key: just the indent.  Can't use join_prefix here
+        // because it always inserts `\n` after `parts.inline`, which would add
+        // a spurious blank line after `{`.
+        parts.indent
+    } else {
+        join_prefix(&parts)
+    };
+    km.leaf_decor_mut().set_prefix(new_prefix);
     Ok(())
 }
 

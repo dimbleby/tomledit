@@ -60,20 +60,39 @@ class TestProxyListMethods:
             doc["arr"].pop(0, None)
 
     def test_pop_aot_last(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
         val = doc["items"].pop()
         assert val == {"name": "b"}
         assert len(doc["items"]) == 1
 
     def test_pop_aot_by_index(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
         val = doc["items"].pop(0)
         assert val == {"name": "a"}
         assert len(doc["items"]) == 1
         assert doc["items"][0] == {"name": "b"}
 
     def test_pop_aot_empty_raises(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         doc["items"].pop()
         with pytest.raises(IndexError):
             doc["items"].pop()
@@ -92,7 +111,14 @@ class TestProxyListMethods:
 
     def test_remove_aot(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         doc["items"].remove({"name": "b"})
         assert len(doc["items"]) == 2
@@ -101,7 +127,14 @@ class TestProxyListMethods:
 
     def test_remove_aot_first_occurrence(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "a"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "a"
+            """)
         )
         doc["items"].remove({"name": "a"})
         assert len(doc["items"]) == 2
@@ -109,12 +142,22 @@ class TestProxyListMethods:
         assert doc["items"][1] == {"name": "a"}
 
     def test_remove_aot_missing_raises(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         with pytest.raises(ValueError, match="not in array"):
             doc["items"].remove({"name": "z"})
 
     def test_remove_aot_non_dict_raises(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         with pytest.raises(ValueError, match="not in array"):
             doc["items"].remove("not a dict")
 
@@ -157,25 +200,47 @@ class TestProxyListMethods:
         assert doc["arr"][3] == 4
 
     def test_append_aot(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         doc["items"].append({"name": "b"})
         assert len(doc["items"]) == 2
         assert doc["items"][1] == {"name": "b"}
 
     def test_append_aot_inline_table(self) -> None:
         src = Document.parse('x = {name = "b"}\n')
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         doc["items"].append(src["x"])
         assert len(doc["items"]) == 2
         assert doc["items"][1] == {"name": "b"}
 
     def test_append_aot_non_table_raises(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         with pytest.raises(TypeError, match="cannot append"):
             doc["items"].append(42)
 
     def test_insert_aot_beginning(self) -> None:
-        doc = Document.parse('[[items]]\nname = "b"\n[[items]]\nname = "c"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "b"
+            [[items]]
+            name = "c"
+        """)
+        )
         doc["items"].insert(0, {"name": "a"})
         assert len(doc["items"]) == 3
         assert doc["items"][0] == {"name": "a"}
@@ -192,7 +257,13 @@ class TestProxyListMethods:
 
     def test_insert_aot_beginning_spaced(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "b"\n\n[[items]]\nname = "c"\n'
+            toml_literal("""
+            [[items]]
+            name = "b"
+
+            [[items]]
+            name = "c"
+        """)
         )
         doc["items"].insert(0, {"name": "a"})
         assert doc.as_toml() == toml_literal("""
@@ -207,7 +278,14 @@ class TestProxyListMethods:
         """)
 
     def test_insert_aot_middle(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "c"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "c"
+        """)
+        )
         doc["items"].insert(1, {"name": "b"})
         assert len(doc["items"]) == 3
         assert doc["items"][0] == {"name": "a"}
@@ -224,7 +302,13 @@ class TestProxyListMethods:
 
     def test_insert_aot_middle_spaced(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n\n[[items]]\nname = "c"\n'
+            toml_literal("""
+            [[items]]
+            name = "a"
+
+            [[items]]
+            name = "c"
+        """)
         )
         doc["items"].insert(1, {"name": "b"})
         assert doc.as_toml() == toml_literal("""
@@ -240,7 +324,12 @@ class TestProxyListMethods:
 
     def test_insert_aot_end(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n'
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
         )
         doc["items"].insert(100, {"name": "c"})
         assert len(doc["items"]) == 3
@@ -256,7 +345,13 @@ class TestProxyListMethods:
 
     def test_insert_aot_end_spaced(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n\n[[items]]\nname = "b"\n'
+            toml_literal("""
+            [[items]]
+            name = "a"
+
+            [[items]]
+            name = "b"
+        """)
         )
         doc["items"].insert(100, {"name": "c"})
         assert len(doc["items"]) == 3
@@ -273,7 +368,12 @@ class TestProxyListMethods:
         """)
 
     def test_extend_aot(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         doc["items"].extend([{"name": "b"}, {"name": "c"}])
         assert len(doc["items"]) == 3
         assert doc["items"][1] == {"name": "b"}
@@ -290,10 +390,15 @@ class TestProxyListMethods:
         """)
 
     def test_insert_aot_preserves_comments(self) -> None:
-        toml = (
-            '# first\n[[items]]\nname = "b"\n\n'
-            '# second\n[[items]]\nname = "c"\n'
-        )
+        toml = toml_literal("""
+            # first
+            [[items]]
+            name = "b"
+
+            # second
+            [[items]]
+            name = "c"
+        """)
         doc = Document.parse(toml)
         doc["items"].insert(0, {"name": "a"})
         assert doc.as_toml() == toml_literal("""
@@ -310,10 +415,15 @@ class TestProxyListMethods:
         """)
 
     def test_insert_aot_middle_preserves_comments(self) -> None:
-        toml = (
-            '# first\n[[items]]\nname = "b"\n\n'
-            '# second\n[[items]]\nname = "c"\n'
-        )
+        toml = toml_literal("""
+            # first
+            [[items]]
+            name = "b"
+
+            # second
+            [[items]]
+            name = "c"
+        """)
         doc = Document.parse(toml)
         doc["items"].insert(1, {"name": "mid"})
         assert doc.as_toml() == toml_literal("""
@@ -331,7 +441,12 @@ class TestProxyListMethods:
 
     def test_append_aot_compact(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n'
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
         )
         doc["items"].append({"name": "c"})
         assert doc.as_toml() == toml_literal("""
@@ -344,7 +459,12 @@ class TestProxyListMethods:
         """)
 
     def test_append_aot_after_clear(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         doc["items"].clear()
         doc["items"].append({"name": "b"})
         assert len(doc["items"]) == 1
@@ -371,7 +491,14 @@ class TestProxyListMethods:
         assert doc["arr"][1] == "c"
 
     def test_clear_aot(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
         doc["items"].clear()
         assert len(doc["items"]) == 0
 
@@ -419,7 +546,12 @@ class TestIadd:
             doc["x"] += [1]
 
     def test_iadd_aot(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         doc["items"] += [{"name": "b"}, {"name": "c"}]
         assert len(doc["items"]) == 3
         assert doc["items"][1] == {"name": "b"}
@@ -465,13 +597,25 @@ class TestCount:
 
     def test_count_aot(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "a"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "a"
+            """)
         )
         assert doc["items"].count({"name": "a"}) == 2
         assert doc["items"].count({"name": "c"}) == 0
 
     def test_count_aot_non_dict_returns_zero(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         assert doc["items"].count("not a dict") == 0
 
 
@@ -526,14 +670,26 @@ class TestIndex:
 
     def test_index_aot(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "a"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "a"
+            """)
         )
         assert doc["items"].index({"name": "b"}) == 1
         assert doc["items"].index({"name": "a"}) == 0
         assert doc["items"].index({"name": "a"}, 1) == 2
 
     def test_index_aot_non_dict_raises(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         with pytest.raises(ValueError, match="not in array"):
             doc["items"].index("not a dict")
 
@@ -655,7 +811,12 @@ class TestIntKeyOnTable:
     """Integer keys on tables should raise TypeError (TOML keys are strings)."""
 
     def test_getitem_int_on_table(self) -> None:
-        doc = Document.parse("[t]\na = 1")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         with pytest.raises(TypeError, match="TOML table keys must be strings"):
             doc["t"][0]
 
@@ -679,7 +840,12 @@ class TestStrKeyOnArray:
             doc["a"]["x"]
 
     def test_getitem_str_on_aot(self) -> None:
-        doc = Document.parse("[[items]]\nname = 'a'\n")
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = 'a'
+        """)
+        )
         with pytest.raises(TypeError, match="TOML array indices must be integers"):
             doc["items"]["name"]
 
@@ -831,7 +997,12 @@ class TestSliceIndexing:
     # ---- errors ----
 
     def test_slice_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            x = 1
+        """)
+        )
         with pytest.raises(TypeError, match="does not support slicing"):
             doc["t"][1:3]
 
@@ -887,18 +1058,35 @@ class TestSliceIndexing:
         assert doc["arr"] == [1, 2, 10, 20, 30]
 
     def test_slice_assignment_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            x = 1
+        """)
+        )
         with pytest.raises(TypeError, match="does not support slic"):
             doc["t"][0:1] = [1]
 
     def test_slice_delete_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\nx = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            x = 1
+        """)
+        )
         with pytest.raises(TypeError, match="does not support slic"):
             del doc["t"][0:1]
 
     def test_aot_slice_read(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         first_two = doc["items"][:2]
         assert len(first_two) == 2
@@ -907,7 +1095,14 @@ class TestSliceIndexing:
 
     def test_aot_del_slice(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         del doc["items"][0:2]
         assert len(doc["items"]) == 1
@@ -915,7 +1110,14 @@ class TestSliceIndexing:
 
     def test_aot_set_slice_contiguous(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         doc["items"][0:2] = [{"name": "x"}]
         assert len(doc["items"]) == 2
@@ -924,7 +1126,14 @@ class TestSliceIndexing:
 
     def test_aot_set_slice_extended(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         doc["items"][0:3:2] = [{"name": "x"}, {"name": "z"}]
         assert len(doc["items"]) == 3
@@ -934,14 +1143,28 @@ class TestSliceIndexing:
 
     def test_aot_set_slice_extended_size_mismatch_raises(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         with pytest.raises(ValueError, match="attempt to assign sequence of size"):
             doc["items"][0:3:2] = [{"name": "x"}]
 
     def test_aot_del_slice_negative_step(self) -> None:
         doc = Document.parse(
-            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+            toml_literal("""
+                [[items]]
+                name = "a"
+                [[items]]
+                name = "b"
+                [[items]]
+                name = "c"
+            """)
         )
         del doc["items"][2::-1]
         assert len(doc["items"]) == 0
@@ -1138,18 +1361,33 @@ class TestSetMultiline:
             doc["x"].set_multiline()
 
     def test_on_table_raises(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
         with pytest.raises(AttributeError):
             doc["t"].set_multiline()
 
     def test_on_aot_is_noop(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
         before = doc.as_toml()
         doc["items"].set_multiline()
         assert doc.as_toml() == before
 
     def test_nested_array(self) -> None:
-        doc = Document.parse("[pkg]\ndeps = [1, 2]\n")
+        doc = Document.parse(
+            toml_literal("""
+            [pkg]
+            deps = [1, 2]
+        """)
+        )
         doc["pkg"]["deps"].set_multiline()
         assert doc.as_toml() == toml_literal("""
             [pkg]

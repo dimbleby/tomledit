@@ -6,6 +6,7 @@ from datetime import date, time
 
 import pytest
 
+from tests.conftest import toml_literal
 from tomledit import Document
 
 SAMPLE = """\
@@ -141,7 +142,12 @@ class TestDictListNotAffected:
     """DictItem and ListItem should not gain forwarding."""
 
     def test_dict_no_forwarding(self) -> None:
-        doc = Document.parse("[server]\nhost = 'x'\n")
+        doc = Document.parse(
+            toml_literal("""
+            [server]
+            host = 'x'
+        """)
+        )
         with pytest.raises(AttributeError):
             doc["server"].upper()
 
@@ -318,7 +324,12 @@ class TestComparison:
 
     def test_cross_scalar_comparison(self) -> None:
         """Comparing two ScalarItems."""
-        doc = Document.parse("a = 1\nb = 2\n")
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+        """)
+        )
         assert doc["a"] < doc["b"]
         assert doc["b"] > doc["a"]
 

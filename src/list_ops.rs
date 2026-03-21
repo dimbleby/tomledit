@@ -7,7 +7,65 @@ use toml_edit::Value as ValueRs;
 use crate::comments;
 use crate::equality;
 use crate::item::Item;
-use crate::item_ops::{into_value, unsupported_op};
+use crate::item_ops::into_value;
+
+// ---------------------------------------------------------------------------
+// Array-like enum — constrains list operations to valid item types
+// ---------------------------------------------------------------------------
+
+/// Mutable reference to an array-like TOML item (array or array-of-tables).
+pub(crate) enum ArrayLikeMut<'a> {
+    Array(&'a mut toml_edit::Array),
+    Aot(&'a mut toml_edit::ArrayOfTables),
+}
+
+impl ArrayLikeMut<'_> {
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Self::Array(arr) => arr.len(),
+            Self::Aot(aot) => aot.len(),
+        }
+    }
+}
+
+/// Shared reference to an array-like TOML item.
+pub(crate) enum ArrayLikeRef<'a> {
+    Array(&'a toml_edit::Array),
+    Aot(&'a toml_edit::ArrayOfTables),
+}
+
+impl ArrayLikeRef<'_> {
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Self::Array(arr) => arr.len(),
+            Self::Aot(aot) => aot.len(),
+        }
+    }
+}
+
+/// Extract a mutable array-like reference, or return a `TypeError`.
+pub(crate) fn as_array_like_mut<'a>(item: &'a mut ItemRs, op: &str) -> PyResult<ArrayLikeMut<'a>> {
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => Ok(ArrayLikeMut::Array(arr)),
+        ItemRs::ArrayOfTables(aot) => Ok(ArrayLikeMut::Aot(aot)),
+        _ => Err(PyTypeError::new_err(format!(
+            "'{}' does not support {op}",
+            item.type_name()
+        ))),
+    }
+}
+
+/// Extract a shared array-like reference, or return a `TypeError`.
+pub(crate) fn as_array_like<'a>(item: &'a ItemRs, op: &str) -> PyResult<ArrayLikeRef<'a>> {
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => Ok(ArrayLikeRef::Array(arr)),
+        ItemRs::ArrayOfTables(aot) => Ok(ArrayLikeRef::Aot(aot)),
+        _ => Err(PyTypeError::new_err(format!(
+            "'{}' does not support {op}",
+            item.type_name()
+        ))),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -84,15 +142,6 @@ pub(crate) fn require_array_index(item: &ItemRs, index: i64) -> PyResult<usize> 
     }
 }
 
-/// Get the length of an array-like item, or error for non-sliceable types.
-pub(crate) fn require_array_like_len(item: &ItemRs) -> PyResult<usize> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => Ok(arr.len()),
-        ItemRs::ArrayOfTables(aot) => Ok(aot.len()),
-        _ => Err(unsupported_op(item, "slicing")),
-    }
-}
-
 /// Collect concrete indices from resolved slice parameters.
 pub(crate) fn collect_slice_indices(start: isize, stop: isize, step: isize) -> Vec<usize> {
     let mut indices = Vec::new();
@@ -112,14 +161,14 @@ pub(crate) fn collect_slice_indices(start: isize, stop: isize, step: isize) -> V
 }
 
 /// Delete elements at the given indices (sorted in reverse internally).
-pub(crate) fn item_delitem_slice(item: &mut ItemRs, indices: &[usize]) -> PyResult<()> {
+pub(crate) fn item_delitem_slice(target: ArrayLikeMut<'_>, indices: &[usize]) -> PyResult<()> {
     let mut sorted = indices.to_vec();
     sorted.sort_unstable();
     sorted.dedup();
     sorted.reverse();
 
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
+    match target {
+        ArrayLikeMut::Array(arr) => {
             let mut ic = comments::save_inline_comments(arr);
             let removing_first = sorted.last() == Some(&0);
             let removing_last = sorted.first() == Some(&(arr.len() - 1));
@@ -132,31 +181,36 @@ pub(crate) fn item_delitem_slice(item: &mut ItemRs, indices: &[usize]) -> PyResu
             apply_removal_decor(arr, &decor);
             Ok(())
         }
-        ItemRs::ArrayOfTables(aot) => {
+        ArrayLikeMut::Aot(aot) => {
             for idx in sorted {
                 aot.remove(idx);
             }
             Ok(())
         }
-        _ => Err(unsupported_op(item, "slice deletion")),
     }
 }
 
-/// Assign to a slice of an array.
+/// Assign to a slice of an array-like item.
 pub(crate) fn item_setitem_slice(
-    item: &mut ItemRs,
+    target: ArrayLikeMut<'_>,
     start: isize,
     stop: isize,
     step: isize,
     values: Vec<Item>,
 ) -> PyResult<()> {
-    let Some(arr) = item.as_array_mut() else {
-        return Err(PyTypeError::new_err(format!(
-            "'{}' does not support slice assignment",
-            item.type_name()
-        )));
-    };
+    match target {
+        ArrayLikeMut::Array(arr) => array_setitem_slice(arr, start, stop, step, values),
+        ArrayLikeMut::Aot(aot) => aot_setitem_slice(aot, start, stop, step, values),
+    }
+}
 
+fn array_setitem_slice(
+    arr: &mut toml_edit::Array,
+    start: isize,
+    stop: isize,
+    step: isize,
+    values: Vec<Item>,
+) -> PyResult<()> {
     if step == 1 {
         // Contiguous slice: replacement can be a different length.
         let start_idx = start as usize;
@@ -208,6 +262,58 @@ pub(crate) fn item_setitem_slice(
             arr.replace(idx, v);
             if !inline.is_empty() {
                 comments::set_array_item_comment(arr, idx, &inline);
+            }
+        }
+        Ok(())
+    }
+}
+
+fn aot_setitem_slice(
+    aot: &mut toml_edit::ArrayOfTables,
+    start: isize,
+    stop: isize,
+    step: isize,
+    values: Vec<Item>,
+) -> PyResult<()> {
+    if step == 1 {
+        let start_idx = start as usize;
+        let stop_idx = stop as usize;
+        for i in (start_idx..stop_idx).rev() {
+            aot.remove(i);
+        }
+        // AoT has no insert API; collect the tail, push new tables, then restore.
+        let mut tail: Vec<toml_edit::Table> = (start_idx..aot.len())
+            .rev()
+            .map(|i| aot.remove(i))
+            .collect();
+        tail.reverse();
+        for value in values {
+            aot.push(require_table(value)?);
+        }
+        for t in tail {
+            aot.push(t);
+        }
+        Ok(())
+    } else {
+        let indices = collect_slice_indices(start, stop, step);
+        if indices.len() != values.len() {
+            return Err(PyValueError::new_err(format!(
+                "attempt to assign sequence of size {} to extended slice of size {}",
+                values.len(),
+                indices.len()
+            )));
+        }
+        // Replace in-place by removing and re-inserting at each position.
+        for (idx, value) in indices.into_iter().zip(values) {
+            let table = require_table(value)?;
+            aot.remove(idx);
+            // Re-insert: pull tail, push new, push tail back.
+            let mut tail: Vec<toml_edit::Table> =
+                (idx..aot.len()).rev().map(|i| aot.remove(i)).collect();
+            tail.reverse();
+            aot.push(table);
+            for t in tail {
+                aot.push(t);
             }
         }
         Ok(())
@@ -300,124 +406,122 @@ pub(crate) fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDec
 // List-like operations
 // ---------------------------------------------------------------------------
 
-pub(crate) fn item_append(item: &mut ItemRs, value: Item) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        let mut ic = comments::save_inline_comments(arr);
-        let mut v = into_value(value)?;
-        let inline = comments::take_inline_comment(&mut v);
-        apply_multiline_decor(arr, &mut v);
-        arr.push(v);
-        ic.push(inline);
-        comments::restore_inline_comments(arr, &ic);
-        Ok(())
-    } else if let ItemRs::ArrayOfTables(aot) = item {
-        let table = require_table(value)?;
-        aot.push(table);
-        Ok(())
-    } else {
-        Err(unsupported_op(item, "append()"))
-    }
-}
-
-pub(crate) fn item_insert(item: &mut ItemRs, index: i64, value: Item) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        let resolved = clamp_index(index, arr.len());
-        let mut ic = comments::save_inline_comments(arr);
-        let mut v = into_value(value)?;
-        let inline = comments::take_inline_comment(&mut v);
-        apply_multiline_decor(arr, &mut v);
-        arr.insert(resolved, v);
-        ic.insert(resolved, inline);
-        comments::restore_inline_comments(arr, &ic);
-        Ok(())
-    } else if let ItemRs::ArrayOfTables(aot) = item {
-        let table = require_table(value)?;
-        let resolved = clamp_index(index, aot.len());
-        // AoT has no insert API; rebuild by removing the tail, pushing, and restoring.
-        let mut tail: Vec<toml_edit::Table> =
-            (resolved..aot.len()).rev().map(|i| aot.remove(i)).collect();
-        tail.reverse();
-        aot.push(table);
-        for t in tail {
-            aot.push(t);
-        }
-        Ok(())
-    } else {
-        Err(unsupported_op(item, "insert()"))
-    }
-}
-
-pub(crate) fn item_remove(item: &mut ItemRs, value: &Bound<'_, PyAny>) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        let mut ic = comments::save_inline_comments(arr);
-        // We don't know which element will match, so snapshot both boundaries.
-        let mut decor = save_removal_decor(arr, true, true);
-        for i in 0..arr.len() {
-            if let Some(v) = arr.get(i)
-                && equality::value_eq(v, value)?
-            {
-                let last = arr.len() - 1;
-                if i != 0 {
-                    decor.first_prefix = None;
-                }
-                if i != last {
-                    decor.last_suffix = None;
-                }
-                arr.remove(i);
-                ic.remove(i);
-                comments::restore_inline_comments(arr, &ic);
-                apply_removal_decor(arr, &decor);
-                return Ok(());
-            }
-        }
-        Err(pyo3::exceptions::PyValueError::new_err(
-            "value not in array",
-        ))
-    } else if let ItemRs::ArrayOfTables(aot) = item {
-        if let Ok(other_dict) = value.cast::<PyDict>() {
-            for i in 0..aot.len() {
-                if let Some(table) = aot.get(i)
-                    && equality::table_entries_eq(table.iter(), table.len(), other_dict)?
-                {
-                    aot.remove(i);
-                    return Ok(());
-                }
-            }
-        }
-        Err(pyo3::exceptions::PyValueError::new_err(
-            "value not in array",
-        ))
-    } else {
-        Err(unsupported_op(item, "remove()"))
-    }
-}
-
-pub(crate) fn item_extend(item: &mut ItemRs, items: Vec<Item>) -> PyResult<()> {
-    if let Some(arr) = item.as_array_mut() {
-        let mut ic = comments::save_inline_comments(arr);
-        for new_item in items {
-            let mut v = into_value(new_item)?;
+pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()> {
+    match target {
+        ArrayLikeMut::Array(arr) => {
+            let mut ic = comments::save_inline_comments(arr);
+            let mut v = into_value(value)?;
             let inline = comments::take_inline_comment(&mut v);
             apply_multiline_decor(arr, &mut v);
             arr.push(v);
             ic.push(inline);
+            comments::restore_inline_comments(arr, &ic);
+            Ok(())
         }
-        comments::restore_inline_comments(arr, &ic);
-        Ok(())
-    } else if let ItemRs::ArrayOfTables(aot) = item {
-        for new_item in items {
-            let table = require_table(new_item)?;
+        ArrayLikeMut::Aot(aot) => {
+            let table = require_table(value)?;
             aot.push(table);
+            Ok(())
         }
-        Ok(())
-    } else {
-        Err(unsupported_op(item, "extend()"))
     }
 }
 
-pub(crate) fn item_count(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<usize> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
+pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> PyResult<()> {
+    match target {
+        ArrayLikeMut::Array(arr) => {
+            let resolved = clamp_index(index, arr.len());
+            let mut ic = comments::save_inline_comments(arr);
+            let mut v = into_value(value)?;
+            let inline = comments::take_inline_comment(&mut v);
+            apply_multiline_decor(arr, &mut v);
+            arr.insert(resolved, v);
+            ic.insert(resolved, inline);
+            comments::restore_inline_comments(arr, &ic);
+            Ok(())
+        }
+        ArrayLikeMut::Aot(aot) => {
+            let table = require_table(value)?;
+            let resolved = clamp_index(index, aot.len());
+            let mut tail: Vec<toml_edit::Table> =
+                (resolved..aot.len()).rev().map(|i| aot.remove(i)).collect();
+            tail.reverse();
+            aot.push(table);
+            for t in tail {
+                aot.push(t);
+            }
+            Ok(())
+        }
+    }
+}
+
+pub(crate) fn item_remove(target: ArrayLikeMut<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
+    match target {
+        ArrayLikeMut::Array(arr) => {
+            let mut ic = comments::save_inline_comments(arr);
+            let mut decor = save_removal_decor(arr, true, true);
+            for i in 0..arr.len() {
+                if let Some(v) = arr.get(i)
+                    && equality::value_eq(v, value)?
+                {
+                    let last = arr.len() - 1;
+                    if i != 0 {
+                        decor.first_prefix = None;
+                    }
+                    if i != last {
+                        decor.last_suffix = None;
+                    }
+                    arr.remove(i);
+                    ic.remove(i);
+                    comments::restore_inline_comments(arr, &ic);
+                    apply_removal_decor(arr, &decor);
+                    return Ok(());
+                }
+            }
+            Err(PyValueError::new_err("value not in array"))
+        }
+        ArrayLikeMut::Aot(aot) => {
+            if let Ok(other_dict) = value.cast::<PyDict>() {
+                for i in 0..aot.len() {
+                    if let Some(table) = aot.get(i)
+                        && equality::table_entries_eq(table.iter(), table.len(), other_dict)?
+                    {
+                        aot.remove(i);
+                        return Ok(());
+                    }
+                }
+            }
+            Err(PyValueError::new_err("value not in array"))
+        }
+    }
+}
+
+pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResult<()> {
+    match target {
+        ArrayLikeMut::Array(arr) => {
+            let mut ic = comments::save_inline_comments(arr);
+            for new_item in items {
+                let mut v = into_value(new_item)?;
+                let inline = comments::take_inline_comment(&mut v);
+                apply_multiline_decor(arr, &mut v);
+                arr.push(v);
+                ic.push(inline);
+            }
+            comments::restore_inline_comments(arr, &ic);
+            Ok(())
+        }
+        ArrayLikeMut::Aot(aot) => {
+            for new_item in items {
+                let table = require_table(new_item)?;
+                aot.push(table);
+            }
+            Ok(())
+        }
+    }
+}
+
+pub(crate) fn item_count(target: ArrayLikeRef<'_>, value: &Bound<'_, PyAny>) -> PyResult<usize> {
+    match target {
+        ArrayLikeRef::Array(arr) => {
             let mut count = 0;
             for v in arr.iter() {
                 if equality::value_eq(v, value)? {
@@ -426,7 +530,7 @@ pub(crate) fn item_count(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<us
             }
             Ok(count)
         }
-        ItemRs::ArrayOfTables(aot) => {
+        ArrayLikeRef::Aot(aot) => {
             if let Ok(other_dict) = value.cast::<PyDict>() {
                 let mut count = 0;
                 for table in aot.iter() {
@@ -439,18 +543,17 @@ pub(crate) fn item_count(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<us
                 Ok(0)
             }
         }
-        _ => Err(unsupported_op(item, "count()")),
     }
 }
 
 pub(crate) fn item_index(
-    item: &ItemRs,
+    target: ArrayLikeRef<'_>,
     value: &Bound<'_, PyAny>,
     start: Option<i64>,
     stop: Option<i64>,
 ) -> PyResult<usize> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
+    match target {
+        ArrayLikeRef::Array(arr) => {
             let len = arr.len();
             let start = clamp_index(start.unwrap_or(0), len);
             let stop = clamp_index(stop.unwrap_or(len as i64), len);
@@ -461,11 +564,9 @@ pub(crate) fn item_index(
                     return Ok(i);
                 }
             }
-            Err(pyo3::exceptions::PyValueError::new_err(
-                "value not in array",
-            ))
+            Err(PyValueError::new_err("value not in array"))
         }
-        ItemRs::ArrayOfTables(aot) => {
+        ArrayLikeRef::Aot(aot) => {
             let len = aot.len();
             let start = clamp_index(start.unwrap_or(0), len);
             let stop = clamp_index(stop.unwrap_or(len as i64), len);
@@ -478,19 +579,16 @@ pub(crate) fn item_index(
                     }
                 }
             }
-            Err(pyo3::exceptions::PyValueError::new_err(
-                "value not in array",
-            ))
+            Err(PyValueError::new_err("value not in array"))
         }
-        _ => Err(unsupported_op(item, "index()")),
     }
 }
 
 /// Format an array as multiline, with each element on its own line.
 /// No-op on empty arrays.
-pub(crate) fn item_set_multiline(item: &mut ItemRs, indent: usize) -> PyResult<()> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
+pub(crate) fn item_set_multiline(target: ArrayLikeMut<'_>, indent: usize) -> PyResult<()> {
+    match target {
+        ArrayLikeMut::Array(arr) => {
             if !arr.is_empty() {
                 let prefix = format!("\n{}", " ".repeat(indent));
                 for val in arr.iter_mut() {
@@ -503,6 +601,6 @@ pub(crate) fn item_set_multiline(item: &mut ItemRs, indent: usize) -> PyResult<(
             }
             Ok(())
         }
-        _ => Err(unsupported_op(item, "set_multiline()")),
+        ArrayLikeMut::Aot(_) => Ok(()),
     }
 }

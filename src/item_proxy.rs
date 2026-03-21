@@ -232,8 +232,8 @@ impl ItemProxy {
             let doc = self.document.bind(py).borrow();
             self.check_fresh(&doc)?;
             let item = self.navigate(&doc.inner)?;
-            let len = list_ops::require_array_like_len(item)?;
-            let si = slice.indices(len as isize)?;
+            let target = list_ops::as_array_like(item, "slicing")?;
+            let si = slice.indices(target.len() as isize)?;
             let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
             let proxies: PyResult<Vec<Py<PyAny>>> = indices
                 .into_iter()
@@ -268,9 +268,9 @@ impl ItemProxy {
             let mut doc = self.document.bind(py).borrow_mut();
             self.check_fresh(&doc)?;
             let item = self.navigate_mut(&mut doc.inner)?;
-            let len = list_ops::require_array_like_len(item)?;
-            let si = slice.indices(len as isize)?;
-            list_ops::item_setitem_slice(item, si.start, si.stop, si.step, values)?;
+            let target = list_ops::as_array_like_mut(item, "slice assignment")?;
+            let si = slice.indices(target.len() as isize)?;
+            list_ops::item_setitem_slice(target, si.start, si.stop, si.step, values)?;
             self.bump_self(&mut doc);
             return Ok(());
         }
@@ -292,10 +292,10 @@ impl ItemProxy {
             let mut doc = self.document.bind(py).borrow_mut();
             self.check_fresh(&doc)?;
             let item = self.navigate_mut(&mut doc.inner)?;
-            let len = list_ops::require_array_like_len(item)?;
-            let si = slice.indices(len as isize)?;
+            let target = list_ops::as_array_like_mut(item, "slice deletion")?;
+            let si = slice.indices(target.len() as isize)?;
             let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
-            list_ops::item_delitem_slice(item, &indices)?;
+            list_ops::item_delitem_slice(target, &indices)?;
             self.bump_self(&mut doc);
             return Ok(());
         }

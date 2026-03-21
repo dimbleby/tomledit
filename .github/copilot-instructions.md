@@ -91,31 +91,23 @@ node has `revised_at > proxy.revision`, the proxy is **stale** and raises
 `RuntimeError`.  Mutations to unrelated subtrees do **not** invalidate a
 proxy (path-precise invalidation).
 
-### Rust modules
+### Rust module layout
 
-- `document.rs` — `Document` PyO3 class.
-- `item_proxy.rs` — `ItemProxy`, `DictProxy`, `ListProxy`, `ScalarProxy`
-  PyO3 classes. Scalar forwarding (arithmetic, comparisons, `__format__`
-  etc.) lives here.
-- `item_ops.rs` — shared Rust helpers for navigating, reading, and mutating
-  `toml_edit` items. Path navigation (`navigate_path` / `navigate_path_mut`),
-  slice operations, `pop`, `update`, `append`/`insert`/`extend`, inline-table
-  comment-preserving removal, and decor-preservation on `__setitem__`.
-- `views.rs` — `KeysView`, `ValuesView`, `ItemsView` (live dictionary views).
+Each Python-visible proxy class has its own `*_proxy.rs` file
+(`item_proxy.rs` for the base `Item`, plus `dict_proxy.rs`, `list_proxy.rs`,
+`scalar_proxy.rs` for the subclasses).  Shared mutation/navigation helpers
+live in `item_ops.rs`.  `lib.rs` lists all modules and registers PyO3
+classes — read it first to orient.
+
+Non-obvious modules worth knowing about:
+
+- `comments.rs` — comment get/set logic.  Inline comments live in decor
+  suffix; block comments in decor prefix.  Array element comments are stored
+  in the _next_ element's prefix (or array trailing for the last).
 - `trie.rs` — `MutationTrie` for path-precise proxy invalidation.
-  Has its own `#[cfg(test)]` Rust unit tests.
-- `comments.rs` — comment get/set logic.
-  Inline comments live in decor suffix; block comments in decor prefix.
-  Array element comments are stored in the _next_ element's prefix (or array
-  trailing for the last).
-- `equality.rs` — structural equality between `toml_edit` items and Python
-  objects.
-- `value.rs` — Python → `toml_edit` type conversion (dicts, lists, datetimes,
-  scalars).
-- `item.rs` — thin `Item(toml_edit::Item)` newtype that implements PyO3's
-  `FromPyObject` trait.  This is the Rust-side type used in function
-  signatures to accept Python values (not the Python-visible `Item` class,
-  which is `ItemProxy`).
+- `item.rs` — thin `Item(toml_edit::Item)` newtype implementing
+  `FromPyObject`.  This is the Rust-side type in function signatures, not the
+  Python-visible `Item` class (which is `ItemProxy`).
 
 ## Key Conventions
 

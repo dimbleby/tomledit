@@ -4,6 +4,7 @@ use pyo3::types::{PyDict, PyIterator, PyTuple};
 
 use toml_edit::DocumentMut as DocumentRs;
 
+use crate::dict_ops;
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{self, Key, table_to_pydict};
@@ -141,7 +142,7 @@ impl Document {
     pub fn __setitem__(slf: &Bound<'_, Self>, key: &str, value: Item) {
         let mut doc = slf.borrow_mut();
         let replaced = doc.inner.contains_key(key);
-        item_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, value);
+        dict_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, value);
         if replaced {
             doc.bump_at(&[Key::Str(key.to_owned())]);
         }
@@ -194,7 +195,7 @@ impl Document {
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let mut pairs = match other {
-            Some(obj) => item_ops::extract_update_pairs(obj)?,
+            Some(obj) => dict_ops::extract_update_pairs(obj)?,
             None => Vec::new(),
         };
         if let Some(kw) = kwargs {
@@ -205,7 +206,7 @@ impl Document {
             }
         }
         let mut doc = slf.borrow_mut();
-        let replaced_keys = item_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
+        let replaced_keys = dict_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
         for key in replaced_keys {
             doc.bump_at(&[Key::Str(key)]);
         }
@@ -233,7 +234,7 @@ impl Document {
         })?;
         {
             let mut doc = slf.borrow_mut();
-            item_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, default);
+            dict_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, default);
         }
         let proxy = Self::make_proxy(slf, key);
         ItemProxy::into_typed(py, proxy)

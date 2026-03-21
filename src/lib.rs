@@ -1,10 +1,12 @@
 mod comments;
+mod dict_ops;
 mod dict_proxy;
 mod document;
 mod equality;
 mod item;
 mod item_ops;
 mod item_proxy;
+mod list_ops;
 mod list_proxy;
 mod scalar_proxy;
 mod trie;

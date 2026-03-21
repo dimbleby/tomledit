@@ -9,6 +9,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyIterator, PySet, PyTuple};
 
+use crate::dict_ops;
 use crate::document::Document;
 use crate::item_ops::{self, Key};
 use crate::item_proxy::ItemProxy;
@@ -50,7 +51,7 @@ fn get_keys(doc: &DocumentRs, path: &[Key]) -> PyResult<Vec<String>> {
         Ok(doc.iter().map(|(k, _)| k.to_owned()).collect())
     } else {
         let item = item_ops::navigate_path(doc, path)?;
-        item_ops::item_keys(item)
+        dict_ops::item_keys(item)
     }
 }
 
@@ -68,7 +69,7 @@ fn contains_key(doc: &DocumentRs, path: &[Key], key: &str) -> PyResult<bool> {
         Ok(doc.contains_key(key))
     } else {
         let item = item_ops::navigate_path(doc, path)?;
-        item_ops::item_has_key(item, key)
+        dict_ops::item_has_key(item, key)
     }
 }
 

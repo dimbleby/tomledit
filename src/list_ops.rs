@@ -92,6 +92,72 @@ fn apply_multiline_decor(arr: &toml_edit::Array, v: &mut ValueRs) {
     }
 }
 
+/// After inserting a new table at position `pos`, ensure the affected element
+/// has the correct blank-line spacing to match its neighbours.
+///
+/// We only *detect* whether the nearest non-first neighbour uses a leading
+/// `\n` (blank-line separator) and then add or strip a leading `\n` on the
+/// target.  The rest of the prefix (block comments, etc.) is never touched.
+///
+/// When inserting at position 0 the new element needs no prefix (it is now
+/// first), but the *old* first element — now at position 1 — was re-pushed
+/// with its original prefix and must be fixed instead.
+fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
+    // Inserting at the front: the element that needs fixing is the old first
+    // element, now sitting at position 1.
+    let target = if pos == 0 { 1 } else { pos };
+    if target >= aot.len() {
+        return;
+    }
+    // Detect whether the nearest non-first neighbour uses blank-line spacing.
+    // Prefer the element *before* — elements after may also be newly pushed
+    // and not yet corrected.
+    //
+    // A `None` prefix means "unset" — toml_edit will insert a default blank
+    // line for non-first AoT entries, so we treat it as spaced.  Only an
+    // explicitly set prefix that does NOT start with '\n' counts as compact.
+    let spaced = [target - 1, target + 1]
+        .into_iter()
+        .filter(|&i| i > 0 && i < aot.len())
+        .find_map(|i| {
+            aot.iter().nth(i).map(|t| {
+                let as_str = t.decor().prefix().and_then(|r| r.as_str());
+                // None → default blank line (spaced)
+                // Some(s) starting with '\n' → explicitly spaced
+                // Some(s) not starting with '\n' → compact
+                as_str.is_none() || as_str.is_some_and(|s| s.starts_with('\n'))
+            })
+        });
+    let Some(spaced) = spaced else { return };
+
+    // Read the target's current prefix.  Distinguish between `None` (unset —
+    // toml_edit will insert a default blank line) and `Some("")` (explicitly
+    // empty — no blank line).
+    let raw_prefix = aot
+        .iter()
+        .nth(target)
+        .and_then(|t| t.decor().prefix()?.as_str().map(str::to_owned));
+    let current = raw_prefix.as_deref().unwrap_or("");
+    let has_blank = current.starts_with('\n');
+
+    if spaced && !has_blank {
+        // Prepend a blank line, preserving any existing content (comments).
+        aot.iter_mut()
+            .nth(target)
+            .expect("target in bounds")
+            .decor_mut()
+            .set_prefix(format!("\n{current}"));
+    } else if !spaced && (raw_prefix.is_none() || current == "\n") {
+        // Prefix is either unset (toml_edit would insert a default blank
+        // line) or is a bare "\n".  Explicitly set to "" to suppress it.
+        aot.iter_mut()
+            .nth(target)
+            .expect("target in bounds")
+            .decor_mut()
+            .set_prefix("");
+    }
+}
+
 fn require_table(item: Item) -> PyResult<toml_edit::Table> {
     match item.0 {
         ItemRs::Table(t) => Ok(t),
@@ -278,6 +344,7 @@ fn aot_setitem_slice(
     if step == 1 {
         let start_idx = start as usize;
         let stop_idx = stop as usize;
+        let values_count = values.len();
         for i in (start_idx..stop_idx).rev() {
             aot.remove(i);
         }
@@ -293,7 +360,9 @@ fn aot_setitem_slice(
         for t in tail {
             aot.push(t);
         }
-        Ok(())
+        for i in start_idx..start_idx + values_count {
+            fix_inserted_aot_spacing(aot, i);
+        }
     } else {
         let indices = collect_slice_indices(start, stop, step);
         if indices.len() != values.len() {
@@ -315,9 +384,10 @@ fn aot_setitem_slice(
             for t in tail {
                 aot.push(t);
             }
+            fix_inserted_aot_spacing(aot, idx);
         }
-        Ok(())
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +491,7 @@ pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()>
         ArrayLikeMut::Aot(aot) => {
             let table = require_table(value)?;
             aot.push(table);
+            fix_inserted_aot_spacing(aot, aot.len() - 1);
             Ok(())
         }
     }
@@ -449,6 +520,7 @@ pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> 
             for t in tail {
                 aot.push(t);
             }
+            fix_inserted_aot_spacing(aot, resolved);
             Ok(())
         }
     }
@@ -513,6 +585,7 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
             for new_item in items {
                 let table = require_table(new_item)?;
                 aot.push(table);
+                fix_inserted_aot_spacing(aot, aot.len() - 1);
             }
             Ok(())
         }

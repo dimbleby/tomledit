@@ -181,6 +181,30 @@ class TestProxyListMethods:
         assert doc["items"][0] == {"name": "a"}
         assert doc["items"][1] == {"name": "b"}
         assert doc["items"][2] == {"name": "c"}
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+            [[items]]
+            name = "c"
+        """)
+
+    def test_insert_aot_beginning_spaced(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "b"\n\n[[items]]\nname = "c"\n'
+        )
+        doc["items"].insert(0, {"name": "a"})
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+
+            [[items]]
+            name = "b"
+
+            [[items]]
+            name = "c"
+        """)
 
     def test_insert_aot_middle(self) -> None:
         doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "c"\n')
@@ -189,12 +213,64 @@ class TestProxyListMethods:
         assert doc["items"][0] == {"name": "a"}
         assert doc["items"][1] == {"name": "b"}
         assert doc["items"][2] == {"name": "c"}
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+            [[items]]
+            name = "c"
+        """)
+
+    def test_insert_aot_middle_spaced(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n\n[[items]]\nname = "c"\n'
+        )
+        doc["items"].insert(1, {"name": "b"})
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+
+            [[items]]
+            name = "b"
+
+            [[items]]
+            name = "c"
+        """)
 
     def test_insert_aot_end(self) -> None:
-        doc = Document.parse('[[items]]\nname = "a"\n')
-        doc["items"].insert(100, {"name": "b"})
-        assert len(doc["items"]) == 2
-        assert doc["items"][1] == {"name": "b"}
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n'
+        )
+        doc["items"].insert(100, {"name": "c"})
+        assert len(doc["items"]) == 3
+        assert doc["items"][2] == {"name": "c"}
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+            [[items]]
+            name = "c"
+        """)
+
+    def test_insert_aot_end_spaced(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n\n[[items]]\nname = "b"\n'
+        )
+        doc["items"].insert(100, {"name": "c"})
+        assert len(doc["items"]) == 3
+        assert doc["items"][2] == {"name": "c"}
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+
+            [[items]]
+            name = "b"
+
+            [[items]]
+            name = "c"
+        """)
 
     def test_extend_aot(self) -> None:
         doc = Document.parse('[[items]]\nname = "a"\n')
@@ -202,6 +278,81 @@ class TestProxyListMethods:
         assert len(doc["items"]) == 3
         assert doc["items"][1] == {"name": "b"}
         assert doc["items"][2] == {"name": "c"}
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+
+            [[items]]
+            name = "b"
+
+            [[items]]
+            name = "c"
+        """)
+
+    def test_insert_aot_preserves_comments(self) -> None:
+        toml = (
+            '# first\n[[items]]\nname = "b"\n\n'
+            '# second\n[[items]]\nname = "c"\n'
+        )
+        doc = Document.parse(toml)
+        doc["items"].insert(0, {"name": "a"})
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+
+            # first
+            [[items]]
+            name = "b"
+
+            # second
+            [[items]]
+            name = "c"
+        """)
+
+    def test_insert_aot_middle_preserves_comments(self) -> None:
+        toml = (
+            '# first\n[[items]]\nname = "b"\n\n'
+            '# second\n[[items]]\nname = "c"\n'
+        )
+        doc = Document.parse(toml)
+        doc["items"].insert(1, {"name": "mid"})
+        assert doc.as_toml() == toml_literal("""
+            # first
+            [[items]]
+            name = "b"
+
+            [[items]]
+            name = "mid"
+
+            # second
+            [[items]]
+            name = "c"
+        """)
+
+    def test_append_aot_compact(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n'
+        )
+        doc["items"].append({"name": "c"})
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+            [[items]]
+            name = "c"
+        """)
+
+    def test_append_aot_after_clear(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        doc["items"].clear()
+        doc["items"].append({"name": "b"})
+        assert len(doc["items"]) == 1
+        assert doc["items"][0] == {"name": "b"}
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "b"
+        """)
 
     def test_clear_array(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")

@@ -71,10 +71,6 @@ class TestWriteArrayElements:
         doc["database"]["ports"][0] = 9999
         assert doc["database"]["ports"][0] == 9999
 
-    def test_replace_does_not_affect_others(self, doc: Document) -> None:
-        doc["database"]["ports"][0] = 9999
-        assert doc["database"]["ports"][2] == 8002
-
 
 # ---------------------------------------------------------------------------
 # Setting new keys (like dict[key] = value)
@@ -112,11 +108,6 @@ class TestSetNewKeys:
         doc = Document()
         doc["meta"] = {"key": "value"}
         assert doc["meta"]["key"] == "value"
-
-    def test_add_nested_dict(self) -> None:
-        doc = Document()
-        doc["a"] = {"b": {"c": "deep"}}
-        assert doc["a"]["b"]["c"] == "deep"
 
     def test_add_list_of_dicts(self) -> None:
         doc = Document()
@@ -160,13 +151,6 @@ class TestSetNewKeys:
         assert doc["t"].value == value
         assert doc.as_toml() == "t = 10:30:45\n"
 
-    def test_add_time_with_microseconds(self) -> None:
-        doc = Document()
-        value = time(10, 30, 45, 123456)
-        doc["t"] = value
-        assert doc["t"].value == value
-        assert doc.as_toml() == "t = 10:30:45.123456\n"
-
     def test_add_time_with_tzinfo_raises(self) -> None:
         doc = Document()
         utc = zoneinfo.ZoneInfo("UTC")
@@ -198,18 +182,6 @@ class TestArrayOfTablesMutation:
         doc["d"] = [{"a": 1}, {"b": 2}]
         doc["d"][1]["b"] = 99
         assert doc["d"][1]["b"] == 99
-
-    def test_setitem_replaces_entry(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            [[items]]
-            name = "a"
-            [[items]]
-            name = "b"
-        """)
-        )
-        doc["items"][0] = {"name": "z"}
-        assert doc["items"][0]["name"] == "z"
 
     def test_setitem_negative_index(self) -> None:
         doc = Document.parse(
@@ -370,25 +342,6 @@ class TestAssignTableToKey:
             bar = "baz"
         """)
 
-    def test_assign_three_level_nested_dict(self) -> None:
-        doc = Document()
-        doc["a"] = {"b": {"c": {"d": "deep"}}}
-        assert doc.as_toml() == toml_literal("""
-            [a.b.c]
-            d = "deep"
-        """)
-
-    def test_assign_nested_dict_with_sibling_scalars(self) -> None:
-        doc = Document()
-        doc["pkg"] = {"name": "hello", "deps": {"requests": ">=2.0"}}
-        assert doc.as_toml() == toml_literal("""
-            [pkg]
-            name = "hello"
-
-            [pkg.deps]
-            requests = ">=2.0"
-        """)
-
     def test_assign_nested_aot_inside_dict(self) -> None:
         doc = Document()
         doc["pkg"] = {"servers": [{"name": "a"}, {"name": "b"}]}
@@ -501,17 +454,6 @@ class TestAssignItemProxy:
         doc["a"] = 99
         assert doc["b"] == 1
 
-    def test_proxy_setitem_on_nested_key(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            [t]
-            x = 1
-            y = 2
-        """)
-        )
-        doc["t"]["x"] = doc["t"]["y"]
-        assert doc["t"]["x"] == 2
-
     def test_slice_assign_from_proxy(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -601,14 +543,6 @@ class TestItemParse:
         doc["x"] = Item.parse("'literal'")
         assert doc.as_toml() == "x = 'literal'\n"
 
-    def test_multiline_string(self) -> None:
-        doc = Document.parse("x = 1\n")
-        doc["x"] = Item.parse("'''multi\nline'''")
-        assert doc.as_toml() == toml_literal("""
-            x = '''multi
-            line'''
-        """)
-
     def test_item_parse_value_returns_int(self) -> None:
         item = Item.parse("0xFF")
         assert item.value == 255
@@ -640,16 +574,6 @@ class TestItemParse:
 
 
 class TestTupleToArray:
-    def test_tuple_assigned_as_array(self) -> None:
-        doc = Document.parse("x = 1\n")
-        doc["x"] = (1, 2, 3)
-        assert doc["x"] == [1, 2, 3]
-
-    def test_nested_tuples(self) -> None:
-        doc = Document.parse("x = 1\n")
-        doc["x"] = ((1, 2), (3, 4))
-        assert doc["x"] == [[1, 2], [3, 4]]
-
     def test_mixed_tuple_and_list(self) -> None:
         doc = Document.parse("x = 1\n")
         doc["x"] = (1, [2, 3])

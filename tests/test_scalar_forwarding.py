@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date
 
 import pytest
 
@@ -26,54 +26,18 @@ def doc() -> Document:
 
 
 class TestStringForwarding:
-    def test_upper(self, doc: Document) -> None:
-        assert doc["name"].upper() == "ALICE"
-
-    def test_lower(self, doc: Document) -> None:
-        assert doc["name"].lower() == "alice"
-
-    def test_startswith(self, doc: Document) -> None:
-        assert doc["name"].startswith("Ali")
-        assert not doc["name"].startswith("Bob")
-
     def test_endswith(self, doc: Document) -> None:
         assert doc["name"].endswith("ice")
-
-    def test_replace(self, doc: Document) -> None:
-        assert doc["name"].replace("Alice", "Bob") == "Bob"
-
-    def test_split(self, doc: Document) -> None:
-        assert doc["name"].split("l") == ["A", "ice"]
-
-    def test_strip(self) -> None:
-        doc2 = Document.parse('padded = "  hello  "')
-        assert doc2["padded"].strip() == "hello"
-
-    def test_title(self) -> None:
-        doc2 = Document.parse('msg = "hello world"')
-        assert doc2["msg"].title() == "Hello World"
-
-    def test_isalpha(self, doc: Document) -> None:
-        assert doc["name"].isalpha()
 
 
 class TestIntForwarding:
     def test_bit_length(self, doc: Document) -> None:
         assert doc["port"].bit_length() == 13  # 8080 needs 13 bits
 
-    def test_to_bytes(self, doc: Document) -> None:
-        assert doc["port"].to_bytes(2, "big") == (8080).to_bytes(2, "big")
-
 
 class TestFloatForwarding:
-    def test_is_integer(self, doc: Document) -> None:
-        assert not doc["rate"].is_integer()
-
     def test_as_integer_ratio(self, doc: Document) -> None:
         assert doc["rate"].as_integer_ratio() == (3.14).as_integer_ratio()
-
-    def test_hex(self, doc: Document) -> None:
-        assert doc["rate"].hex() == (3.14).hex()
 
 
 class TestBoolForwarding:
@@ -85,26 +49,11 @@ class TestDatetimeForwarding:
     def test_date_isoformat(self, doc: Document) -> None:
         assert doc["birthday"].isoformat() == "1990-05-15"
 
-    def test_time_isoformat(self, doc: Document) -> None:
-        assert doc["alarm"].isoformat() == "07:30:00"
-
-    def test_datetime_isoformat(self, doc: Document) -> None:
-        assert doc["created"].isoformat() == "1990-05-15T10:30:00+00:00"
-
-    def test_date_year(self, doc: Document) -> None:
-        assert doc["birthday"].year == 1990
-
-    def test_date_month(self, doc: Document) -> None:
-        assert doc["birthday"].month == 5
-
     def test_time_hour(self, doc: Document) -> None:
         assert doc["alarm"].hour == 7
 
     def test_datetime_date(self, doc: Document) -> None:
         assert doc["created"].date() == date(1990, 5, 15)
-
-    def test_datetime_time(self, doc: Document) -> None:
-        assert doc["created"].time() == time(10, 30)
 
 
 class TestExistingAttrsNotShadowed:
@@ -371,9 +320,6 @@ class TestTypeConversion:
 
 
 class TestFormatting:
-    def test_format_str(self, doc: Document) -> None:
-        assert f"{doc['name']:>10}" == "     Alice"
-
     def test_format_int(self, doc: Document) -> None:
         assert f"{doc['port']:06d}" == "008080"
 

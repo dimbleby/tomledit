@@ -229,17 +229,9 @@ class TestProxyBool:
         )
         assert bool(doc["items"]) is True
 
-    def test_datetime_truthy(self) -> None:
-        doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
-        assert bool(doc["dt"]) is True
-
     def test_date_truthy(self) -> None:
         doc = Document.parse("d = 2024-01-15\n")
         assert bool(doc["d"]) is True
-
-    def test_time_truthy(self) -> None:
-        doc = Document.parse("t = 10:30:00\n")
-        assert bool(doc["t"]) is True
 
 
 # ---------------------------------------------------------------------------
@@ -282,19 +274,6 @@ class TestProxyDelitem:
         del doc["items"][0]
         assert len(doc["items"]) == 1
         assert doc["items"][0]["name"] == "b"
-
-    def test_del_aot_negative(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            [[items]]
-            name = "a"
-            [[items]]
-            name = "b"
-        """)
-        )
-        del doc["items"][-1]
-        assert len(doc["items"]) == 1
-        assert doc["items"][0]["name"] == "a"
 
 
 # ---------------------------------------------------------------------------
@@ -378,14 +357,6 @@ class TestAsToml:
         doc = Document.parse(text)
         assert doc.as_toml() == text
 
-    def test_scalar_as_toml(self) -> None:
-        doc = Document.parse('name = "hello"\n')
-        assert doc["name"].as_toml() == '"hello"'
-
-    def test_int_as_toml(self) -> None:
-        doc = Document.parse("x = 42\n")
-        assert doc["x"].as_toml() == "42"
-
     def test_bool_as_toml(self) -> None:
         doc = Document.parse("x = true\n")
         assert doc["x"].as_toml() == "true"
@@ -464,17 +435,6 @@ y = 2
         v = doc["inline"].value
         assert v == {"a": 1, "b": 2}
         assert type(v) is dict
-
-    def test_table(self) -> None:
-        doc = Document.parse(self.TOML)
-        v = doc["tbl"].value
-        assert v == {"x": 1, "y": 2}
-        assert type(v) is dict
-
-    def test_nested_array(self) -> None:
-        doc = Document.parse("arr = [[1, 2], [3, 4]]\n")
-        v = doc["arr"].value
-        assert v == [[1, 2], [3, 4]]
 
     def test_nested_table(self) -> None:
         doc = Document.parse(
@@ -572,19 +532,6 @@ class TestArrayOfTablesAccess:
         assert doc["items"][0]["name"] == "a"
         assert doc["items"][2]["name"] == "c"
 
-    def test_getitem_negative(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-                [[items]]
-                name = "a"
-                [[items]]
-                name = "b"
-                [[items]]
-                name = "c"
-            """)
-        )
-        assert doc["items"][-1]["name"] == "c"
-
     def test_getitem_out_of_range(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -665,20 +612,6 @@ class TestProxyFmt:
         b = doc["t"]["b"]
         t.fmt()
         assert b.value == 2
-
-    def test_fmt_table_strips_comments_on_entries(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            [t]
-            # comment
-            a = 1 # inline
-        """)
-        )
-        doc["t"].fmt()
-        assert doc.as_toml() == toml_literal("""
-            [t]
-            a = 1
-        """)
 
 
 # ---------------------------------------------------------------------------

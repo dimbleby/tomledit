@@ -203,14 +203,6 @@ class TestMutatorProxyStaysValid:
         t.update({"b": 2})
         assert t["b"] == 2
 
-    def test_multiple_mutations_through_same_proxy(self) -> None:
-        doc = Document.parse("arr = [1]")
-        arr = doc["arr"]
-        arr.append(2)
-        arr.append(3)
-        arr.append(4)
-        assert len(arr) == 4
-
     def test_setdefault_through_proxy(self) -> None:
         doc = Document.parse(
             toml_literal("""

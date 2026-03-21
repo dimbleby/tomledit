@@ -116,12 +116,12 @@ class TestWrongTypeErrors:
 
     def test_slice_del_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError, match="does not support slicing"):
+        with pytest.raises(TypeError, match="does not support slice deletion"):
             del doc["x"][0:1]
 
     def test_slice_assign_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError, match="does not support slicing"):
+        with pytest.raises(TypeError, match="does not support slice assignment"):
             doc["x"][0:1] = [1]
 
     # -- wrong key type --

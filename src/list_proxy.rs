@@ -59,7 +59,8 @@ impl ListProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        list_ops::item_append(item, value)?;
+        let target = list_ops::as_array_like_mut(item, "append()")?;
+        list_ops::item_append(target, value)?;
         Ok(())
     }
 
@@ -74,7 +75,8 @@ impl ListProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        list_ops::item_insert(item, index, value)?;
+        let target = list_ops::as_array_like_mut(item, "insert()")?;
+        list_ops::item_insert(target, index, value)?;
         base.bump_self(&mut doc);
         Ok(())
     }
@@ -85,16 +87,14 @@ impl ListProxy {
         py: Python<'_>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        // Resolve ItemProxy to its Python value before taking the mutable
-        // borrow — otherwise equality comparison triggers dunder methods on the
-        // proxy that try to re-borrow the same document and panic.
         let resolved = resolve_proxy(py, value)?;
         let value = resolved.as_ref().map_or(value, |v| v.bind(py));
         let mut base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        list_ops::item_remove(item, value)?;
+        let target = list_ops::as_array_like_mut(item, "remove()")?;
+        list_ops::item_remove(target, value)?;
         base.bump_self(&mut doc);
         Ok(())
     }
@@ -114,7 +114,8 @@ impl ListProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        list_ops::item_extend(item, items)?;
+        let target = list_ops::as_array_like_mut(item, "extend()")?;
+        list_ops::item_extend(target, items)?;
         Ok(())
     }
 
@@ -130,7 +131,8 @@ impl ListProxy {
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
         let item = base.navigate(&doc.inner)?;
-        list_ops::item_count(item, value)
+        let target = list_ops::as_array_like(item, "count()")?;
+        list_ops::item_count(target, value)
     }
 
     #[pyo3(signature = (value, start=None, stop=None, /))]
@@ -147,7 +149,8 @@ impl ListProxy {
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
         let item = base.navigate(&doc.inner)?;
-        list_ops::item_index(item, value, start, stop)
+        let target = list_ops::as_array_like(item, "index()")?;
+        list_ops::item_index(target, value, start, stop)
     }
 
     /// Format the array as multiline.
@@ -164,6 +167,7 @@ impl ListProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        list_ops::item_set_multiline(item, indent)
+        let target = list_ops::as_array_like_mut(item, "set_multiline()")?;
+        list_ops::item_set_multiline(target, indent)
     }
 }

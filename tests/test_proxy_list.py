@@ -762,6 +762,39 @@ class TestSliceIndexing:
         assert len(doc["items"]) == 1
         assert doc["items"][0]["name"] == "c"
 
+    def test_aot_set_slice_contiguous(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        doc["items"][0:2] = [{"name": "x"}]
+        assert len(doc["items"]) == 2
+        assert doc["items"][0]["name"] == "x"
+        assert doc["items"][1]["name"] == "c"
+
+    def test_aot_set_slice_extended(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        doc["items"][0:3:2] = [{"name": "x"}, {"name": "z"}]
+        assert len(doc["items"]) == 3
+        assert doc["items"][0]["name"] == "x"
+        assert doc["items"][1]["name"] == "b"
+        assert doc["items"][2]["name"] == "z"
+
+    def test_aot_set_slice_extended_size_mismatch_raises(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        with pytest.raises(ValueError, match="attempt to assign sequence of size"):
+            doc["items"][0:3:2] = [{"name": "x"}]
+
+    def test_aot_del_slice_negative_step(self) -> None:
+        doc = Document.parse(
+            '[[items]]\nname = "a"\n[[items]]\nname = "b"\n[[items]]\nname = "c"\n'
+        )
+        del doc["items"][2::-1]
+        assert len(doc["items"]) == 0
+
 
 # ---------------------------------------------------------------------------
 # Multiline array formatting preservation
@@ -957,6 +990,12 @@ class TestSetMultiline:
         doc = Document.parse("[t]\na = 1\n")
         with pytest.raises(AttributeError):
             doc["t"].set_multiline()
+
+    def test_on_aot_is_noop(self) -> None:
+        doc = Document.parse('[[items]]\nname = "a"\n')
+        before = doc.as_toml()
+        doc["items"].set_multiline()
+        assert doc.as_toml() == before
 
     def test_nested_array(self) -> None:
         doc = Document.parse("[pkg]\ndeps = [1, 2]\n")

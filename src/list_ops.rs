@@ -1,3 +1,4 @@
+use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use toml_edit::Item as ItemRs;
@@ -6,7 +7,7 @@ use toml_edit::Value as ValueRs;
 use crate::comments;
 use crate::equality;
 use crate::item::Item;
-use crate::item_ops::{apply_removal_decor, into_value, save_removal_decor, unsupported_op};
+use crate::item_ops::{into_value, unsupported_op};
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -52,6 +53,247 @@ fn clamp_index(index: i64, len: usize) -> usize {
         index.min(len as i64)
     };
     resolved as usize
+}
+
+// ---------------------------------------------------------------------------
+// Index / slice helpers
+// ---------------------------------------------------------------------------
+
+/// Resolve a Python index (possibly negative) against a known length.
+pub(crate) fn resolve_index(index: i64, len: usize) -> PyResult<usize> {
+    let resolved = if index < 0 { len as i64 + index } else { index };
+    if resolved < 0 || resolved as usize >= len {
+        Err(PyIndexError::new_err("index out of range"))
+    } else {
+        Ok(resolved as usize)
+    }
+}
+
+/// Resolve an integer index against an array-like item.
+pub(crate) fn require_array_index(item: &ItemRs, index: i64) -> PyResult<usize> {
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => resolve_index(index, arr.len()),
+        ItemRs::ArrayOfTables(aot) => resolve_index(index, aot.len()),
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => Err(PyTypeError::new_err(
+            "TOML table keys must be strings, not integers",
+        )),
+        _ => Err(PyTypeError::new_err(format!(
+            "TOML {} item is not subscriptable (use .value to get the Python object)",
+            item.type_name()
+        ))),
+    }
+}
+
+/// Get the length of an array-like item, or error for non-sliceable types.
+pub(crate) fn require_array_like_len(item: &ItemRs) -> PyResult<usize> {
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => Ok(arr.len()),
+        ItemRs::ArrayOfTables(aot) => Ok(aot.len()),
+        _ => Err(unsupported_op(item, "slicing")),
+    }
+}
+
+/// Collect concrete indices from resolved slice parameters.
+pub(crate) fn collect_slice_indices(start: isize, stop: isize, step: isize) -> Vec<usize> {
+    let mut indices = Vec::new();
+    let mut i = start;
+    if step > 0 {
+        while i < stop {
+            indices.push(i as usize);
+            i += step;
+        }
+    } else if step < 0 {
+        while i > stop {
+            indices.push(i as usize);
+            i += step;
+        }
+    }
+    indices
+}
+
+/// Delete elements at the given indices (sorted in reverse internally).
+pub(crate) fn item_delitem_slice(item: &mut ItemRs, indices: &[usize]) -> PyResult<()> {
+    let mut sorted = indices.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    sorted.reverse();
+
+    match item {
+        ItemRs::Value(ValueRs::Array(arr)) => {
+            let mut ic = comments::save_inline_comments(arr);
+            let removing_first = sorted.last() == Some(&0);
+            let removing_last = sorted.first() == Some(&(arr.len() - 1));
+            let decor = save_removal_decor(arr, removing_first, removing_last);
+            for idx in sorted {
+                arr.remove(idx);
+                ic.remove(idx);
+            }
+            comments::restore_inline_comments(arr, &ic);
+            apply_removal_decor(arr, &decor);
+            Ok(())
+        }
+        ItemRs::ArrayOfTables(aot) => {
+            for idx in sorted {
+                aot.remove(idx);
+            }
+            Ok(())
+        }
+        _ => Err(unsupported_op(item, "slice deletion")),
+    }
+}
+
+/// Assign to a slice of an array.
+pub(crate) fn item_setitem_slice(
+    item: &mut ItemRs,
+    start: isize,
+    stop: isize,
+    step: isize,
+    values: Vec<Item>,
+) -> PyResult<()> {
+    let Some(arr) = item.as_array_mut() else {
+        return Err(PyTypeError::new_err(format!(
+            "'{}' does not support slice assignment",
+            item.type_name()
+        )));
+    };
+
+    if step == 1 {
+        // Contiguous slice: replacement can be a different length.
+        let start_idx = start as usize;
+        let stop_idx = stop as usize;
+
+        let mut ic = comments::save_inline_comments(arr);
+        let removes_first = start_idx == 0 && stop_idx > 0;
+        let removes_last = stop_idx == arr.len() && stop_idx > start_idx;
+        let decor = save_removal_decor(
+            arr,
+            removes_first && values.is_empty(),
+            removes_last && values.is_empty(),
+        );
+
+        // Remove old elements from back to front.
+        for i in (start_idx..stop_idx).rev() {
+            arr.remove(i);
+            ic.remove(i);
+        }
+
+        // Insert new elements at start position.
+        for (offset, value) in values.into_iter().enumerate() {
+            let mut v = into_value(value)?;
+            let inline = comments::take_inline_comment(&mut v);
+            let idx = start_idx + offset;
+            if idx >= arr.len() {
+                arr.push(v);
+            } else {
+                arr.insert(idx, v);
+            }
+            ic.insert(idx, inline);
+        }
+        comments::restore_inline_comments(arr, &ic);
+        apply_removal_decor(arr, &decor);
+        Ok(())
+    } else {
+        // Extended slice: replacement must match the slice length.
+        let indices = collect_slice_indices(start, stop, step);
+        if indices.len() != values.len() {
+            return Err(PyValueError::new_err(format!(
+                "attempt to assign sequence of size {} to extended slice of size {}",
+                values.len(),
+                indices.len()
+            )));
+        }
+        for (idx, value) in indices.into_iter().zip(values) {
+            let mut v = into_value(value)?;
+            let inline = comments::take_inline_comment(&mut v);
+            arr.replace(idx, v);
+            if !inline.is_empty() {
+                comments::set_array_item_comment(arr, idx, &inline);
+            }
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Array boundary-element decoration repair
+// ---------------------------------------------------------------------------
+
+/// Decoration state captured before an array removal so that the opening and
+/// closing brackets stay in their original positions.
+pub(crate) struct RemovalDecor {
+    pub(crate) first_prefix: Option<String>,
+    pub(crate) last_suffix: Option<String>,
+}
+
+/// Snapshot the decorations that would be lost when the first and/or last
+/// element of an array is removed.
+///
+/// `removing_first` / `removing_last` indicate whether the removal will
+/// affect element 0 or element `len − 1`.  Returns `None` fields when the
+/// corresponding boundary is unaffected or the array is too small to need
+/// repair (single-element arrays becoming empty).
+pub(crate) fn save_removal_decor(
+    arr: &toml_edit::Array,
+    removing_first: bool,
+    removing_last: bool,
+) -> RemovalDecor {
+    let at_least_two = arr.len() >= 2;
+    RemovalDecor {
+        first_prefix: (removing_first && at_least_two).then(|| {
+            arr.get(0)
+                .and_then(|v| v.decor().prefix().and_then(|r| r.as_str()))
+                .unwrap_or_default()
+                .to_owned()
+        }),
+        last_suffix: (removing_last && at_least_two).then(|| {
+            let last = arr.len() - 1;
+            arr.get(last)
+                .and_then(|v| v.decor().suffix().and_then(|r| r.as_str()))
+                .unwrap_or_default()
+                .to_owned()
+        }),
+    }
+}
+
+/// Apply saved decoration fixes after a removal + `restore_inline_comments`.
+pub(crate) fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDecor) {
+    // --- First-element prefix ---
+    // The new first element inherits a prefix meant to follow a comma (e.g.
+    // `" "` in `[1, 2]` or `" # note\n    "` in multiline arrays).  Replace
+    // it with the old first element's prefix so `[1, 2, 3]` becomes `[2, 3]`
+    // instead of `[ 2, 3]`.
+    if let Some(ref old_first_prefix) = decor.first_prefix
+        && let Some(new_first) = arr.get_mut(0)
+    {
+        let cur = new_first
+            .decor()
+            .prefix()
+            .and_then(|r| r.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        let fixed = if let Some((_inline, rest)) = cur.split_once('\n') {
+            // Multiline: drop the removed element's inline-comment line,
+            // keep block comments + indentation that belong to this element.
+            format!("\n{rest}")
+        } else {
+            // Single-line: use the original first element's prefix.
+            old_first_prefix.clone()
+        };
+        new_first.decor_mut().set_prefix(&fixed);
+    }
+
+    // --- Last-element suffix ---
+    // The old last element's suffix (whitespace between the value and `]`) is
+    // discarded by toml_edit when that element is removed.  Transfer it to the
+    // array's trailing string so the closing bracket stays in place, e.g.
+    // `[ 1, 2, 3 ]` becomes `[ 1, 2 ]` instead of `[ 1, 2]`.
+    if let Some(ref old_last_suffix) = decor.last_suffix
+        && !old_last_suffix.is_empty()
+        && !arr.is_empty()
+    {
+        let trailing = arr.trailing().as_str().unwrap_or_default().to_owned();
+        arr.set_trailing(format!("{trailing}{old_last_suffix}"));
+    }
 }
 
 // ---------------------------------------------------------------------------

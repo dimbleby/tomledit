@@ -11,6 +11,7 @@ use crate::document::Document;
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
+use crate::list_ops;
 use crate::list_proxy::ListProxy;
 use crate::scalar_proxy::ScalarProxy;
 
@@ -231,9 +232,9 @@ impl ItemProxy {
             let doc = self.document.bind(py).borrow();
             self.check_fresh(&doc)?;
             let item = self.navigate(&doc.inner)?;
-            let len = item_ops::require_array_like_len(item)?;
+            let len = list_ops::require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
-            let indices = item_ops::collect_slice_indices(si.start, si.stop, si.step);
+            let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
             let proxies: PyResult<Vec<Py<PyAny>>> = indices
                 .into_iter()
                 .map(|i| self.child_proxy_typed(py, Key::Int(i)))
@@ -267,9 +268,9 @@ impl ItemProxy {
             let mut doc = self.document.bind(py).borrow_mut();
             self.check_fresh(&doc)?;
             let item = self.navigate_mut(&mut doc.inner)?;
-            let len = item_ops::require_array_like_len(item)?;
+            let len = list_ops::require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
-            item_ops::item_setitem_slice(item, si.start, si.stop, si.step, values)?;
+            list_ops::item_setitem_slice(item, si.start, si.stop, si.step, values)?;
             self.bump_self(&mut doc);
             return Ok(());
         }
@@ -291,10 +292,10 @@ impl ItemProxy {
             let mut doc = self.document.bind(py).borrow_mut();
             self.check_fresh(&doc)?;
             let item = self.navigate_mut(&mut doc.inner)?;
-            let len = item_ops::require_array_like_len(item)?;
+            let len = list_ops::require_array_like_len(item)?;
             let si = slice.indices(len as isize)?;
-            let indices = item_ops::collect_slice_indices(si.start, si.stop, si.step);
-            item_ops::item_delitem_slice(item, &indices)?;
+            let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
+            list_ops::item_delitem_slice(item, &indices)?;
             self.bump_self(&mut doc);
             return Ok(());
         }

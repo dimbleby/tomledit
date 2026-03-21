@@ -93,21 +93,18 @@ proxy (path-precise invalidation).
 
 ### Rust module layout
 
-Each Python-visible proxy class has its own `*_proxy.rs` file
-(`item_proxy.rs` for the base `Item`, plus `dict_proxy.rs`, `list_proxy.rs`,
-`scalar_proxy.rs` for the subclasses).  Shared mutation/navigation helpers
-live in `item_ops.rs`.  `lib.rs` lists all modules and registers PyO3
-classes — read it first to orient.
+Each Python-visible proxy class has its own `*_proxy.rs` file, and each
+category of operations has its own `*_ops.rs` file.  `lib.rs` lists all
+modules and registers PyO3 classes — read it first to orient.
 
-Non-obvious modules worth knowing about:
+Non-obvious things worth knowing:
 
-- `comments.rs` — comment get/set logic.  Inline comments live in decor
-  suffix; block comments in decor prefix.  Array element comments are stored
-  in the _next_ element's prefix (or array trailing for the last).
-- `trie.rs` — `MutationTrie` for path-precise proxy invalidation.
-- `item.rs` — thin `Item(toml_edit::Item)` newtype implementing
+- `item.rs` defines a thin `Item(toml_edit::Item)` newtype implementing
   `FromPyObject`.  This is the Rust-side type in function signatures, not the
-  Python-visible `Item` class (which is `ItemProxy`).
+  Python-visible `Item` class (which is `ItemProxy` in `item_proxy.rs`).
+- `comments.rs` — array element comments are stored in the _next_ element's
+  decor prefix (or the array's trailing string for the last element), not on
+  the element itself.
 
 ## Key Conventions
 

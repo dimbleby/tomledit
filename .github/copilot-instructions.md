@@ -13,14 +13,11 @@ others that share the same document.
 ## Build, Test, and Lint
 
 ```sh
-# Build and install (requires Rust toolchain + maturin)
-uv sync
-
-# Run full test suite
-uv run pytest
+# Build and run tests (always use --reinstall-package after Rust changes)
+uv run --reinstall-package tomledit pytest
 
 # Run a single test
-uv run pytest tests/test_comments.py::TestComment::test_set_comment -v
+uv run --reinstall-package tomledit pytest tests/test_comments.py::TestComment::test_set_comment -v
 
 # Rust lint, format, and unit tests
 cargo fmt
@@ -35,8 +32,9 @@ ruff format .
 uv run mypy
 ```
 
-After changing Rust code, rebuild with `uv run --reinstall-package tomledit
-pytest` to pick up changes.
+**After any Rust change you must `--reinstall-package tomledit`** — Python
+tests import a compiled `.so` and will silently run against stale code
+without it.  When only Python files changed, plain `uv run pytest` suffices.
 
 ### CI
 
@@ -93,18 +91,21 @@ proxy (path-precise invalidation).
 
 ### Rust module layout
 
-Each Python-visible proxy class has its own `*_proxy.rs` file, and each
-category of operations has its own `*_ops.rs` file.  `lib.rs` lists all
-modules and registers PyO3 classes — read it first to orient.
+`lib.rs` lists all modules and registers PyO3 classes — read it first to
+orient.  The split follows a pattern:
 
-Non-obvious things worth knowing:
-
-- `item.rs` defines a thin `Item(toml_edit::Item)` newtype implementing
-  `FromPyObject`.  This is the Rust-side type in function signatures, not the
-  Python-visible `Item` class (which is `ItemProxy` in `item_proxy.rs`).
-- `comments.rs` — array element comments are stored in the _next_ element's
-  decor prefix (or the array's trailing string for the last element), not on
-  the element itself.
+| File | Role |
+|------|------|
+| `document.rs` | `Document` class |
+| `item_proxy.rs` | `ItemProxy` base + `resolve_proxy()` helper |
+| `dict_proxy.rs` / `list_proxy.rs` / `scalar_proxy.rs` | Subclass pymethods |
+| `item_ops.rs` / `dict_ops.rs` / `list_ops.rs` | Pure logic helpers (no PyO3 class) |
+| `item.rs` | Thin `Item(toml_edit::Item)` newtype for `FromPyObject` — **not** the Python-visible `Item` |
+| `value.rs` | Python ↔ `toml_edit` type conversion |
+| `equality.rs` | Semantic equality between TOML items and Python objects |
+| `comments.rs` | Comment get/set; array element comments live in the _next_ element's decor prefix |
+| `views.rs` | `KeysView`, `ValuesView`, `ItemsView` |
+| `trie.rs` | `MutationTrie` for path-precise staleness |
 
 ## Key Conventions
 
@@ -158,10 +159,8 @@ Use `from __future__ import annotations` (enforced by ruff isort
 
 Things agents (and humans) get wrong:
 
-- **Forgetting to rebuild after Rust changes.** Python tests import a
-  compiled `.so`.  After touching any `.rs` file, you must
-  `uv run --reinstall-package tomledit pytest` or the tests will run against
-  stale code.
+- **Forgetting `--reinstall-package tomledit`.** The single most common
+  failure.  After touching any `.rs` file, `uv run pytest` runs stale code.
 - **Using `str(doc)` for TOML output.** `str()` returns a Python repr.  Use
   `doc.as_toml()` to get TOML text.
 - **Forgetting `bump_at` / `bump_self` / `bump_child`.** Every mutation must
@@ -171,9 +170,9 @@ Things agents (and humans) get wrong:
 - **Re-borrowing inside equality comparisons.** When a method receives a
   `value: &Bound<'_, PyAny>` that might be an `ItemProxy` from the same
   document, calling `__eq__` on it while holding a `borrow_mut()` will panic
-  (double borrow). Use `resolve_proxy()` to extract the plain Python value
-  *before* borrowing the document mutably. See `ListProxy::remove` for the
-  pattern.
+  (double borrow). Use `resolve_proxy()` (in `item_proxy.rs`) to extract the
+  plain Python value *before* borrowing the document mutably. See
+  `ListProxy::remove` for the pattern.
 - **Forgetting `check_fresh`.** Every proxy method must call
   `self.check_fresh(&doc)?` before navigating. Without it, a stale proxy
   silently accesses the wrong data or panics.

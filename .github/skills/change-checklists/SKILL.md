@@ -5,6 +5,27 @@ description: Step-by-step checklists and Rust code patterns for adding methods, 
 
 # Change Checklists
 
+## Adding a new property to a Python class
+
+1. **Rust** — add a `#[getter]` (and `#[setter]` if writable) in the
+   appropriate `#[pymethods]` block.  For proxy classes, borrow the doc and
+   check freshness as with methods.
+2. **Type stub** — add the `@property` to `tomledit.pyi`.
+3. **Tests** — test in the appropriate `test_*.py`.
+4. **Rebuild** — `uv run --reinstall-package tomledit pytest`.
+
+Pattern for a **read-only property** on a proxy:
+```rust
+#[getter]
+pub fn my_prop(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<...> {
+    let base = self_.as_super();
+    let doc = base.document.bind(py).borrow();
+    base.check_fresh(&doc)?;
+    let item = base.navigate(&doc.inner)?;
+    // ...
+}
+```
+
 ## Adding a new method to an existing Python class
 
 1. **Rust** — add the `#[pymethod]` in the appropriate `#[pymethods]` block:
@@ -69,7 +90,9 @@ pub fn my_method(self_: PyRefMut<'_, Self>, py: Python<'_>, ...) -> PyResult<...
 
 ## Releasing a new version
 
-1. Update `version` in `Cargo.toml`.
-2. Update `CHANGELOG.md`.
-3. Commit, tag as `vX.Y.Z`, push.  The `publish.yml` workflow builds wheels
+1. Ensure CI is green on `main`.
+2. Update `version` in `Cargo.toml`.
+3. Update `CHANGELOG.md` — move items from `## Unreleased` into a new
+   `## X.Y.Z (DD Month YYYY)` section.
+4. Commit, tag as `vX.Y.Z`, push.  The `publish.yml` workflow builds wheels
    and publishes to PyPI on tag push.

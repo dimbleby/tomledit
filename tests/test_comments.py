@@ -844,6 +844,18 @@ class TestComment:
         doc = Document.parse('[[items]]\nname = "a"\n')
         assert doc["items"].comment is None
 
+    def test_aot_element_block_comment_is_none(self) -> None:
+        """AoT element is a Table, not a Value — no block comment via decor."""
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        assert doc["items"][0].comment is None
+        assert doc["items"][1].comment is None
+
+    def test_aot_element_inline_comment_is_none(self) -> None:
+        """AoT parent is not an array Value — inline_comment returns None."""
+        doc = Document.parse('[[items]]\nname = "a"\n[[items]]\nname = "b"\n')
+        assert doc["items"][0].inline_comment is None
+        assert doc["items"][1].inline_comment is None
+
     # ---- comments survive mutations ----
 
     def test_inline_comment_preserved_on_top_level_update(self) -> None:

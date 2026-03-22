@@ -17,7 +17,7 @@ use crate::list_ops;
 
 /// Remove a key from an inline table, preserving sibling inline comments.
 /// Returns the removed value, or `None` if the key was not found.
-fn it_remove_preserving(it: &mut toml_edit::InlineTable, key: &str) -> Option<toml_edit::Value> {
+fn it_remove(it: &mut toml_edit::InlineTable, key: &str) -> Option<toml_edit::Value> {
     let mut ic = comments::save_it_inline_comments(it);
     let pos = comments::it_key_position(it, key);
     let removed = it.remove(key)?;
@@ -215,13 +215,14 @@ fn datetime_to_py(dt: &toml_edit::Datetime, py: Python<'_>) -> PyResult<Py<PyAny
     }
 }
 
-/// Return the number of iterable children, or a TypeError for scalars.
+/// Result of inspecting a TOML item's iteration shape: either a list of
+/// table keys or the length of an array.
 pub(crate) enum IterKind<'a> {
     TableKeys(Vec<&'a str>),
     ArrayLen(usize),
 }
 
-pub(crate) fn item_iter_info<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
+pub(crate) fn item_iter_kind<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
     match item {
         ItemRs::Table(table) => Ok(IterKind::TableKeys(table.iter().map(|(k, _)| k).collect())),
         ItemRs::Value(ValueRs::InlineTable(it)) => {
@@ -308,7 +309,7 @@ pub(crate) fn item_getitem(item: &ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Ke
 // Setitem
 // ---------------------------------------------------------------------------
 
-/// Returns `true` if an existing value was replaced, `false` if a new key was added.
+/// Returns `Some(key)` if an existing value was replaced, `None` if a new key was added.
 pub(crate) fn item_setitem(
     item: &mut ItemRs,
     key: &Bound<'_, PyAny>,
@@ -358,7 +359,7 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
         }
         ItemRs::Value(ValueRs::InlineTable(it)) => {
             let k = require_str_key(key)?;
-            if it_remove_preserving(it, &k).is_none() {
+            if it_remove(it, &k).is_none() {
                 return Err(PyKeyError::new_err(k));
             }
             Ok(Key::Str(k))
@@ -401,7 +402,7 @@ pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyR
             }
             ItemRs::Value(ValueRs::InlineTable(it)) => {
                 let key: &str = key_obj.extract()?;
-                it_remove_preserving(it, key)
+                it_remove(it, key)
                     .map(|v| Item(ItemRs::Value(v)))
                     .ok_or_else(|| PyKeyError::new_err(key.to_owned()))
             }
@@ -482,7 +483,7 @@ pub(crate) fn item_fmt(item: &mut ItemRs) {
 }
 
 // ---------------------------------------------------------------------------
-// Key type (shared with item_proxy)
+// Key type
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Hash, PartialEq, Eq)]

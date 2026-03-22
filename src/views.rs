@@ -47,30 +47,18 @@ fn keys_to_pyset<'py>(
 }
 
 fn get_keys(doc: &DocumentRs, path: &[Key]) -> PyResult<Vec<String>> {
-    if path.is_empty() {
-        Ok(doc.iter().map(|(k, _)| k.to_owned()).collect())
-    } else {
-        let item = item_ops::navigate_path(doc, path)?;
-        dict_ops::item_keys(item)
-    }
+    let item = item_ops::navigate_path(doc, path)?;
+    dict_ops::item_keys(item)
 }
 
 fn get_len(doc: &DocumentRs, path: &[Key]) -> PyResult<usize> {
-    if path.is_empty() {
-        Ok(doc.len())
-    } else {
-        let item = item_ops::navigate_path(doc, path)?;
-        item_ops::item_len(item).ok_or_else(|| PyTypeError::new_err("TOML item has no len()"))
-    }
+    let item = item_ops::navigate_path(doc, path)?;
+    item_ops::item_len(item).ok_or_else(|| PyTypeError::new_err("TOML item has no len()"))
 }
 
 fn contains_key(doc: &DocumentRs, path: &[Key], key: &str) -> PyResult<bool> {
-    if path.is_empty() {
-        Ok(doc.contains_key(key))
-    } else {
-        let item = item_ops::navigate_path(doc, path)?;
-        dict_ops::item_has_key(item, key)
-    }
+    let item = item_ops::navigate_path(doc, path)?;
+    dict_ops::item_has_key(item, key)
 }
 
 // ---------------------------------------------------------------------------
@@ -221,13 +209,9 @@ impl ValuesView {
     fn __contains__(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let doc = self.document.bind(py).borrow();
         let keys = get_keys(&doc.inner, &self.path)?;
+        let parent = item_ops::navigate_path(&doc.inner, &self.path)?;
         for key in &keys {
-            let item = if self.path.is_empty() {
-                doc.inner.as_item().get(key.as_str())
-            } else {
-                item_ops::navigate_path(&doc.inner, &self.path)?.get(key.as_str())
-            };
-            if let Some(item) = item
+            if let Some(item) = parent.get(key.as_str())
                 && crate::equality::item_eq(item, value)?
             {
                 return Ok(true);
@@ -321,11 +305,7 @@ impl ItemsView {
         let value = tuple.get_item(1)?;
 
         let doc = self.document.bind(py).borrow();
-        let target = if self.path.is_empty() {
-            doc.inner.as_item().get(key.as_str())
-        } else {
-            item_ops::navigate_path(&doc.inner, &self.path)?.get(key.as_str())
-        };
+        let target = item_ops::navigate_path(&doc.inner, &self.path)?.get(key.as_str());
         match target {
             Some(item_rs) => crate::equality::item_eq(item_rs, &value),
             None => Ok(false),

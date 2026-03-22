@@ -160,12 +160,12 @@ pub(crate) fn apply_update_pairs(
     }
     let mut replaced_keys = Vec::new();
     for (key, val) in pairs {
+        set_with_decor_preservation(item, &key, val);
         let exists = item.as_table().is_some_and(|t| t.contains_key(&key))
             || item.as_inline_table().is_some_and(|t| t.contains_key(&key));
         if exists {
-            replaced_keys.push(key.clone());
+            replaced_keys.push(key);
         }
-        set_with_decor_preservation(item, &key, val);
     }
     Ok(replaced_keys)
 }

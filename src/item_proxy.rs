@@ -328,7 +328,7 @@ impl ItemProxy {
         self.check_fresh(&doc)?;
         let item = self.navigate(&doc.inner)?;
 
-        match item_ops::item_iter_info(item)? {
+        match item_ops::item_iter_kind(item)? {
             item_ops::IterKind::TableKeys(keys) => {
                 let list = keys.into_pyobject(py)?;
                 Ok(list.try_iter()?.unbind())

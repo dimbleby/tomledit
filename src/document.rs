@@ -76,7 +76,7 @@ impl Document {
     ///
     /// This is the main entry point for editing existing TOML files:
     /// comments, whitespace, and style are retained so that only the
-    /// values you change are affected when you call ``str(doc)``.
+    /// values you change are affected when you call ``doc.as_toml()``.
     #[staticmethod]
     fn parse(text: &str) -> PyResult<Self> {
         let document_rs = text

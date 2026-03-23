@@ -341,31 +341,36 @@ fn aot_setitem_slice(
     step: isize,
     values: Vec<Item>,
 ) -> PyResult<()> {
+    // Validate all values up front so a bad element never leaves the AoT
+    // in a partially-mutated state.
+    let tables: Vec<toml_edit::Table> = values
+        .into_iter()
+        .map(require_table)
+        .collect::<PyResult<_>>()?;
+
     if step == 1 {
         let start_idx = start as usize;
         let stop_idx = stop as usize;
-        let values_count = values.len();
+        let tables_count = tables.len();
         for i in (start_idx..stop_idx).rev() {
             aot.remove(i);
         }
-        for (offset, value) in values.into_iter().enumerate() {
-            aot.insert(start_idx + offset, require_table(value)?);
+        for (offset, table) in tables.into_iter().enumerate() {
+            aot.insert(start_idx + offset, table);
         }
-        for i in start_idx..start_idx + values_count {
+        for i in start_idx..start_idx + tables_count {
             fix_inserted_aot_spacing(aot, i);
         }
     } else {
         let indices = collect_slice_indices(start, stop, step);
-        if indices.len() != values.len() {
+        if indices.len() != tables.len() {
             return Err(PyValueError::new_err(format!(
                 "attempt to assign sequence of size {} to extended slice of size {}",
-                values.len(),
+                tables.len(),
                 indices.len()
             )));
         }
-        // Replace in-place by removing and re-inserting at each position.
-        for (idx, value) in indices.into_iter().zip(values) {
-            let table = require_table(value)?;
+        for (idx, table) in indices.into_iter().zip(tables) {
             aot.remove(idx);
             aot.insert(idx, table);
             fix_inserted_aot_spacing(aot, idx);
@@ -560,8 +565,12 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
             Ok(())
         }
         ArrayLikeMut::Aot(aot) => {
-            for new_item in items {
-                let table = require_table(new_item)?;
+            // Validate all values up front.
+            let tables: Vec<toml_edit::Table> = items
+                .into_iter()
+                .map(require_table)
+                .collect::<PyResult<_>>()?;
+            for table in tables {
                 aot.push(table);
                 fix_inserted_aot_spacing(aot, aot.len() - 1);
             }

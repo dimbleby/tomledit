@@ -196,3 +196,84 @@ class TestWrongTypeErrors:
             doc["t"].extend([1, 2])
 
     # -- view methods on wrong types --
+
+
+# ---------------------------------------------------------------------------
+# Atomicity: a bad element must not leave the collection partially mutated
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicMutation:
+    """Conversion errors must be raised *before* any mutation happens.
+
+    Each test supplies a mix of valid and invalid values so that without
+    up-front validation the collection would be left in a half-modified state.
+    """
+
+    # -- array-of-tables --
+
+    def test_aot_setitem_slice_contiguous_rolls_back(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+            [[items]]
+            name = "c"
+        """)
+        )
+        with pytest.raises(TypeError, match="cannot append"):
+            doc["items"][0:2] = [{"name": "x"}, 42]
+        assert len(doc["items"]) == 3
+        assert doc["items"][0]["name"] == "a"
+        assert doc["items"][1]["name"] == "b"
+
+    def test_aot_setitem_slice_extended_rolls_back(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+            [[items]]
+            name = "c"
+        """)
+        )
+        with pytest.raises(TypeError, match="cannot append"):
+            doc["items"][0:3:2] = [{"name": "x"}, 42]
+        assert len(doc["items"]) == 3
+        assert doc["items"][0]["name"] == "a"
+        assert doc["items"][2]["name"] == "c"
+
+    def test_aot_extend_rolls_back(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
+        with pytest.raises(TypeError, match="cannot append"):
+            doc["items"].extend([{"name": "b"}, 42])
+        assert len(doc["items"]) == 1
+        assert doc["items"][0]["name"] == "a"
+
+    # -- regular arrays --
+
+    def test_array_setitem_slice_contiguous_rolls_back(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        with pytest.raises(TypeError, match="not a valid TOML value"):
+            doc["arr"][0:2] = [10, None]
+        assert list(doc["arr"]) == [1, 2, 3]
+
+    def test_array_setitem_slice_extended_rolls_back(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        with pytest.raises(TypeError, match="not a valid TOML value"):
+            doc["arr"][0:3:2] = [10, None]
+        assert list(doc["arr"]) == [1, 2, 3]
+
+    def test_array_extend_rolls_back(self) -> None:
+        doc = Document.parse("arr = [1]\n")
+        with pytest.raises(TypeError, match="not a valid TOML value"):
+            doc["arr"].extend([2, None])
+        assert list(doc["arr"]) == [1]

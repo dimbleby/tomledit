@@ -348,17 +348,8 @@ fn aot_setitem_slice(
         for i in (start_idx..stop_idx).rev() {
             aot.remove(i);
         }
-        // AoT has no insert API; collect the tail, push new tables, then restore.
-        let mut tail: Vec<toml_edit::Table> = (start_idx..aot.len())
-            .rev()
-            .map(|i| aot.remove(i))
-            .collect();
-        tail.reverse();
-        for value in values {
-            aot.push(require_table(value)?);
-        }
-        for t in tail {
-            aot.push(t);
+        for (offset, value) in values.into_iter().enumerate() {
+            aot.insert(start_idx + offset, require_table(value)?);
         }
         for i in start_idx..start_idx + values_count {
             fix_inserted_aot_spacing(aot, i);
@@ -376,14 +367,7 @@ fn aot_setitem_slice(
         for (idx, value) in indices.into_iter().zip(values) {
             let table = require_table(value)?;
             aot.remove(idx);
-            // Re-insert: pull tail, push new, push tail back.
-            let mut tail: Vec<toml_edit::Table> =
-                (idx..aot.len()).rev().map(|i| aot.remove(i)).collect();
-            tail.reverse();
-            aot.push(table);
-            for t in tail {
-                aot.push(t);
-            }
+            aot.insert(idx, table);
             fix_inserted_aot_spacing(aot, idx);
         }
     }
@@ -513,13 +497,7 @@ pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> 
         ArrayLikeMut::Aot(aot) => {
             let table = require_table(value)?;
             let resolved = clamp_index(index, aot.len());
-            let mut tail: Vec<toml_edit::Table> =
-                (resolved..aot.len()).rev().map(|i| aot.remove(i)).collect();
-            tail.reverse();
-            aot.push(table);
-            for t in tail {
-                aot.push(t);
-            }
+            aot.insert(resolved, table);
             fix_inserted_aot_spacing(aot, resolved);
             Ok(())
         }

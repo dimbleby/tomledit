@@ -155,6 +155,9 @@ class DictItem(Item, MutableMapping[str, Any]):
     def get(self, key: str, default: _T, /) -> Item | _T: ...
     @override
     def setdefault(self, key: str, default: Any = ..., /) -> Item: ...
+    @property
+    @override
+    def value(self) -> dict[str, Any]: ...
 
 class ListItem(Item, MutableSequence[Any]):
     @staticmethod
@@ -163,6 +166,9 @@ class ListItem(Item, MutableSequence[Any]):
     @override
     def insert(self, index: int, value: Any, /) -> None: ...
     def set_multiline(self, *, indent: int = 4) -> None: ...
+    @property
+    @override
+    def value(self) -> list[Any]: ...
 
 class ScalarItem(Item):
     @staticmethod

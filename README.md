@@ -66,8 +66,9 @@ Under the hood, though, every `Item` is really a _path_ back into the shared
 document.
 
 This is mostly invisible, but sometimes the implementation leaks out.
-In particular: because items are paths, they can go stale when the document
-changes underneath them.
+Because items are paths, a mutation to the `Document` can invalidate or change
+the value being pointed at.
+In such cases the `Item` is made stale:
 
 ```python
 doc = Document.parse('arr = ["a", "b"]')
@@ -81,7 +82,15 @@ The item that performs the mutation stays valid:
 ```python
 arr = doc["arr"]
 arr[0] = "changed"
-print(arr)                  # still works - arr itself did the mutating
+print(arr)                  # works as expected
+```
+
+Changes in unrelated parts of the document are no problem:
+
+```python
+arr = doc["arr"]
+doc["foo"] = "bar"
+print(arr)                  # this is fine
 ```
 
 If you just need the plain Python value, grab it with `.value` before the

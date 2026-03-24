@@ -43,10 +43,9 @@ pub(crate) fn resolve_proxy(
 /// set of dict-like, list-like, and scalar methods is available directly
 /// on Item and will raise at runtime if called on the wrong kind.
 ///
-/// An Item becomes stale when the part of the Document it points to (or an
-/// ancestor) is modified through a different reference; using a stale Item
-/// raises ``RuntimeError``.  Mutations to unrelated subtrees do **not**
-/// invalidate this Item.
+/// Under the hood, an Item is really a path into the Document. An Item can
+/// become stale when a mutation to the Document changes the value that the
+/// Item points at.  Using a stale Item raises a ``RuntimeError``.
 #[pyclass(name = "Item", module = "tomledit", subclass)]
 pub(crate) struct ItemProxy {
     pub(crate) document: Py<Document>,

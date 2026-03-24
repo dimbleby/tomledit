@@ -338,6 +338,10 @@ class TestStr:
         doc = Document.parse("x = 3.14\n")
         assert str(doc["x"]) == "3.14"
 
+    def test_proxy_str_float_whole(self) -> None:
+        doc = Document.parse("x = 1.0\n")
+        assert str(doc["x"]) == "1.0"
+
     def test_proxy_str_bool(self) -> None:
         doc = Document.parse("x = true\n")
         assert str(doc["x"]) == "True"

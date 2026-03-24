@@ -106,7 +106,7 @@ pub(crate) fn item_str(item: &ItemRs, py: Python<'_>) -> PyResult<String> {
         match v {
             ValueRs::String(s) => return Ok(s.value().to_owned()),
             ValueRs::Integer(i) => return Ok(i.value().to_string()),
-            ValueRs::Float(f) => return Ok(f.value().to_string()),
+            ValueRs::Float(_) => {}
             ValueRs::Boolean(b) => return Ok(if *b.value() { "True" } else { "False" }.to_owned()),
             _ => {}
         }
@@ -169,7 +169,7 @@ fn value_to_py(value: &ValueRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
 }
 
 /// Convert a toml_edit Datetime to a Python datetime.datetime, date, or time.
-fn datetime_to_py(dt: &toml_edit::Datetime, py: Python<'_>) -> PyResult<Py<PyAny>> {
+pub(crate) fn datetime_to_py(dt: &toml_edit::Datetime, py: Python<'_>) -> PyResult<Py<PyAny>> {
     let make_tz = |offset: &toml_edit::Offset| -> PyResult<Bound<'_, PyTzInfo>> {
         let minutes: i32 = match offset {
             toml_edit::Offset::Z => 0,

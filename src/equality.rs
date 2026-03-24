@@ -4,7 +4,7 @@ use pyo3::types::{
 };
 use toml_edit::Item as ItemRs;
 
-use crate::value::Datetime;
+use crate::item_ops::datetime_to_py;
 
 /// Semantically compare two toml_edit Datetimes, treating Offset::Z and
 /// Offset::Custom { minutes: 0 } as equivalent, and normalizing optional
@@ -96,16 +96,14 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
                 if let Ok(other_i) = other.extract::<i64>() {
                     return Ok(*i.value() == other_i);
                 }
-                if let Ok(other_f) = other.extract::<f64>() {
-                    return Ok((*i.value() as f64) == other_f);
-                }
+                let py_int = i.value().into_pyobject(other.py())?;
+                return py_int.into_any().eq(other);
             }
         }
         toml_edit::Value::Float(f) => {
-            if other.cast::<PyBool>().is_err()
-                && let Ok(other_f) = other.extract::<f64>()
-            {
-                return Ok(*f.value() == other_f);
+            if other.cast::<PyBool>().is_err() {
+                let py_float = f.value().into_pyobject(other.py())?;
+                return py_float.into_any().eq(other);
             }
         }
         toml_edit::Value::String(s) => {
@@ -115,8 +113,10 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
         }
         toml_edit::Value::Datetime(dt) => {
             if let Ok(py_dt) = other.cast::<PyDateTime>() {
-                let other_dt: Datetime = py_dt.extract()?;
-                return Ok(datetime_eq(dt.value(), &other_dt.0));
+                // Convert TOML datetime to Python and let Python's __eq__
+                // handle instant comparison for offset-aware datetimes.
+                let toml_py = datetime_to_py(dt.value(), other.py())?;
+                return toml_py.bind(other.py()).eq(py_dt);
             }
             if let Ok(py_date) = other.cast::<PyDate>() {
                 if let (Some(d), None, None) =

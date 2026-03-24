@@ -390,6 +390,12 @@ class TestEqualityEdgeCases:
         expected = datetime(2024, 1, 15, 10, 30, 0, tzinfo=tz)
         assert doc["dt"] == expected
 
+    def test_datetime_equality_same_instant_different_offset(self) -> None:
+        """Aware datetimes that represent the same instant should compare equal."""
+        doc = Document.parse("dt = 2024-01-15T10:30:00+01:00\n")
+        expected = datetime(2024, 1, 15, 9, 30, 0, tzinfo=timezone.utc)
+        assert doc["dt"] == expected
+
     def test_proxy_date_only_ne_proxy_full_datetime(self) -> None:
         """Proxy-vs-proxy: date-only != full datetime even with same date."""
         doc = Document.parse(
@@ -446,3 +452,13 @@ class TestNumericTowerEquality:
         )
         # Proxy-to-proxy uses TOML structural equality (type-aware)
         assert doc["x"] != doc["y"]
+
+    def test_large_int_proxy_not_equal_to_rounded_python_float(self) -> None:
+        """Large integers should not compare equal to rounded IEEE-754 floats."""
+        doc = Document.parse("x = 9007199254740993\n")
+        assert doc["x"] != float(9007199254740993)
+
+    def test_float_proxy_not_equal_to_nearby_large_python_int(self) -> None:
+        """A float should not compare equal to an int it can't exactly represent."""
+        doc = Document.parse("x = 9007199254740992.0\n")
+        assert doc["x"] != 9007199254740993

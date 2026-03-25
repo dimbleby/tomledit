@@ -105,7 +105,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           manylinux: ${{ matrix.platform.manylinux || 'auto' }}
-          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t
           before-script-linux: |
             # Install OpenSSL development headers if needed
             if command -v apt-get &> /dev/null; then

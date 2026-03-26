@@ -1,7 +1,7 @@
 use pyo3::exceptions::{PyAttributeError, PyValueError};
 use pyo3::prelude::*;
 
-use crate::item_proxy::ItemProxy;
+use crate::item_proxy::{ItemProxy, resolve_proxy};
 
 /// A scalar TOML value (string, integer, float, boolean, datetime, date, or time).
 #[pyclass(name = "ScalarItem", module = "tomledit", extends = ItemProxy)]
@@ -82,6 +82,8 @@ impl ScalarProxy {
     fn __contains__(self_: PyRef<'_, Self>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = self_.py();
         let resolved = Self::resolve(&self_)?;
+        let resolved_value = resolve_proxy(py, value)?;
+        let value = resolved_value.as_ref().map_or(value, |v| v.bind(py));
         py_binop(py, "contains", resolved.bind(py), value)?.extract::<bool>(py)
     }
 
@@ -221,7 +223,11 @@ impl ScalarProxy {
         let val = Self::resolve(&self_)?;
         let pow_fn = py.import("builtins")?.getattr("pow")?;
         match modulo {
-            Some(m) => pow_fn.call1((val.bind(py), exp, m)),
+            Some(m) => {
+                let resolved_m = resolve_proxy(py, m)?;
+                let m = resolved_m.as_ref().map_or(m, |v| v.bind(py));
+                pow_fn.call1((val.bind(py), exp, m))
+            }
             None => pow_fn.call1((val.bind(py), exp)),
         }
         .map(Bound::unbind)
@@ -236,7 +242,11 @@ impl ScalarProxy {
         let val = Self::resolve(&self_)?;
         let pow_fn = py.import("builtins")?.getattr("pow")?;
         match modulo {
-            Some(m) => pow_fn.call1((base, val.bind(py), m)),
+            Some(m) => {
+                let resolved_m = resolve_proxy(py, m)?;
+                let m = resolved_m.as_ref().map_or(m, |v| v.bind(py));
+                pow_fn.call1((base, val.bind(py), m))
+            }
             None => pow_fn.call1((base, val.bind(py))),
         }
         .map(Bound::unbind)

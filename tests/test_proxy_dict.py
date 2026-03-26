@@ -743,11 +743,6 @@ class TestViews:
         assert doc.items() != {("a", 1), ("b", 99)}
         assert doc.items() != 42  # non-iterable
 
-    def test_items_view_contains_non_tuple(self) -> None:
-        doc = Document.parse("a = 1\n")
-        with pytest.raises(TypeError):
-            "not a tuple" in doc.items()  # type: ignore[comparison-overlap]  # noqa: B015
-
     # -- Nested (non-root path) view operations --
 
     def test_proxy_keys_view_contains(self) -> None:
@@ -829,3 +824,71 @@ class TestItemsViewSetEquality:
         """Items view should NOT equal a list (just like Python's dict_items)."""
         doc = Document.parse("a = 1\nb = 2\n")
         assert doc.items() != [("a", 1), ("b", 2)]
+
+
+class TestKeysViewContainsNonString:
+    """KeysView.__contains__ should return False for non-string keys, not TypeError."""
+
+    def test_int_key(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert 1 not in doc.keys()  # type: ignore[comparison-overlap]  # noqa: SIM118
+
+    def test_none_key(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert None not in doc.keys()  # noqa: SIM118
+
+    def test_list_key(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert [1, 2] not in doc.keys()  # type: ignore[comparison-overlap]  # noqa: SIM118
+
+    def test_nested_keys_view(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert 42 not in doc["t"].keys()  # noqa: SIM118
+
+
+class TestItemsViewContainsEdgeCases:
+    """ItemsView.__contains__ should return False for non-tuples and
+    tuples with non-string first element, not raise TypeError."""
+
+    def test_non_tuple(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert 1 not in doc.items()  # type: ignore[comparison-overlap]
+
+    def test_list_pair(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert ["a", 1] not in doc.items()  # type: ignore[comparison-overlap]
+
+    def test_int_key_in_tuple(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert (1, "a") not in doc.items()  # type: ignore[comparison-overlap]
+
+    def test_none_key_in_tuple(self) -> None:
+        doc = Document.parse("a = 1\n")
+        assert (None, 1) not in doc.items()  # type: ignore[comparison-overlap]
+
+    def test_three_element_tuple(self) -> None:
+        """3-tuples are not valid (key, value) pairs — should be False."""
+        doc = Document.parse("a = 1\n")
+        assert ("a", 1, "extra") not in doc.items()  # type: ignore[comparison-overlap]
+
+
+class TestItemsViewEqUnhashable:
+    """ItemsView.__eq__ should work even when values are unhashable (lists, dicts)."""
+
+    def test_eq_with_list_values(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]\n")
+        assert doc.items() == doc.items()
+
+    def test_eq_with_dict_values(self) -> None:
+        doc = Document.parse("[a]\nx = 1\n")
+        assert doc.items() == doc.items()
+
+    def test_eq_cross_document(self) -> None:
+        doc1 = Document.parse("a = [1, 2]\nb = [3, 4]\n")
+        doc2 = Document.parse("b = [3, 4]\na = [1, 2]\n")
+        assert doc1.items() == doc2.items()
+
+    def test_ne_with_list_values(self) -> None:
+        doc1 = Document.parse("a = [1, 2]\n")
+        doc2 = Document.parse("a = [1, 3]\n")
+        assert doc1.items() != doc2.items()

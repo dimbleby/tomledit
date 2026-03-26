@@ -328,3 +328,36 @@ class TestFormatting:
 
     def test_format_empty_spec(self, doc: Document) -> None:
         assert f"{doc['name']}" == "Alice"
+
+
+class TestScalarContainsProxy:
+    """ScalarProxy.__contains__ should resolve proxy value arguments."""
+
+    def test_proxy_in_string_proxy(self) -> None:
+        doc = Document.parse('msg = "hello world"\npart = "hello"')
+        assert doc["part"] in doc["msg"]
+
+    def test_proxy_not_in_string_proxy(self) -> None:
+        doc = Document.parse('msg = "hello world"\npart = "xyz"')
+        assert doc["part"] not in doc["msg"]
+
+    def test_cross_document_proxy_in_string(self) -> None:
+        doc1 = Document.parse('msg = "hello world"')
+        doc2 = Document.parse('part = "hello"')
+        assert doc2["part"] in doc1["msg"]
+
+
+class TestPowModuloProxy:
+    """pow() with proxy modulo should resolve the proxy before calling builtins.pow."""
+
+    def test_pow_with_proxy_modulo(self) -> None:
+        doc = Document.parse("base = 5\nmod = 3")
+        assert pow(doc["base"], 2, doc["mod"]) == pow(5, 2, 3)
+
+    def test_rpow_with_proxy_modulo(self) -> None:
+        doc = Document.parse("n = 3\nmod = 5")
+        assert pow(2, doc["n"], doc["mod"]) == pow(2, 3, 5)  # type: ignore[misc]  # ty: ignore[no-matching-overload]
+
+    def test_pow_all_proxies(self) -> None:
+        doc = Document.parse("a = 5\nb = 3\nm = 7")
+        assert pow(doc["a"], doc["b"], doc["m"]) == pow(5, 3, 7)

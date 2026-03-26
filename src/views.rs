@@ -92,9 +92,12 @@ impl KeysView {
         Ok(list.try_iter()?.unbind())
     }
 
-    fn __contains__(&self, py: Python<'_>, key: &str) -> PyResult<bool> {
+    fn __contains__(&self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let Ok(key) = key.extract::<String>() else {
+            return Ok(false);
+        };
         let doc = self.document.bind(py).borrow();
-        contains_key(&doc.inner, &self.path, key)
+        contains_key(&doc.inner, &self.path, &key)
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
@@ -277,14 +280,18 @@ impl ItemsView {
     }
 
     fn __contains__(&self, py: Python<'_>, item: &Bound<'_, PyAny>) -> PyResult<bool> {
-        // ItemsView.__contains__ expects a (key, value) tuple
-        let tuple = item
-            .cast::<PyTuple>()
-            .map_err(|_| PyTypeError::new_err("ItemsView.__contains__ requires a tuple"))?;
+        // ItemsView.__contains__ expects a (key, value) tuple.
+        // Return False (not TypeError) for non-tuples or wrong shapes,
+        // matching Python's dict_items behavior.
+        let Ok(tuple) = item.cast::<PyTuple>() else {
+            return Ok(false);
+        };
         if tuple.len() != 2 {
             return Ok(false);
         }
-        let key: String = tuple.get_item(0)?.extract()?;
+        let Ok(key) = tuple.get_item(0)?.extract::<String>() else {
+            return Ok(false);
+        };
         let value = tuple.get_item(1)?;
 
         let doc = self.document.bind(py).borrow();
@@ -302,12 +309,37 @@ impl ItemsView {
     }
 
     fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        // ItemsView uses set semantics: only equal to sets and other set-like
-        // views, never to lists.  Build our pairs as a frozenset and delegate
-        // to Python's set.__eq__ which handles the type checking.
-        let ours: Vec<Bound<'_, PyAny>> =
-            self.__iter__(py)?.into_bound(py).collect::<PyResult<_>>()?;
-        let our_set = PySet::new(py, &ours)?;
-        our_set.eq(other)
+        // ItemsView uses set semantics: only equal to Set-like objects
+        // (sets, frozensets, other views registered as Set ABCs).
+        let set_abc = py.import("collections.abc")?.getattr("Set")?;
+        if !other.is_instance(&set_abc)? {
+            return Ok(false);
+        }
+
+        let doc = self.document.bind(py).borrow();
+        let our_len = get_len(&doc.inner, &self.path)?;
+        let other_len = other.len()?;
+        if our_len != other_len {
+            return Ok(false);
+        }
+
+        // Build plain Python (key, value) tuples and check containment
+        // in `other`.  Using plain values (not proxies) avoids hashing
+        // issues and lets the other side's __contains__ compare correctly.
+        let keys = get_keys(&doc.inner, &self.path)?;
+        let parent = item_ops::navigate_path(&doc.inner, &self.path)?;
+        for key in &keys {
+            if let Some(item) = parent.get(key.as_str()) {
+                let py_val = item_ops::item_to_py(item, py)?;
+                let pair = PyTuple::new(
+                    py,
+                    [key.into_pyobject(py)?.into_any(), py_val.into_bound(py)],
+                )?;
+                if !other.contains(&pair)? {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
     }
 }

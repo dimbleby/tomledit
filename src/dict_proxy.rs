@@ -5,7 +5,7 @@ use pyo3::types::{PyDict, PyTuple};
 use crate::dict_ops;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
-use crate::item_proxy::ItemProxy;
+use crate::item_proxy::{self, ItemProxy};
 use crate::views::{ItemsView, KeysView, ValuesView};
 
 /// A TOML table or inline table.
@@ -96,6 +96,9 @@ impl DictProxy {
         } else {
             Some(default.get_item(0)?.unbind())
         };
+
+        let resolved = item_proxy::resolve_proxy(py, key)?;
+        let key = resolved.as_ref().map_or(key, |v| v.bind(py));
 
         let base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();

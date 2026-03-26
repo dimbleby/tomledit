@@ -337,6 +337,12 @@ pub(crate) fn item_setitem(
         }
         ItemRs::ArrayOfTables(aot) => {
             let idx = list_ops::resolve_index(require_int_key(key)?, aot.len())?;
+            if !value.0.is_table() && !value.0.is_inline_table() {
+                return Err(PyTypeError::new_err(format!(
+                    "cannot assign {} to array of tables (expected a table/dict)",
+                    value.0.type_name()
+                )));
+            }
             item[idx] = value.0;
             Ok(Some(Key::Int(idx)))
         }

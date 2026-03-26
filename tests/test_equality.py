@@ -462,3 +462,23 @@ class TestNumericTowerEquality:
         """A float should not compare equal to an int it can't exactly represent."""
         doc = Document.parse("x = 9007199254740992.0\n")
         assert doc["x"] != 9007199254740993
+
+
+class TestTimeZoneEquality:
+    """TOML local time must NOT equal a timezone-aware Python time."""
+
+    def test_local_time_not_equal_to_aware_time(self) -> None:
+        doc = Document.parse("t = 12:30:15\n")
+        aware = time(12, 30, 15, tzinfo=timezone.utc)
+        assert doc["t"] != aware
+
+    def test_local_time_not_equal_to_aware_time_reverse(self) -> None:
+        doc = Document.parse("t = 12:30:15\n")
+        aware = time(12, 30, 15, tzinfo=timezone.utc)
+        assert aware != doc["t"]
+
+    def test_local_time_equal_to_naive_time(self) -> None:
+        """Sanity check: local time DOES equal a naive time with same fields."""
+        doc = Document.parse("t = 12:30:15\n")
+        naive = time(12, 30, 15)
+        assert doc["t"] == naive

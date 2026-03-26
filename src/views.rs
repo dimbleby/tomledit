@@ -226,26 +226,9 @@ impl ValuesView {
         Ok(format!("ValuesView(<{len} values>)"))
     }
 
-    fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let our_iter = self.__iter__(py)?;
-        let mut our_iter = our_iter.into_bound(py);
-        let other_iter = match other.try_iter() {
-            Ok(it) => it,
-            Err(_) => return Ok(false),
-        };
-        for other_val in other_iter {
-            let other_val = other_val?;
-            match our_iter.next() {
-                Some(our_val) => {
-                    if !our_val?.eq(&other_val)? {
-                        return Ok(false);
-                    }
-                }
-                None => return Ok(false),
-            }
-        }
-        Ok(our_iter.next().is_none())
-    }
+    // No __eq__: Python's dict_values has no equality support (returns
+    // NotImplemented), falling back to identity comparison.  We match that
+    // by simply not defining __eq__.
 }
 
 // ---------------------------------------------------------------------------
@@ -319,23 +302,12 @@ impl ItemsView {
     }
 
     fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let our_iter = self.__iter__(py)?;
-        let mut our_iter = our_iter.into_bound(py);
-        let other_iter = match other.try_iter() {
-            Ok(it) => it,
-            Err(_) => return Ok(false),
-        };
-        for other_val in other_iter {
-            let other_val = other_val?;
-            match our_iter.next() {
-                Some(our_val) => {
-                    if !our_val?.eq(&other_val)? {
-                        return Ok(false);
-                    }
-                }
-                None => return Ok(false),
-            }
-        }
-        Ok(our_iter.next().is_none())
+        // ItemsView uses set semantics: only equal to sets and other set-like
+        // views, never to lists.  Build our pairs as a frozenset and delegate
+        // to Python's set.__eq__ which handles the type checking.
+        let ours: Vec<Bound<'_, PyAny>> =
+            self.__iter__(py)?.into_bound(py).collect::<PyResult<_>>()?;
+        let our_set = PySet::new(py, &ours)?;
+        our_set.eq(other)
     }
 }

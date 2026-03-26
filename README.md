@@ -72,8 +72,8 @@ In such cases the `Item` is made stale:
 
 ```python
 doc = Document.parse('arr = ["a", "b"]')
-first = doc["arr"][0]       # a path to arr[0]
-doc["arr"][0] = "changed"   # mutates the document
+first = doc["arr"][0]       # `first` mostly behaves as "a"
+doc["arr"][0] = "changed"   # prefer `first` still to be "a", but...
 print(first)                # RuntimeError: this Item is stale
 ```
 

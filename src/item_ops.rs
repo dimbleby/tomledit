@@ -254,7 +254,10 @@ fn bad_key_type(key: &Bound<'_, PyAny>) -> PyErr {
 
 fn require_str_key(key: &Bound<'_, PyAny>) -> PyResult<String> {
     key.extract().map_err(|_| {
-        if key.extract::<i64>().is_ok() {
+        // Use a C-level type check instead of extract (which invokes
+        // __index__) to avoid re-borrowing the document through dunder
+        // methods when the key is a proxy.
+        if key.is_instance_of::<pyo3::types::PyInt>() {
             PyTypeError::new_err("TOML table keys must be strings, not integers")
         } else {
             bad_key_type(key)

@@ -102,7 +102,7 @@ class TestWrongTypeErrors:
         """)
         )
         with pytest.raises(TypeError, match="indices must be integers or strings"):
-            doc["tbl"][1.5]  # type: ignore[call-overload]
+            doc["tbl"][1.5]  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
 
     def test_setitem_int_key_on_table_raises(self) -> None:
         doc = Document.parse(
@@ -142,12 +142,12 @@ class TestWrongTypeErrors:
         """)
         )
         with pytest.raises(TypeError, match="indices must be integers or strings"):
-            doc["t"][1.5] = 99  # type: ignore[index]
+            doc["t"][1.5] = 99  # type: ignore[index]  # ty: ignore[invalid-assignment]
 
     def test_delitem_float_key_on_array_raises(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")
         with pytest.raises(TypeError, match="indices must be integers or strings"):
-            del doc["arr"][1.5]  # type: ignore[arg-type]
+            del doc["arr"][1.5]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
     # -- missing keys --
 
@@ -213,13 +213,13 @@ class TestProxyAsKey:
     def test_setitem_array_with_proxy_index(self) -> None:
         doc = Document.parse("idx = 1\narr = [10, 20, 30]\n")
         idx = doc["idx"]
-        doc["arr"][idx] = 99  # type: ignore[index]
+        doc["arr"][idx] = 99  # type: ignore[index]  # ty: ignore[invalid-assignment]
         assert doc["arr"][1] == 99
 
     def test_delitem_array_with_proxy_index(self) -> None:
         doc = Document.parse("idx = 1\narr = [10, 20, 30]\n")
         idx = doc["idx"]
-        del doc["arr"][idx]  # type: ignore[arg-type]
+        del doc["arr"][idx]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         assert list(doc["arr"]) == [10, 30]
 
     def test_list_pop_with_proxy_index(self) -> None:
@@ -232,13 +232,13 @@ class TestProxyAsKey:
     def test_setitem_table_with_proxy_str_key(self) -> None:
         doc = Document.parse('key = "port"\n[server]\nport = 80\n')
         key = doc["key"]
-        doc["server"][key] = 9090  # type: ignore[index]
+        doc["server"][key] = 9090  # type: ignore[index]  # ty: ignore[invalid-assignment]
         assert doc["server"]["port"] == 9090
 
     def test_delitem_table_with_proxy_str_key(self) -> None:
         doc = Document.parse('key = "port"\n[server]\nport = 80\n')
         key = doc["key"]
-        del doc["server"][key]  # type: ignore[arg-type]
+        del doc["server"][key]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         assert "port" not in doc["server"]
 
     def test_setitem_table_with_int_proxy_gives_type_error(self) -> None:
@@ -247,13 +247,13 @@ class TestProxyAsKey:
         doc = Document.parse("idx = 1\n[server]\nport = 80\n")
         idx = doc["idx"]
         with pytest.raises(TypeError, match="strings, not integers"):
-            doc["server"][idx] = "test"  # type: ignore[index]
+            doc["server"][idx] = "test"  # type: ignore[index]  # ty: ignore[invalid-assignment]
 
     def test_delitem_table_with_int_proxy_gives_type_error(self) -> None:
         doc = Document.parse("idx = 1\n[server]\nport = 80\n")
         idx = doc["idx"]
         with pytest.raises(TypeError, match="strings, not integers"):
-            del doc["server"][idx]  # type: ignore[arg-type]
+            del doc["server"][idx]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 # ---------------------------------------------------------------------------

@@ -335,3 +335,34 @@ class TestAtomicMutation:
         with pytest.raises(TypeError, match="not a valid TOML value"):
             doc["arr"].extend([2, None])
         assert list(doc["arr"]) == [1]
+
+
+class TestAotTypeValidation:
+    """Assigning a non-table to an array-of-tables index should raise TypeError."""
+
+    def test_aot_setitem_rejects_scalar(self) -> None:
+        doc = Document.parse("[[items]]\na = 1\n")
+        with pytest.raises(TypeError):
+            doc["items"][0] = 42
+
+    def test_aot_setitem_rejects_array(self) -> None:
+        doc = Document.parse("[[items]]\na = 1\n")
+        with pytest.raises(TypeError):
+            doc["items"][0] = [1, 2, 3]
+
+    def test_aot_setitem_accepts_table(self) -> None:
+        """Sanity: assigning a table should still work."""
+        doc = Document.parse("[[items]]\na = 1\n")
+        doc["items"][0] = {"b": 2}
+        assert doc["items"][0]["b"] == 2
+
+
+class TestDictProxyPopDoubleBorrow:
+    """DictProxy.pop with a proxy key must not panic from double borrow."""
+
+    def test_pop_with_proxy_str_key(self) -> None:
+        doc = Document.parse('key = "port"\n[server]\nport = 80\n')
+        key = doc["key"]
+        result = doc["server"].pop(key)
+        assert result == 80
+        assert "port" not in doc["server"]

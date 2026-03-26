@@ -237,7 +237,7 @@ pub(crate) fn item_delitem_slice(target: ArrayLikeMut<'_>, indices: &[usize]) ->
         ArrayLikeMut::Array(arr) => {
             let mut ic = comments::save_inline_comments(arr);
             let removing_first = sorted.last() == Some(&0);
-            let removing_last = sorted.first() == Some(&(arr.len() - 1));
+            let removing_last = !sorted.is_empty() && sorted.first() == Some(&(arr.len() - 1));
             let decor = save_removal_decor(arr, removing_first, removing_last);
             for idx in sorted {
                 arr.remove(idx);
@@ -669,5 +669,18 @@ pub(crate) fn item_set_multiline(target: ArrayLikeMut<'_>, indent: usize) -> PyR
             Ok(())
         }
         ArrayLikeMut::Aot(_) => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_delitem_slice_empty_array() {
+        let mut arr = toml_edit::Array::new();
+        // arr.len() - 1 underflows in debug builds when indices is empty
+        item_delitem_slice(ArrayLikeMut::Array(&mut arr), &[]).unwrap();
+        assert_eq!(arr.len(), 0);
     }
 }

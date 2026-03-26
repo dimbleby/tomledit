@@ -708,10 +708,13 @@ class TestViews:
             b = 2
         """)
         )
-        vals = list(doc.values())
-        assert doc.values() == vals
-        assert doc.values() != [1]
-        assert doc.values() != [1, 2, 3]
+        # Python's dict_values has no equality support — falls back to
+        # identity comparison.  So two distinct views are never equal.
+        v = doc.values()
+        assert v == v  # identity
+        assert doc.values() != doc.values()  # distinct objects
+        assert doc.values() != list(doc.values())
+        assert doc.values() != [1, 99]
         assert doc.values() != 42  # non-iterable
 
     # -- ItemsView: repr and eq --
@@ -734,10 +737,10 @@ class TestViews:
             b = 2
         """)
         )
-        pairs = list(doc.items())
-        assert doc.items() == pairs
-        assert doc.items() != [("a", 1)]
-        assert doc.items() != [("a", 1), ("b", 99)]
+        # ItemsView uses set semantics, like Python's dict_items.
+        assert doc.items() == {("a", 1), ("b", 2)}
+        assert doc.items() != {("a", 1)}
+        assert doc.items() != {("a", 1), ("b", 99)}
         assert doc.items() != 42  # non-iterable
 
     def test_items_view_contains_non_tuple(self) -> None:
@@ -808,11 +811,21 @@ class TestViews:
         doc = Document.parse("a = 1\n")
         assert doc.items() != [("a", 1), ("b", 2)]
 
-    def test_values_view_eq_element_mismatch(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            a = 1
-            b = 2
-        """)
-        )
-        assert doc.values() != [1, 99]
+
+class TestItemsViewSetEquality:
+    """ItemsView.__eq__ should be set-like (order independent), per Python spec."""
+
+    def test_items_view_eq_different_order(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        # Same pairs as a set — order should not matter.
+        assert doc.items() == {("b", 2), ("a", 1)}
+
+    def test_items_view_eq_same_order(self) -> None:
+        """Sanity: same pairs as a set should definitely be equal."""
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.items() == {("a", 1), ("b", 2)}
+
+    def test_items_view_ne_list(self) -> None:
+        """Items view should NOT equal a list (just like Python's dict_items)."""
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.items() != [("a", 1), ("b", 2)]

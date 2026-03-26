@@ -171,11 +171,11 @@ class TestSetNewKeys:
 
 
 class TestArrayOfTablesMutation:
-    def test_set_element_to_scalar(self) -> None:
+    def test_set_element_to_scalar_raises(self) -> None:
         doc = Document()
         doc["d"] = [{"a": 1}, {"b": 2}]
-        doc["d"][0] = 7
-        assert doc["d"][0] == 7
+        with pytest.raises(TypeError, match="expected a table"):
+            doc["d"][0] = 7
 
     def test_set_nested_value_in_table(self) -> None:
         doc = Document()

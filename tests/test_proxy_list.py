@@ -1171,3 +1171,27 @@ class TestSetMultiline:
                 3,
             ]
         """)
+
+
+# ---------------------------------------------------------------------------
+# Bug regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestEmptySliceDeletion:
+    """del arr[:] on an empty array must not panic from usize underflow."""
+
+    def test_del_all_slice_empty_array(self) -> None:
+        doc = Document.parse("arr = []\n")
+        del doc["arr"][:]
+        assert list(doc["arr"]) == []
+
+    def test_del_specific_slice_empty_array(self) -> None:
+        doc = Document.parse("arr = []\n")
+        del doc["arr"][0:0]
+        assert list(doc["arr"]) == []
+
+    def test_del_step_slice_empty_array(self) -> None:
+        doc = Document.parse("arr = []\n")
+        del doc["arr"][::2]
+        assert list(doc["arr"]) == []

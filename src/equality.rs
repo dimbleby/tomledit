@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{
     PyBool, PyDate, PyDateAccess, PyDateTime, PyDict, PyList, PyString, PyTime, PyTimeAccess,
+    PyTzInfoAccess,
 };
 use toml_edit::Item as ItemRs;
 
@@ -132,6 +133,10 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
                 if let (None, Some(t), None) =
                     (&dt.value().date, &dt.value().time, &dt.value().offset)
                 {
+                    // TOML local time must not equal a timezone-aware Python time.
+                    if py_time.get_tzinfo().is_some() {
+                        return Ok(false);
+                    }
                     return Ok(t.hour == py_time.get_hour()
                         && t.minute == py_time.get_minute()
                         && t.second.unwrap_or(0) == py_time.get_second()

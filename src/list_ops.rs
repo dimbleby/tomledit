@@ -277,6 +277,13 @@ fn array_setitem_slice(
     step: isize,
     values: Vec<Item>,
 ) -> PyResult<()> {
+    // Validate all values up front so a bad element never leaves the array
+    // in a partially-mutated state (mirrors the AoT path).
+    let converted: Vec<ValueRs> = values
+        .into_iter()
+        .map(into_value)
+        .collect::<PyResult<_>>()?;
+
     if step == 1 {
         // Contiguous slice: replacement can be a different length.
         let start_idx = start as usize;
@@ -287,8 +294,8 @@ fn array_setitem_slice(
         let removes_last = stop_idx == arr.len() && stop_idx > start_idx;
         let decor = save_removal_decor(
             arr,
-            removes_first && values.is_empty(),
-            removes_last && values.is_empty(),
+            removes_first && converted.is_empty(),
+            removes_last && converted.is_empty(),
         );
 
         // Remove old elements from back to front.
@@ -298,8 +305,7 @@ fn array_setitem_slice(
         }
 
         // Insert new elements at start position.
-        for (offset, value) in values.into_iter().enumerate() {
-            let mut v = into_value(value)?;
+        for (offset, mut v) in converted.into_iter().enumerate() {
             let inline = comments::take_inline_comment(&mut v);
             let idx = start_idx + offset;
             if idx >= arr.len() {
@@ -315,15 +321,14 @@ fn array_setitem_slice(
     } else {
         // Extended slice: replacement must match the slice length.
         let indices = collect_slice_indices(start, stop, step);
-        if indices.len() != values.len() {
+        if indices.len() != converted.len() {
             return Err(PyValueError::new_err(format!(
                 "attempt to assign sequence of size {} to extended slice of size {}",
-                values.len(),
+                converted.len(),
                 indices.len()
             )));
         }
-        for (idx, value) in indices.into_iter().zip(values) {
-            let mut v = into_value(value)?;
+        for (idx, mut v) in indices.into_iter().zip(converted) {
             let inline = comments::take_inline_comment(&mut v);
             arr.replace(idx, v);
             if !inline.is_empty() {
@@ -553,9 +558,11 @@ pub(crate) fn item_remove(target: ArrayLikeMut<'_>, value: &Bound<'_, PyAny>) ->
 pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResult<()> {
     match target {
         ArrayLikeMut::Array(arr) => {
+            // Validate all values up front.
+            let converted: Vec<ValueRs> =
+                items.into_iter().map(into_value).collect::<PyResult<_>>()?;
             let mut ic = comments::save_inline_comments(arr);
-            for new_item in items {
-                let mut v = into_value(new_item)?;
+            for mut v in converted {
                 let inline = comments::take_inline_comment(&mut v);
                 apply_multiline_decor(arr, &mut v);
                 arr.push(v);

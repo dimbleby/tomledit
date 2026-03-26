@@ -199,6 +199,64 @@ class TestWrongTypeErrors:
 
 
 # ---------------------------------------------------------------------------
+# Proxy keys/indices: using a ScalarItem as a key or index must not panic
+# ---------------------------------------------------------------------------
+
+
+class TestProxyAsKey:
+    """Using a ScalarItem proxy as a key/index in mutating operations must
+    not trigger a double-borrow panic.  The proxy's __index__ protocol
+    re-borrows the document, so the key must be resolved before taking
+    a mutable borrow.
+    """
+
+    def test_setitem_array_with_proxy_index(self) -> None:
+        doc = Document.parse("idx = 1\narr = [10, 20, 30]\n")
+        idx = doc["idx"]
+        doc["arr"][idx] = 99  # type: ignore[index]
+        assert doc["arr"][1] == 99
+
+    def test_delitem_array_with_proxy_index(self) -> None:
+        doc = Document.parse("idx = 1\narr = [10, 20, 30]\n")
+        idx = doc["idx"]
+        del doc["arr"][idx]  # type: ignore[arg-type]
+        assert list(doc["arr"]) == [10, 30]
+
+    def test_list_pop_with_proxy_index(self) -> None:
+        doc = Document.parse("idx = 1\narr = [10, 20, 30]\n")
+        idx = doc["idx"]
+        result = doc["arr"].pop(idx)
+        assert result == 20
+        assert list(doc["arr"]) == [10, 30]
+
+    def test_setitem_table_with_proxy_str_key(self) -> None:
+        doc = Document.parse('key = "port"\n[server]\nport = 80\n')
+        key = doc["key"]
+        doc["server"][key] = 9090  # type: ignore[index]
+        assert doc["server"]["port"] == 9090
+
+    def test_delitem_table_with_proxy_str_key(self) -> None:
+        doc = Document.parse('key = "port"\n[server]\nport = 80\n')
+        key = doc["key"]
+        del doc["server"][key]  # type: ignore[arg-type]
+        assert "port" not in doc["server"]
+
+    def test_setitem_table_with_int_proxy_gives_type_error(self) -> None:
+        """An integer proxy used as a table key should raise TypeError,
+        not panic from a double borrow in the error-handling path."""
+        doc = Document.parse("idx = 1\n[server]\nport = 80\n")
+        idx = doc["idx"]
+        with pytest.raises(TypeError, match="strings, not integers"):
+            doc["server"][idx] = "test"  # type: ignore[index]
+
+    def test_delitem_table_with_int_proxy_gives_type_error(self) -> None:
+        doc = Document.parse("idx = 1\n[server]\nport = 80\n")
+        idx = doc["idx"]
+        with pytest.raises(TypeError, match="strings, not integers"):
+            del doc["server"][idx]  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
 # Atomicity: a bad element must not leave the collection partially mutated
 # ---------------------------------------------------------------------------
 

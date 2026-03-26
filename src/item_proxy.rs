@@ -274,6 +274,10 @@ impl ItemProxy {
             return Ok(());
         }
 
+        // Resolve proxy keys before the mutable borrow — extract() on a
+        // ScalarItem triggers __index__ which re-borrows the document.
+        let resolved_key = resolve_proxy(py, key)?;
+        let key = resolved_key.as_ref().map_or(key, |v| v.bind(py));
         let value: Item = value.extract()?;
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_fresh(&doc)?;
@@ -299,6 +303,9 @@ impl ItemProxy {
             return Ok(());
         }
 
+        // Resolve proxy keys before the mutable borrow.
+        let resolved_key = resolve_proxy(py, key)?;
+        let key = resolved_key.as_ref().map_or(key, |v| v.bind(py));
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_fresh(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;

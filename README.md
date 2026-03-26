@@ -72,32 +72,23 @@ In such cases the `Item` is made stale:
 
 ```python
 doc = Document.parse('arr = ["a", "b"]')
-first = doc["arr"][0]       # `first` mostly behaves as "a"
-doc["arr"][0] = "changed"   # prefer `first` still to be "a", but...
-print(first)                # RuntimeError: this Item is stale
-```
-
-The item that performs the mutation stays valid:
-
-```python
-arr = doc["arr"]
-arr[0] = "changed"
-print(arr)                  # works as expected
+first = doc["arr"][0]         # `first` mostly behaves as "a"
+doc["arr"][0] = "changed"     # prefer `first` still to be "a", but...
+print(first)                  # RuntimeError: this Item is stale
 ```
 
 Changes in unrelated parts of the document are no problem:
 
 ```python
-arr = doc["arr"]
+first = doc["arr"][0]
 doc["foo"] = "bar"
-print(arr)                  # this is fine
+print(first)                  # this is fine
 ```
 
-If you just need the plain Python value, grab it with `.value` before the
-document changes:
+If you just need the plain Python value, grab it with `.value`:
 
 ```python
-first = doc["arr"][0].value   # "a" - a plain str, not a path
+first = doc["arr"][0].value   # "a" - a regular string, not a path
 doc["arr"][0] = "changed"
 print(first)                  # still "a"
 ```

@@ -49,7 +49,7 @@ class TestDocumentConstructor:
 
     def test_non_dict_raises(self) -> None:
         with pytest.raises(TypeError, match="must be a dict"):
-            Document(42)  # type: ignore[arg-type]
+            Document(42)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
     def test_none_is_empty(self) -> None:
         doc = Document(None)

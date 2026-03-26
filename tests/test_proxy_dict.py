@@ -332,7 +332,7 @@ class TestDocumentDictMethods:
     def test_pop_too_many_args(self) -> None:
         doc = Document.parse("x = 1\n")
         with pytest.raises(TypeError, match="at most 2 arguments"):
-            doc.pop("x", 1, 2)  # type: ignore[call-overload]
+            doc.pop("x", 1, 2)  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
 
     # -- pop return types --
 

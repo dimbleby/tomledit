@@ -912,3 +912,28 @@ class TestContainsNonStringKey:
     def test_inline_table_contains_non_string(self, key: object) -> None:
         doc = Document.parse("t = {a = 1}\n")
         assert key not in doc["t"]
+
+
+class TestGetNonStringKey:
+    """get() should return the default for non-string keys on tables/Document,
+    matching Python dict behavior (no TypeError)."""
+
+    @pytest.mark.parametrize("key", [42, 3.14, True, None])
+    def test_document_get_non_string_returns_none(self, key: object) -> None:
+        doc = Document.parse("a = 1\n")
+        assert doc.get(key) is None  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
+
+    @pytest.mark.parametrize("key", [42, 3.14, True, None])
+    def test_document_get_non_string_returns_default(self, key: object) -> None:
+        doc = Document.parse("a = 1\n")
+        assert doc.get(key, "fallback") == "fallback"  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
+
+    @pytest.mark.parametrize("key", [42, 3.14, True, None])
+    def test_dict_item_get_non_string_returns_none(self, key: object) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert doc["t"].get(key) is None
+
+    @pytest.mark.parametrize("key", [42, 3.14, True, None])
+    def test_dict_item_get_non_string_returns_default(self, key: object) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert doc["t"].get(key, "fallback") == "fallback"

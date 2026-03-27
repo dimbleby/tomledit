@@ -123,10 +123,13 @@ impl Document {
     #[pyo3(signature = (key, default=None, /))]
     pub fn get(
         slf: &Bound<'_, Self>,
-        key: &str,
+        key: &Bound<'_, PyAny>,
         default: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         let py = slf.py();
+        let Ok(key) = key.extract::<&str>() else {
+            return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
+        };
         let doc = slf.borrow();
         if doc.inner.get(key).is_some() {
             let proxy = Self::make_proxy(slf, key);

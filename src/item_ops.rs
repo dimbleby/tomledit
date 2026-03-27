@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError};
+use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDate, PyDateTime, PyDelta, PyDict, PyList, PyTime, PyTzInfo};
 use toml_edit::DocumentMut as DocumentRs;
@@ -92,8 +92,7 @@ pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult
             }
             Ok(false)
         }
-        // ScalarProxy overrides __contains__ to forward to the inner value,
-        // so in practice this is only reached for tables, arrays, and AoT.
+        // ScalarProxy overrides __contains__, so this is not expected from Python.
         _ => Err(PyTypeError::new_err(
             "TOML scalar item does not support 'in' (use .value to get the Python object)",
         )),
@@ -437,10 +436,6 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
 // Mutation: dict-like
 // ---------------------------------------------------------------------------
 
-/// Pop an element.  Returns `(removed_item, affected_key)` where
-/// `affected_key` is `Some(key)` when only that key was removed (no index
-/// shifting — safe for targeted invalidation), or `None` when indices
-/// shifted and the whole container must be invalidated.
 /// Remove a key from a table-like item, returning the removed item and key.
 pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
     match item {
@@ -453,67 +448,6 @@ pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
             None => Err(PyKeyError::new_err(key.to_owned())),
         },
         _ => Err(unsupported_op(item, "pop()")),
-    }
-}
-
-pub(crate) fn item_pop(
-    item: &mut ItemRs,
-    key: Option<&Bound<'_, PyAny>>,
-) -> PyResult<(Item, Option<Key>)> {
-    match key {
-        Some(key_obj) => match item {
-            ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
-                let key: &str = key_obj.extract()?;
-                let (removed, k) = table_pop(item, key)?;
-                Ok((removed, Some(k)))
-            }
-            ItemRs::Value(ValueRs::Array(arr)) => {
-                let idx = list_ops::resolve_index(key_obj.extract::<i64>()?, arr.len())?;
-                let is_last = idx == arr.len() - 1;
-                let mut ic = comments::save_inline_comments(arr);
-                let decor = list_ops::save_removal_decor(arr, idx == 0, is_last);
-                let removed = arr.remove(idx);
-                ic.remove(idx);
-                comments::restore_inline_comments(arr, &ic);
-                list_ops::apply_removal_decor(arr, &decor);
-                let key = is_last.then_some(Key::Int(idx));
-                Ok((Item(ItemRs::Value(removed)), key))
-            }
-            ItemRs::ArrayOfTables(aot) => {
-                let idx = list_ops::resolve_index(key_obj.extract::<i64>()?, aot.len())?;
-                let is_last = idx == aot.len() - 1;
-                let key = is_last.then_some(Key::Int(idx));
-                Ok((Item(ItemRs::Table(aot.remove(idx))), key))
-            }
-            // Only called from DictProxy (tables) and ListProxy (arrays).
-            _ => Err(unsupported_op(item, "pop()")),
-        },
-        // key=None is only used by ListProxy.pop() (arrays/AoT).
-        None => match item {
-            ItemRs::Value(ValueRs::Array(arr)) => {
-                if arr.is_empty() {
-                    return Err(PyIndexError::new_err("pop from empty array"));
-                }
-                let last = arr.len() - 1;
-                let mut ic = comments::save_inline_comments(arr);
-                let decor = list_ops::save_removal_decor(arr, false, true);
-                let removed = arr.remove(last);
-                ic.remove(last);
-                comments::restore_inline_comments(arr, &ic);
-                list_ops::apply_removal_decor(arr, &decor);
-                Ok((Item(ItemRs::Value(removed)), Some(Key::Int(last))))
-            }
-            ItemRs::ArrayOfTables(aot) => {
-                if aot.is_empty() {
-                    return Err(PyIndexError::new_err("pop from empty array"));
-                }
-                let last = aot.len() - 1;
-                Ok((Item(ItemRs::Table(aot.remove(last))), Some(Key::Int(last))))
-            }
-            _ => Err(PyTypeError::new_err(
-                "pop() with no argument is only supported on arrays",
-            )),
-        },
     }
 }
 

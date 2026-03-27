@@ -149,6 +149,16 @@ class TestWrongTypeErrors:
         with pytest.raises(TypeError, match="indices must be integers or strings"):
             del doc["arr"][1.5]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
+    def test_getitem_float_key_on_scalar_raises(self) -> None:
+        doc = Document.parse("val = 42\n")
+        with pytest.raises(TypeError, match="indices must be integers or strings"):
+            doc["val"][1.5]  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
+
+    def test_delitem_int_key_on_inline_table_raises(self) -> None:
+        doc = Document.parse("t = {a = 1}\n")
+        with pytest.raises(KeyError):
+            del doc["t"][0]
+
     # -- missing keys --
 
     def test_getitem_missing_nested_key_raises(self) -> None:

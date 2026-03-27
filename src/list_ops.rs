@@ -663,6 +663,40 @@ pub(crate) fn item_set_multiline(target: ArrayLikeMut<'_>, indent: usize) -> PyR
     }
 }
 
+/// Pop an element from an array-like item.
+///
+/// When `index` is `Some`, pops by index; when `None`, pops the last element.
+pub(crate) fn list_pop(
+    target: ArrayLikeMut<'_>,
+    index: Option<&Bound<'_, PyAny>>,
+) -> PyResult<(Item, Option<Key>)> {
+    let len = target.len();
+    let idx = match index {
+        Some(key_obj) => resolve_index(key_obj.extract::<i64>()?, len)?,
+        None => {
+            if len == 0 {
+                return Err(PyIndexError::new_err("pop from empty array"));
+            }
+            len - 1
+        }
+    };
+    let is_last = idx + 1 == len;
+    let removed = match target {
+        ArrayLikeMut::Array(arr) => {
+            let mut ic = comments::save_inline_comments(arr);
+            let decor = save_removal_decor(arr, idx == 0, is_last);
+            let removed = arr.remove(idx);
+            ic.remove(idx);
+            comments::restore_inline_comments(arr, &ic);
+            apply_removal_decor(arr, &decor);
+            Item(ItemRs::Value(removed))
+        }
+        ArrayLikeMut::Aot(aot) => Item(ItemRs::Table(aot.remove(idx))),
+    };
+    let key = is_last.then_some(Key::Int(idx));
+    Ok((removed, key))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

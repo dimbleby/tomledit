@@ -49,8 +49,9 @@ impl ListProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
+        let target = list_ops::as_array_like_mut(item, "pop()")?;
 
-        let (removed, affected_key) = item_ops::item_pop(item, index)?;
+        let (removed, affected_key) = list_ops::list_pop(target, index)?;
         let result = item_ops::item_to_py(&removed.0, py)?;
         base.bump_affected(&mut doc, affected_key);
         Ok(result)

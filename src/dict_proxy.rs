@@ -1,8 +1,10 @@
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
+use toml_edit::DocumentMut as DocumentRs;
 
 use crate::dict_ops;
+use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
 use crate::item_proxy::{self, ItemProxy};
@@ -132,6 +134,73 @@ impl DictProxy {
         let (key, val) = dict_ops::item_popitem(item, py)?;
         base.bump_child(&mut doc, Key::Str(key.clone()));
         Ok((key, val))
+    }
+
+    pub fn __or__(
+        self_: PyRef<'_, Self>,
+        py: Python<'_>,
+        other: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        if !dict_ops::is_mapping_like(other) {
+            return Ok(py.NotImplemented());
+        }
+        let base = self_.into_super();
+        let mut new_doc = {
+            let doc = base.document.bind(py).borrow();
+            base.check_fresh(&doc)?;
+            let item = base.navigate(&doc.inner)?;
+            let mut nd = DocumentRs::new();
+            nd["_"] = item.clone();
+            nd
+        };
+        dict_ops::merge_other_into(&mut new_doc["_"], other, py)?;
+        let doc_py = Py::new(py, Document::from_inner(new_doc))?;
+        let proxy = ItemProxy::new(doc_py, vec![Key::Str("_".to_owned())], 0);
+        ItemProxy::into_typed(py, proxy)
+    }
+
+    pub fn __ror__(
+        self_: PyRef<'_, Self>,
+        py: Python<'_>,
+        other: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        if !dict_ops::is_mapping_like(other) {
+            return Ok(py.NotImplemented());
+        }
+        // LHS is a plain mapping → result should be a plain dict.
+        let pairs = dict_ops::extract_update_pairs(other)?;
+        let dict = PyDict::new(py);
+        for (k, v) in &pairs {
+            dict.set_item(k, item_ops::item_to_py(&v.0, py)?)?;
+        }
+        let base = self_.into_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_fresh(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        let tbl = item
+            .as_table_like()
+            .ok_or_else(|| item_ops::unsupported_op(item, "|"))?;
+        for (k, v) in tbl.iter() {
+            dict.set_item(k, item_ops::item_to_py(v, py)?)?;
+        }
+        Ok(dict.into_any().unbind())
+    }
+
+    pub fn __ior__(
+        self_: PyRefMut<'_, Self>,
+        py: Python<'_>,
+        other: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let pairs = dict_ops::extract_update_pairs(other)?;
+        let base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_fresh(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        let replaced_keys = dict_ops::apply_update_pairs(item, pairs)?;
+        for key in replaced_keys {
+            base.bump_child(&mut doc, Key::Str(key));
+        }
+        Ok(())
     }
 
     #[pyo3(signature = (other=None, /, **kwargs))]

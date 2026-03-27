@@ -5,8 +5,10 @@ use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
 use crate::comments;
+use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, unsupported_op};
+use crate::item_proxy::ItemProxy;
 
 // ---------------------------------------------------------------------------
 // Decor preservation
@@ -162,9 +164,9 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
         return Ok(pairs);
     }
 
-    // Mapping with .keys()
-    if let Ok(keys_method) = other.getattr("keys") {
-        let keys = keys_method.call0()?;
+    // Mapping — use .keys() + __getitem__ protocol.
+    if is_abc_mapping(other) {
+        let keys = other.call_method0("keys")?;
         let mut pairs = Vec::new();
         for key_obj in keys.try_iter()? {
             let key_obj = key_obj?;
@@ -204,4 +206,98 @@ pub(crate) fn apply_update_pairs(
         }
     }
     Ok(replaced_keys)
+}
+
+// ---------------------------------------------------------------------------
+// TOML-level merge (preserves key decor / block comments)
+// ---------------------------------------------------------------------------
+
+/// Merge entries from `source` into `target` at the `toml_edit` level,
+/// preserving key decorations (block comments) from the source for newly
+/// inserted keys.  Conflicting keys use the source value (the target's
+/// value decor is preserved).
+///
+/// Returns the list of keys that were overridden.
+pub(crate) fn merge_table_entries(target: &mut ItemRs, source: &ItemRs) -> PyResult<Vec<String>> {
+    let src = source
+        .as_table_like()
+        .ok_or_else(|| unsupported_op(source, "|"))?;
+    let tgt = target
+        .as_table_like()
+        .ok_or_else(|| unsupported_op(target, "|"))?;
+
+    // Collect source keys up-front to avoid borrow conflicts.
+    let keys: Vec<String> = src.iter().map(|(k, _)| k.to_owned()).collect();
+    // Pre-check which keys already exist in the target.
+    let existed: Vec<bool> = keys.iter().map(|k| tgt.contains_key(k)).collect();
+
+    let mut replaced = Vec::new();
+
+    for (key, existed) in keys.into_iter().zip(existed) {
+        if existed {
+            replaced.push(key.clone());
+        }
+
+        // Clone the source value via the TableLike trait.  For inline tables
+        // this wraps the Value in an Item automatically.
+        let src_val = src.get(&key).unwrap().clone();
+        set_with_decor_preservation(target, &key, Item(src_val));
+
+        // For NEW keys, copy the source key's decor (block comments).
+        if !existed && let Some((src_key, _)) = src.get_key_value(&key) {
+            let decor = src_key.leaf_decor().clone();
+            let tgt = target.as_table_like_mut().expect("target checked above");
+            if let Some(mut km) = tgt.key_mut(&key) {
+                if let Some(p) = decor.prefix() {
+                    km.leaf_decor_mut().set_prefix(p.clone());
+                }
+                if let Some(s) = decor.suffix() {
+                    km.leaf_decor_mut().set_suffix(s.clone());
+                }
+            }
+        }
+    }
+
+    Ok(replaced)
+}
+
+/// Merge `other` (a Python object) into `target`, dispatching to
+/// [`merge_table_entries`] when `other` is a TOML-aware type (preserving
+/// key decor / block comments) and falling back to [`extract_update_pairs`]
+/// for plain Python mappings.
+pub(crate) fn merge_other_into(
+    target: &mut ItemRs,
+    other: &Bound<'_, PyAny>,
+    py: Python<'_>,
+) -> PyResult<Vec<String>> {
+    if let Ok(proxy) = other.cast::<ItemProxy>() {
+        let pb = proxy.borrow();
+        let other_doc = pb.document.bind(py).borrow();
+        pb.check_fresh(&other_doc)?;
+        let other_item = pb.navigate(&other_doc.inner)?;
+        return merge_table_entries(target, other_item);
+    }
+    if let Ok(doc_bound) = other.cast::<Document>() {
+        let doc = doc_bound.borrow();
+        return merge_table_entries(target, doc.inner.as_item());
+    }
+    // Plain mapping / iterable — no TOML decor to preserve.
+    apply_update_pairs(target, extract_update_pairs(other)?)
+}
+
+/// Returns `true` if `other` is a `Mapping` (the `collections.abc` ABC),
+/// or a TOML-aware type (`ItemProxy` or `Document`).
+pub(crate) fn is_mapping_like(other: &Bound<'_, PyAny>) -> bool {
+    other.is_instance_of::<ItemProxy>()
+        || other.is_instance_of::<Document>()
+        || other.is_instance_of::<PyDict>()
+        || is_abc_mapping(other)
+}
+
+fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> bool {
+    let py = obj.py();
+    py.import("collections.abc")
+        .and_then(|m| m.getattr("Mapping"))
+        .and_then(|cls| obj.is_instance(&cls))
+        .unwrap_or(false)
 }

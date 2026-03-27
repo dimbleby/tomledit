@@ -8,6 +8,7 @@ from types import MappingProxyType
 
 import pytest
 
+import tomledit
 from tests.conftest import toml_literal
 from tomledit import Document
 
@@ -972,3 +973,220 @@ class TestPopitem:
         assert key == "b"
         assert val == 2
         assert list(doc["t"]) == ["a"]
+
+
+class TestMergeOperators:
+    """| and |= operators (PEP 584)."""
+
+    # -- Document | other --
+
+    def test_document_or_dict(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        result = doc | {"b": 3, "c": 4}
+        assert isinstance(result, Document)
+        assert result.as_toml() == toml_literal("""
+            a = 1
+            b = 3
+            c = 4
+        """)
+        assert doc.as_toml() == "a = 1\nb = 2\n"  # original unchanged
+
+    def test_document_or_document(self) -> None:
+        d1 = Document.parse("# on a\na = 1\n")
+        d2 = Document.parse("# on b\nb = 2\n")
+        result = d1 | d2
+        assert isinstance(result, Document)
+        assert result.as_toml() == toml_literal("""
+            # on a
+            a = 1
+            # on b
+            b = 2
+        """)
+
+    def test_document_or_override_keeps_lhs_comment(self) -> None:
+        """When RHS overrides a key, the LHS comment on that key is kept."""
+        doc = Document.parse("# important\na = 1\n")
+        result = doc | {"a": 99}
+        assert result.as_toml() == toml_literal("""
+            # important
+            a = 99
+        """)
+
+    # -- other | Document (__ror__ returns plain dict) --
+
+    def test_dict_or_document(self) -> None:
+        doc = Document.parse("b = 2\n")
+        result = {"a": 1} | doc
+        assert isinstance(result, dict)
+        assert result == {"a": 1, "b": 2}
+
+    def test_dict_or_document_override(self) -> None:
+        doc = Document.parse("a = 99\nb = 2\n")
+        result = {"a": 1} | doc
+        assert result == {"a": 99, "b": 2}
+
+    # -- Document |= other --
+
+    def test_document_ior(self) -> None:
+        doc = Document.parse("# on a\na = 1\n")
+        doc |= {"b": 2, "c": 3}
+        assert isinstance(doc, Document)
+        assert doc.as_toml() == toml_literal("""
+            # on a
+            a = 1
+            b = 2
+            c = 3
+        """)
+
+    def test_document_ior_override(self) -> None:
+        doc = Document.parse("# keep this\na = 1\nb = 2\n")
+        doc |= {"b": 3}
+        assert doc.as_toml() == toml_literal("""
+            # keep this
+            a = 1
+            b = 3
+        """)
+
+    # -- DictItem | other --
+
+    def test_dict_item_or_dict(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        result = doc["t"] | {"b": 2}
+        assert isinstance(result, tomledit.DictItem)
+        assert result.value == {"a": 1, "b": 2}
+        assert doc["t"].value == {"a": 1}  # original unchanged
+
+    def test_dict_item_or_dict_item(self) -> None:
+        d1 = Document.parse("[x]\n# on a\na = 1\n")
+        d2 = Document.parse("[y]\n# on b\nb = 2  # inline\n")
+        result = d1["x"] | d2["y"]
+        assert isinstance(result, tomledit.DictItem)
+        assert result["a"].comment == "# on a"
+        assert result["b"].comment == "# on b"
+        assert result["b"].inline_comment == "# inline"
+        assert result.value == {"a": 1, "b": 2}
+
+    # -- other | DictItem (__ror__ returns plain dict) --
+
+    def test_dict_or_dict_item(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        result = {"b": 2} | doc["t"]
+        assert isinstance(result, dict)
+        assert result == {"a": 1, "b": 2}
+
+    # -- DictItem |= other --
+
+    def test_dict_item_ior(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        t = doc["t"]
+        t |= {"b": 2}
+        assert doc.as_toml() == toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+
+    # -- InlineTable --
+
+    def test_inline_table_or(self) -> None:
+        doc = Document.parse("t = {a = 1}\n")
+        result = doc["t"] | {"b": 2}
+        assert isinstance(result, tomledit.DictItem)
+        assert result.value == {"a": 1, "b": 2}
+
+    # -- Empty cases --
+
+    def test_document_or_empty(self) -> None:
+        doc = Document.parse("a = 1\n")
+        result = doc | {}
+        assert result.as_toml() == "a = 1\n"
+
+    def test_empty_document_or_dict(self) -> None:
+        doc = Document()
+        result = doc | {"a": 1}
+        assert isinstance(result, Document)
+        assert result.value == {"a": 1}
+
+    # -- |= with iterables of pairs --
+
+    def test_document_ior_list_of_pairs(self) -> None:
+        doc = Document.parse("a = 1\n")
+        doc |= [("b", 2), ("c", 3)]
+        assert doc.as_toml() == toml_literal("""
+            a = 1
+            b = 2
+            c = 3
+        """)
+
+    def test_dict_item_ior_list_of_pairs(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        doc["t"] |= [("b", 2)]
+        assert doc.as_toml() == toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+
+    def test_document_ior_generator(self) -> None:
+        doc = Document.parse("a = 1\n")
+        doc |= ((k, v) for k, v in [("b", 2), ("c", 3)])
+        assert doc.as_toml() == toml_literal("""
+            a = 1
+            b = 2
+            c = 3
+        """)
+
+    # -- Inline table merges (toml_edit-level) --
+
+    def test_inline_table_or_inline_table(self) -> None:
+        doc1 = Document.parse("t = {a = 1}\n")
+        doc2 = Document.parse("u = {b = 2}\n")
+        result = doc1["t"] | doc2["u"]
+        assert isinstance(result, tomledit.DictItem)
+        assert result.value == {"a": 1, "b": 2}
+
+    def test_inline_table_ior_inline_table(self) -> None:
+        doc1 = Document.parse("t = {a = 1}\n")
+        doc2 = Document.parse("u = {b = 2, c = 3}\n")
+        doc1["t"] |= doc2["u"]
+        assert doc1.as_toml() == "t = {a = 1, b = 2, c = 3}\n"
+
+    def test_inline_table_or_replaces_existing_key(self) -> None:
+        doc1 = Document.parse("t = {a = 1, b = 2}\n")
+        doc2 = Document.parse("u = {b = 99}\n")
+        result = doc1["t"] | doc2["u"]
+        assert result.value == {"a": 1, "b": 99}
+
+    # -- NotImplemented / TypeError for non-mappings --
+
+    def test_document_or_non_mapping_raises(self) -> None:
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(TypeError, match="unsupported operand"):
+            doc | 42  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+
+    def test_document_ror_non_mapping_raises(self) -> None:
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(TypeError, match="unsupported operand"):
+            42 | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+
+    def test_dict_item_or_non_mapping_raises(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="unsupported operand"):
+            doc["t"] | 42
+
+    def test_dict_item_ror_non_mapping_raises(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="unsupported operand"):
+            42 | doc["t"]
+
+    # -- |= replaces existing keys --
+
+    def test_dict_item_ior_replaces_existing(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        t = doc["t"]
+        t |= {"b": 99}
+        assert doc.as_toml() == toml_literal("""
+            [t]
+            a = 1
+            b = 99
+        """)

@@ -206,6 +206,48 @@ impl Document {
         Ok((key, val))
     }
 
+    pub fn __or__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        let py = slf.py();
+        if !dict_ops::is_mapping_like(other) {
+            return Ok(py.NotImplemented());
+        }
+        let mut new_inner = slf.borrow().inner.clone();
+        let replaced = dict_ops::merge_other_into(new_inner.as_item_mut(), other, py)?;
+        let mut doc = Self::from_inner(new_inner);
+        for key in replaced {
+            doc.bump_at(&[Key::Str(key)]);
+        }
+        Ok(Py::new(py, doc)?.into_any())
+    }
+
+    pub fn __ror__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        let py = slf.py();
+        if !dict_ops::is_mapping_like(other) {
+            return Ok(py.NotImplemented());
+        }
+        // LHS is a plain mapping → result should be a plain dict.
+        let pairs = dict_ops::extract_update_pairs(other)?;
+        let dict = PyDict::new(py);
+        for (k, v) in &pairs {
+            dict.set_item(k, item_ops::item_to_py(&v.0, py)?)?;
+        }
+        let doc = slf.borrow();
+        for (k, v) in doc.inner.iter() {
+            dict.set_item(k, item_ops::item_to_py(v, py)?)?;
+        }
+        Ok(dict.into_any().unbind())
+    }
+
+    pub fn __ior__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<()> {
+        let pairs = dict_ops::extract_update_pairs(other)?;
+        let mut doc = slf.borrow_mut();
+        let replaced_keys = dict_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
+        for key in replaced_keys {
+            doc.bump_at(&[Key::Str(key)]);
+        }
+        Ok(())
+    }
+
     #[pyo3(signature = (other=None, /, **kwargs))]
     pub fn update(
         slf: &Bound<'_, Self>,

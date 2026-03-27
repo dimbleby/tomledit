@@ -1,6 +1,5 @@
 use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
@@ -518,50 +517,37 @@ pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> 
     }
 }
 
-/// Remove the first matching element.  Returns `Some(Key::Int(idx))` when
-/// only that element was removed (last position — no shifting), or `None`
-/// when earlier indices shifted and the whole container must be invalidated.
-pub(crate) fn item_remove(
-    target: ArrayLikeMut<'_>,
-    value: &Bound<'_, PyAny>,
-) -> PyResult<Option<Key>> {
+/// Remove the element at `index`.  Returns `Some(Key::Int(idx))` when
+/// only the last element was removed (no shifting), or `None` when
+/// earlier indices shifted and the whole container must be invalidated.
+pub(crate) fn item_remove_at(target: ArrayLikeMut<'_>, index: usize) -> PyResult<Option<Key>> {
     match target {
         ArrayLikeMut::Array(arr) => {
+            if index >= arr.len() {
+                return Err(PyIndexError::new_err("array index out of range"));
+            }
             let mut ic = comments::save_inline_comments(arr);
             let mut decor = save_removal_decor(arr, true, true);
-            for i in 0..arr.len() {
-                if let Some(v) = arr.get(i)
-                    && equality::value_eq(v, value)?
-                {
-                    let last = arr.len() - 1;
-                    if i != 0 {
-                        decor.first_prefix = None;
-                    }
-                    if i != last {
-                        decor.last_suffix = None;
-                    }
-                    arr.remove(i);
-                    ic.remove(i);
-                    comments::restore_inline_comments(arr, &ic);
-                    apply_removal_decor(arr, &decor);
-                    return Ok((i == last).then_some(Key::Int(i)));
-                }
+            let last = arr.len() - 1;
+            if index != 0 {
+                decor.first_prefix = None;
             }
-            Err(PyValueError::new_err("value not in array"))
+            if index != last {
+                decor.last_suffix = None;
+            }
+            arr.remove(index);
+            ic.remove(index);
+            comments::restore_inline_comments(arr, &ic);
+            apply_removal_decor(arr, &decor);
+            Ok((index == last).then_some(Key::Int(index)))
         }
         ArrayLikeMut::Aot(aot) => {
-            if let Ok(other_dict) = value.cast::<PyDict>() {
-                for i in 0..aot.len() {
-                    if let Some(table) = aot.get(i)
-                        && equality::table_entries_eq(table.iter(), table.len(), other_dict)?
-                    {
-                        let last = aot.len() - 1;
-                        aot.remove(i);
-                        return Ok((i == last).then_some(Key::Int(i)));
-                    }
-                }
+            if index >= aot.len() {
+                return Err(PyIndexError::new_err("array index out of range"));
             }
-            Err(PyValueError::new_err("value not in array"))
+            let last = aot.len() - 1;
+            aot.remove(index);
+            Ok((index == last).then_some(Key::Int(index)))
         }
     }
 }
@@ -609,17 +595,13 @@ pub(crate) fn item_count(target: ArrayLikeRef<'_>, value: &Bound<'_, PyAny>) -> 
             Ok(count)
         }
         ArrayLikeRef::Aot(aot) => {
-            if let Ok(other_dict) = value.cast::<PyDict>() {
-                let mut count = 0;
-                for table in aot.iter() {
-                    if equality::table_entries_eq(table.iter(), table.len(), other_dict)? {
-                        count += 1;
-                    }
+            let mut count = 0;
+            for table in aot.iter() {
+                if equality::table_eq(table, value)? {
+                    count += 1;
                 }
-                Ok(count)
-            } else {
-                Ok(0)
             }
+            Ok(count)
         }
     }
 }
@@ -648,13 +630,11 @@ pub(crate) fn item_index(
             let len = aot.len();
             let start = clamp_index(start.unwrap_or(0), len);
             let stop = clamp_index(stop.unwrap_or(len as i64), len);
-            if let Ok(other_dict) = value.cast::<PyDict>() {
-                for i in start..stop {
-                    if let Some(table) = aot.get(i)
-                        && equality::table_entries_eq(table.iter(), table.len(), other_dict)?
-                    {
-                        return Ok(i);
-                    }
+            for i in start..stop {
+                if let Some(table) = aot.get(i)
+                    && equality::table_eq(table, value)?
+                {
+                    return Ok(i);
                 }
             }
             Err(PyValueError::new_err("value not in array"))

@@ -59,11 +59,8 @@ pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult
             Ok(false)
         }
         ItemRs::ArrayOfTables(aot) => {
-            let Ok(other_dict) = value.cast::<PyDict>() else {
-                return Ok(false);
-            };
             for table in aot.iter() {
-                if equality::table_entries_eq(table.iter(), table.len(), other_dict)? {
+                if equality::table_eq(table, value)? {
                     return Ok(true);
                 }
             }

@@ -1205,3 +1205,64 @@ class TestMergeOperators:
             a = 1
             b = 99
         """)
+
+
+class TestViewContainsProxy:
+    """ValuesView/ItemsView.__contains__ must accept proxy values.
+
+    The views yield proxies from __iter__, so __contains__ must recognise
+    those same proxies — otherwise ``x in view`` fails for the very
+    objects the view itself produces.
+    """
+
+    def test_values_contains_string_proxy(self) -> None:
+        doc = Document.parse('name = "Alice"\n')
+        assert doc["name"] in doc.values()
+
+    def test_values_contains_bool_proxy(self) -> None:
+        doc = Document.parse("flag = true\n")
+        assert doc["flag"] in doc.values()
+
+    def test_values_contains_int_proxy(self) -> None:
+        doc = Document.parse("num = 42\n")
+        assert doc["num"] in doc.values()
+
+    def test_values_contains_table_proxy(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert doc["t"] in doc.values()
+
+    def test_values_contains_array_proxy(self) -> None:
+        doc = Document.parse("arr = [1, 2]\n")
+        assert doc["arr"] in doc.values()
+
+    def test_items_contains_string_proxy(self) -> None:
+        doc = Document.parse('name = "Alice"\n')
+        assert ("name", doc["name"]) in doc.items()
+
+    def test_items_contains_bool_proxy(self) -> None:
+        doc = Document.parse("flag = true\n")
+        assert ("flag", doc["flag"]) in doc.items()
+
+    def test_items_contains_table_proxy(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert ("t", doc["t"]) in doc.items()
+
+    def test_iter_values_roundtrip(self) -> None:
+        """Every value from iter(values()) must be found by __contains__."""
+        doc = Document.parse('a = 1\nb = "hi"\nc = true\n')
+        for v in doc.values():
+            assert v in doc.values()
+
+    def test_iter_items_roundtrip(self) -> None:
+        """Every pair from iter(items()) must be found by __contains__."""
+        doc = Document.parse('a = 1\nb = "hi"\nc = true\n')
+        for pair in doc.items():
+            assert pair in doc.items()
+
+    def test_dictitem_values_contains_proxy(self) -> None:
+        doc = Document.parse('[t]\nname = "Bob"\n')
+        assert doc["t"]["name"] in doc["t"].values()
+
+    def test_dictitem_items_contains_proxy(self) -> None:
+        doc = Document.parse('[t]\nname = "Bob"\n')
+        assert ("name", doc["t"]["name"]) in doc["t"].items()

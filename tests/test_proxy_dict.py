@@ -892,3 +892,23 @@ class TestItemsViewEqUnhashable:
         doc1 = Document.parse("a = [1, 2]\n")
         doc2 = Document.parse("a = [1, 3]\n")
         assert doc1.items() != doc2.items()
+
+
+class TestContainsNonStringKey:
+    """__contains__ should return False for non-string keys on tables/Document,
+    matching Python dict behavior (no TypeError)."""
+
+    @pytest.mark.parametrize("key", [42, 3.14, True, None, [1, 2], {"x": 1}])
+    def test_document_contains_non_string(self, key: object) -> None:
+        doc = Document.parse("a = 1\n")
+        assert key not in doc
+
+    @pytest.mark.parametrize("key", [42, 3.14, True, None, [1, 2], {"x": 1}])
+    def test_dict_item_contains_non_string(self, key: object) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert key not in doc["t"]
+
+    @pytest.mark.parametrize("key", [42, 3.14, True, None, [1, 2], {"x": 1}])
+    def test_inline_table_contains_non_string(self, key: object) -> None:
+        doc = Document.parse("t = {a = 1}\n")
+        assert key not in doc["t"]

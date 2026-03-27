@@ -234,6 +234,7 @@ source = { editable = "." }
 dev = [
     { name = "mypy" },
     { name = "pytest" },
+    { name = "typing-extensions" },
 ]
 
 [package.metadata]
@@ -242,6 +243,7 @@ dev = [
 dev = [
     { name = "mypy", specifier = ">=1.19.1" },
     { name = "pytest", specifier = ">=8.4.2" },
+    { name = "typing-extensions", specifier = ">=4.15.0" },
 ]
 
 [[package]]

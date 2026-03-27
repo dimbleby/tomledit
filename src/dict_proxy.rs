@@ -100,16 +100,15 @@ impl DictProxy {
         let resolved = item_proxy::resolve_proxy(py, key)?;
         let key = resolved.as_ref().map_or(key, |v| v.bind(py));
 
-        let base = self_.into_super();
+        let mut base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
 
         match item_ops::item_pop(item, Some(key)) {
-            Ok(removed) => {
+            Ok((removed, affected_key)) => {
                 let result = item_ops::item_to_py(&removed.0, py)?;
-                let popped_key: String = key.extract()?;
-                base.bump_child(&mut doc, Key::Str(popped_key));
+                base.bump_affected(&mut doc, affected_key);
                 Ok(result)
             }
             Err(e)

@@ -120,14 +120,6 @@ class TestStaleProxyViaProxy:
         with pytest.raises(RuntimeError, match="stale"):
             _ = a.value
 
-    def test_stale_after_proxy_pop(self) -> None:
-        doc = Document.parse("arr = [1, 2, 3]")
-        item = doc["arr"][0]
-        arr = doc["arr"]
-        arr.pop()
-        with pytest.raises(RuntimeError, match="stale"):
-            _ = item.value
-
     def test_valid_after_additive_proxy_update(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -530,3 +522,72 @@ class TestDocumentFmtPreservesProxies:
         proxy = doc["x"]
         doc.fmt()
         assert proxy.value == 1
+
+
+class TestEndOfArrayOptimizations:
+    """End-of-array mutations should NOT invalidate sibling element proxies."""
+
+    def test_pop_last_preserves_earlier_proxies(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        first = doc["arr"][0]
+        second = doc["arr"][1]
+        doc["arr"].pop()
+        assert first.value == 1
+        assert second.value == 2
+
+    def test_pop_middle_invalidates_later_proxies(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        last = doc["arr"][2]
+        doc["arr"].pop(0)
+        with pytest.raises(RuntimeError):
+            _ = last.value
+
+    def test_del_last_preserves_earlier_proxies(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        first = doc["arr"][0]
+        del doc["arr"][-1]
+        assert first.value == 1
+
+    def test_del_middle_invalidates_later_proxies(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        last = doc["arr"][2]
+        del doc["arr"][1]
+        with pytest.raises(RuntimeError):
+            _ = last.value
+
+    def test_insert_at_end_preserves_existing_proxies(self) -> None:
+        doc = Document.parse("arr = [1, 2]")
+        first = doc["arr"][0]
+        second = doc["arr"][1]
+        doc["arr"].insert(99, 3)  # clamps to end
+        assert first.value == 1
+        assert second.value == 2
+        assert doc["arr"][2].value == 3
+
+    def test_insert_at_middle_invalidates_proxies(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        last = doc["arr"][2]
+        doc["arr"].insert(1, 99)
+        with pytest.raises(RuntimeError):
+            _ = last.value
+
+    def test_remove_last_preserves_earlier_proxies(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        first = doc["arr"][0]
+        doc["arr"].remove(3)
+        assert first.value == 1
+
+    def test_remove_first_invalidates_later_proxies(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        last = doc["arr"][2]
+        doc["arr"].remove(1)
+        with pytest.raises(RuntimeError):
+            _ = last.value
+
+    def test_pop_last_invalidates_popped_proxy(self) -> None:
+        """The removed element's proxy should still be stale."""
+        doc = Document.parse("arr = [1, 2, 3]")
+        third = doc["arr"][2]
+        doc["arr"].pop()
+        with pytest.raises((RuntimeError, IndexError)):
+            _ = third.value

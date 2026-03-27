@@ -357,36 +357,41 @@ pub(crate) fn item_setitem(
 // Delitem
 // ---------------------------------------------------------------------------
 
-pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Key> {
+/// Delete an element.  Returns `Some(key)` when only that key was removed
+/// (no index shifting — safe for targeted invalidation), or `None` when
+/// indices shifted and the whole container must be invalidated.
+pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Option<Key>> {
     match item {
         ItemRs::Table(table) => {
             let k = require_str_key(key)?;
             if table.remove(&k).is_none() {
                 return Err(PyKeyError::new_err(k));
             }
-            Ok(Key::Str(k))
+            Ok(Some(Key::Str(k)))
         }
         ItemRs::Value(ValueRs::InlineTable(it)) => {
             let k = require_str_key(key)?;
             if it_remove(it, &k).is_none() {
                 return Err(PyKeyError::new_err(k));
             }
-            Ok(Key::Str(k))
+            Ok(Some(Key::Str(k)))
         }
         ItemRs::Value(ValueRs::Array(array)) => {
             let idx = list_ops::resolve_index(require_int_key(key)?, array.len())?;
+            let is_last = idx == array.len() - 1;
             let mut ic = comments::save_inline_comments(array);
-            let decor = list_ops::save_removal_decor(array, idx == 0, idx == array.len() - 1);
+            let decor = list_ops::save_removal_decor(array, idx == 0, is_last);
             array.remove(idx);
             ic.remove(idx);
             comments::restore_inline_comments(array, &ic);
             list_ops::apply_removal_decor(array, &decor);
-            Ok(Key::Int(idx))
+            Ok(is_last.then_some(Key::Int(idx)))
         }
         ItemRs::ArrayOfTables(aot) => {
             let idx = list_ops::resolve_index(require_int_key(key)?, aot.len())?;
+            let is_last = idx == aot.len() - 1;
             aot.remove(idx);
-            Ok(Key::Int(idx))
+            Ok(is_last.then_some(Key::Int(idx)))
         }
         _ => Err(PyTypeError::new_err(format!(
             "TOML {} item is not subscriptable",
@@ -399,35 +404,47 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
 // Mutation: dict-like
 // ---------------------------------------------------------------------------
 
-pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyResult<Item> {
+/// Pop an element.  Returns `(removed_item, affected_key)` where
+/// `affected_key` is `Some(key)` when only that key was removed (no index
+/// shifting — safe for targeted invalidation), or `None` when indices
+/// shifted and the whole container must be invalidated.
+pub(crate) fn item_pop(
+    item: &mut ItemRs,
+    key: Option<&Bound<'_, PyAny>>,
+) -> PyResult<(Item, Option<Key>)> {
     match key {
         Some(key_obj) => match item {
             ItemRs::Table(table) => {
                 let key: &str = key_obj.extract()?;
-                table
-                    .remove(key)
-                    .map(Item)
-                    .ok_or_else(|| PyKeyError::new_err(key.to_owned()))
+                match table.remove(key) {
+                    Some(v) => Ok((Item(v), Some(Key::Str(key.into())))),
+                    None => Err(PyKeyError::new_err(key.to_owned())),
+                }
             }
             ItemRs::Value(ValueRs::InlineTable(it)) => {
                 let key: &str = key_obj.extract()?;
-                it_remove(it, key)
-                    .map(|v| Item(ItemRs::Value(v)))
-                    .ok_or_else(|| PyKeyError::new_err(key.to_owned()))
+                match it_remove(it, key) {
+                    Some(v) => Ok((Item(ItemRs::Value(v)), Some(Key::Str(key.into())))),
+                    None => Err(PyKeyError::new_err(key.to_owned())),
+                }
             }
             ItemRs::Value(ValueRs::Array(arr)) => {
                 let idx = list_ops::resolve_index(key_obj.extract::<i64>()?, arr.len())?;
+                let is_last = idx == arr.len() - 1;
                 let mut ic = comments::save_inline_comments(arr);
-                let decor = list_ops::save_removal_decor(arr, idx == 0, idx == arr.len() - 1);
+                let decor = list_ops::save_removal_decor(arr, idx == 0, is_last);
                 let removed = arr.remove(idx);
                 ic.remove(idx);
                 comments::restore_inline_comments(arr, &ic);
                 list_ops::apply_removal_decor(arr, &decor);
-                Ok(Item(ItemRs::Value(removed)))
+                let key = is_last.then_some(Key::Int(idx));
+                Ok((Item(ItemRs::Value(removed)), key))
             }
             ItemRs::ArrayOfTables(aot) => {
                 let idx = list_ops::resolve_index(key_obj.extract::<i64>()?, aot.len())?;
-                Ok(Item(ItemRs::Table(aot.remove(idx))))
+                let is_last = idx == aot.len() - 1;
+                let key = is_last.then_some(Key::Int(idx));
+                Ok((Item(ItemRs::Table(aot.remove(idx))), key))
             }
             _ => Err(unsupported_op(item, "pop()")),
         },
@@ -443,14 +460,14 @@ pub(crate) fn item_pop(item: &mut ItemRs, key: Option<&Bound<'_, PyAny>>) -> PyR
                 ic.remove(last);
                 comments::restore_inline_comments(arr, &ic);
                 list_ops::apply_removal_decor(arr, &decor);
-                Ok(Item(ItemRs::Value(removed)))
+                Ok((Item(ItemRs::Value(removed)), Some(Key::Int(last))))
             }
             ItemRs::ArrayOfTables(aot) => {
                 if aot.is_empty() {
                     return Err(PyIndexError::new_err("pop from empty array"));
                 }
                 let last = aot.len() - 1;
-                Ok(Item(ItemRs::Table(aot.remove(last))))
+                Ok((Item(ItemRs::Table(aot.remove(last))), Some(Key::Int(last))))
             }
             _ => Err(PyTypeError::new_err(
                 "pop() with no argument is only supported on arrays",

@@ -168,7 +168,7 @@ impl Document {
     pub fn pop(
         &mut self,
         py: Python<'_>,
-        key: &str,
+        key: &Bound<'_, PyAny>,
         default: &Bound<'_, PyTuple>,
     ) -> PyResult<Py<PyAny>> {
         if default.len() > 1 {
@@ -182,6 +182,13 @@ impl Document {
             None
         } else {
             Some(default.get_item(0)?.unbind())
+        };
+
+        let Ok(key) = key.extract::<&str>() else {
+            return match default {
+                Some(d) => Ok(d),
+                None => Err(PyKeyError::new_err(key.repr()?.to_string())),
+            };
         };
 
         match self.inner.remove(key) {

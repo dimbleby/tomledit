@@ -135,7 +135,10 @@ impl Document {
         }
     }
 
-    pub fn __getitem__(slf: &Bound<'_, Self>, key: &str) -> PyResult<Py<PyAny>> {
+    pub fn __getitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        let Ok(key) = key.extract::<&str>() else {
+            return Err(PyKeyError::new_err(key.repr()?.to_string()));
+        };
         let proxy = {
             let doc = slf.borrow();
             if !doc.inner.contains_key(key) {
@@ -156,7 +159,10 @@ impl Document {
         }
     }
 
-    pub fn __delitem__(&mut self, key: &str) -> PyResult<()> {
+    pub fn __delitem__(&mut self, key: &Bound<'_, PyAny>) -> PyResult<()> {
+        let Ok(key) = key.extract::<&str>() else {
+            return Err(PyKeyError::new_err(key.repr()?.to_string()));
+        };
         if self.inner.remove(key).is_none() {
             return Err(PyKeyError::new_err(key.to_owned()));
         }

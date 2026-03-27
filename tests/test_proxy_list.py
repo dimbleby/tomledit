@@ -717,12 +717,12 @@ class TestIntKeyOnTable:
 
     def test_getitem_int_on_inline_table(self) -> None:
         doc = Document.parse("t = {a = 1}")
-        with pytest.raises(TypeError, match="TOML table keys must be strings"):
+        with pytest.raises(KeyError):
             doc["t"][0]
 
     def test_getitem_int_on_empty_table(self) -> None:
         doc = Document.parse("[t]")
-        with pytest.raises(TypeError, match="TOML table keys must be strings"):
+        with pytest.raises(KeyError):
             doc["t"][0]
 
 

@@ -250,19 +250,16 @@ impl Document {
     }
 
     pub fn __ior__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<()> {
-        if let Some(src) = dict_ops::resolve_toml_source(other, slf)? {
-            let mut doc = slf.borrow_mut();
-            let replaced = dict_ops::merge_table_entries(doc.inner.as_item_mut(), src.as_item()?)?;
-            for key in replaced {
-                doc.bump_at(&[Key::Str(key)]);
-            }
+        let toml_src = dict_ops::resolve_toml_source(other, slf)?;
+        let mut doc = slf.borrow_mut();
+        let replaced = if let Some(src) = toml_src {
+            dict_ops::merge_table_entries(doc.inner.as_item_mut(), src.as_item()?)?
         } else {
             let pairs = dict_ops::extract_update_pairs(other)?;
-            let mut doc = slf.borrow_mut();
-            let replaced = dict_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
-            for key in replaced {
-                doc.bump_at(&[Key::Str(key)]);
-            }
+            dict_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?
+        };
+        for key in replaced {
+            doc.bump_at(&[Key::Str(key)]);
         }
         Ok(())
     }

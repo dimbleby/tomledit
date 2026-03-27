@@ -80,6 +80,13 @@ impl ItemProxy {
         doc.bump_at_child(&self.path, &child_key);
     }
 
+    /// Record mutations at child string keys (used after merge/update operations).
+    pub(crate) fn bump_child_keys(&self, doc: &mut Document, keys: Vec<String>) {
+        for key in keys {
+            self.bump_child(doc, Key::Str(key));
+        }
+    }
+
     /// Record a structural mutation at this proxy's own path (e.g. clear,
     /// array insert/remove). The proxy self-updates to stay valid.
     pub(crate) fn bump_self(&mut self, doc: &mut Document) {

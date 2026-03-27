@@ -200,6 +200,12 @@ impl Document {
         }
     }
 
+    pub fn popitem(&mut self, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
+        let (key, val) = dict_ops::item_popitem(self.inner.as_item_mut(), py)?;
+        self.bump_at(&[Key::Str(key.clone())]);
+        Ok((key, val))
+    }
+
     #[pyo3(signature = (other=None, /, **kwargs))]
     pub fn update(
         slf: &Bound<'_, Self>,

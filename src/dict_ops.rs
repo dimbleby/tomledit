@@ -1,4 +1,4 @@
-use pyo3::exceptions::PyTypeError;
+use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use toml_edit::Item as ItemRs;
@@ -6,7 +6,7 @@ use toml_edit::Value as ValueRs;
 
 use crate::comments;
 use crate::item::Item;
-use crate::item_ops::unsupported_op;
+use crate::item_ops::{self, unsupported_op};
 
 // ---------------------------------------------------------------------------
 // Decor preservation
@@ -120,6 +120,25 @@ pub(crate) fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
             item.type_name()
         ))),
     }
+}
+
+/// Remove and return the last `(key, Item)` pair from a table-like item.
+pub(crate) fn item_popitem(item: &mut ItemRs, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
+    let last_key = match item {
+        ItemRs::Table(table) => table.iter().last().map(|(k, _)| k.to_owned()),
+        ItemRs::Value(ValueRs::InlineTable(it)) => it.iter().last().map(|(k, _)| k.to_owned()),
+        _ => return Err(unsupported_op(item, "popitem()")),
+    };
+    let key = last_key.ok_or_else(|| PyKeyError::new_err("popitem(): table is empty"))?;
+    let removed = match item {
+        ItemRs::Table(table) => table.remove(&key).expect("key just found"),
+        ItemRs::Value(ValueRs::InlineTable(it)) => {
+            ItemRs::Value(item_ops::it_remove(it, &key).expect("key just found"))
+        }
+        _ => unreachable!(),
+    };
+    let py_val = item_ops::item_to_py(&removed, py)?;
+    Ok((key, py_val))
 }
 
 // ---------------------------------------------------------------------------

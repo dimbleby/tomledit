@@ -937,3 +937,38 @@ class TestGetNonStringKey:
     def test_dict_item_get_non_string_returns_default(self, key: object) -> None:
         doc = Document.parse("[t]\na = 1\n")
         assert doc["t"].get(key, "fallback") == "fallback"
+
+
+class TestPopitem:
+    """popitem() removes and returns the last (key, value) pair."""
+
+    def test_document_popitem(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        key, val = doc.popitem()
+        assert key == "b"
+        assert val == 2
+        assert list(doc) == ["a"]
+
+    def test_document_popitem_empty_raises(self) -> None:
+        doc = Document()
+        with pytest.raises(KeyError):
+            doc.popitem()
+
+    def test_dict_item_popitem(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        key, val = doc["t"].popitem()
+        assert key == "b"
+        assert val == 2
+        assert list(doc["t"]) == ["a"]
+
+    def test_dict_item_popitem_empty_raises(self) -> None:
+        doc = Document.parse("[t]\n")
+        with pytest.raises(KeyError):
+            doc["t"].popitem()
+
+    def test_inline_table_popitem(self) -> None:
+        doc = Document.parse("t = {a = 1, b = 2}\n")
+        key, val = doc["t"].popitem()
+        assert key == "b"
+        assert val == 2
+        assert list(doc["t"]) == ["a"]

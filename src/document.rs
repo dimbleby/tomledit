@@ -46,13 +46,6 @@ impl Document {
         self.trie.stamp(path, self.revision);
     }
 
-    /// Record mutations at top-level keys (used after merge/update operations).
-    pub(crate) fn bump_keys(&mut self, keys: Vec<String>) {
-        for key in keys {
-            self.bump_at(&[Key::Str(key)]);
-        }
-    }
-
     /// Record a mutation at `path + [child]` without cloning the path.
     pub(crate) fn bump_at_child(&mut self, path: &[Key], child: &Key) {
         self.revision += 1;
@@ -232,7 +225,9 @@ impl Document {
         let mut new_inner = slf.borrow().inner.clone();
         let replaced = dict_ops::merge_other_into(new_inner.as_item_mut(), other, py)?;
         let mut doc = Self::from_inner(new_inner);
-        doc.bump_keys(replaced);
+        for key in replaced {
+            doc.bump_at(&[Key::Str(key)]);
+        }
         Ok(Py::new(py, doc)?.into_any())
     }
 
@@ -258,12 +253,16 @@ impl Document {
         if let Some(src) = dict_ops::resolve_toml_source(other, slf)? {
             let mut doc = slf.borrow_mut();
             let replaced = dict_ops::merge_table_entries(doc.inner.as_item_mut(), src.as_item()?)?;
-            doc.bump_keys(replaced);
+            for key in replaced {
+                doc.bump_at(&[Key::Str(key)]);
+            }
         } else {
             let pairs = dict_ops::extract_update_pairs(other)?;
             let mut doc = slf.borrow_mut();
             let replaced = dict_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
-            doc.bump_keys(replaced);
+            for key in replaced {
+                doc.bump_at(&[Key::Str(key)]);
+            }
         }
         Ok(())
     }
@@ -303,7 +302,9 @@ impl Document {
                 extra_pairs,
             )?);
         }
-        doc.bump_keys(replaced);
+        for key in replaced {
+            doc.bump_at(&[Key::Str(key)]);
+        }
         Ok(())
     }
 

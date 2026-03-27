@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+from collections import OrderedDict
+from types import MappingProxyType
 
 import pytest
 
@@ -47,9 +49,17 @@ class TestDocumentConstructor:
         assert doc["name"] == "hello"
         assert doc["version"] == "1.0"
 
-    def test_non_dict_raises(self) -> None:
-        with pytest.raises(TypeError, match="must be a dict"):
+    def test_non_mapping_raises(self) -> None:
+        with pytest.raises(TypeError, match="must be a mapping"):
             Document(42)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+    def test_from_mapping_proxy(self) -> None:
+        doc = Document(MappingProxyType({"a": 1, "b": "hi"}))
+        assert doc == {"a": 1, "b": "hi"}
+
+    def test_from_ordered_dict(self) -> None:
+        doc = Document(OrderedDict({"x": 10}))
+        assert doc == {"x": 10}
 
     def test_none_is_empty(self) -> None:
         doc = Document(None)

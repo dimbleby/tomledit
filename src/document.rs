@@ -66,14 +66,10 @@ impl Document {
         match data {
             None => Ok(Self::from_inner(DocumentRs::new())),
             Some(obj) => {
-                if let Ok(dict) = obj.cast::<PyDict>() {
-                    let table: Table = dict.extract()?;
-                    Ok(Self::from_inner(DocumentRs::from(table.0)))
-                } else {
-                    Err(PyTypeError::new_err(
-                        "Document() argument must be a dict or None",
-                    ))
-                }
+                let table: Table = obj.extract().map_err(|_| {
+                    PyTypeError::new_err("Document() argument must be a mapping or None")
+                })?;
+                Ok(Self::from_inner(DocumentRs::from(table.0)))
             }
         }
     }

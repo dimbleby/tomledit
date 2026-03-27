@@ -124,6 +124,16 @@ impl DictProxy {
         }
     }
 
+    pub fn popitem(self_: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
+        let base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_fresh(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        let (key, val) = dict_ops::item_popitem(item, py)?;
+        base.bump_child(&mut doc, Key::Str(key.clone()));
+        Ok((key, val))
+    }
+
     #[pyo3(signature = (other=None, /, **kwargs))]
     pub fn update(
         self_: PyRefMut<'_, Self>,

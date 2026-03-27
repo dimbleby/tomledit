@@ -17,7 +17,7 @@ use crate::list_ops;
 
 /// Remove a key from an inline table, preserving sibling inline comments.
 /// Returns the removed value, or `None` if the key was not found.
-fn it_remove(it: &mut toml_edit::InlineTable, key: &str) -> Option<toml_edit::Value> {
+pub(crate) fn it_remove(it: &mut toml_edit::InlineTable, key: &str) -> Option<toml_edit::Value> {
     let mut ic = comments::save_it_inline_comments(it);
     let pos = comments::it_key_position(it, key);
     let removed = it.remove(key)?;

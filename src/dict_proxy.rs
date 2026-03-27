@@ -64,9 +64,12 @@ impl DictProxy {
     pub fn get(
         self_: PyRef<'_, Self>,
         py: Python<'_>,
-        key: &str,
+        key: &Bound<'_, PyAny>,
         default: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
+        let Ok(key) = key.extract::<&str>() else {
+            return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
+        };
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;

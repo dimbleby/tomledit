@@ -239,11 +239,19 @@ impl Document {
     }
 
     pub fn __ior__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<()> {
-        let pairs = dict_ops::extract_update_pairs(other)?;
-        let mut doc = slf.borrow_mut();
-        let replaced_keys = dict_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
-        for key in replaced_keys {
-            doc.bump_at(&[Key::Str(key)]);
+        if let Some(src) = dict_ops::resolve_toml_source(other, slf)? {
+            let mut doc = slf.borrow_mut();
+            let replaced = dict_ops::merge_table_entries(doc.inner.as_item_mut(), src.as_item()?)?;
+            for key in replaced {
+                doc.bump_at(&[Key::Str(key)]);
+            }
+        } else {
+            let pairs = dict_ops::extract_update_pairs(other)?;
+            let mut doc = slf.borrow_mut();
+            let replaced = dict_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
+            for key in replaced {
+                doc.bump_at(&[Key::Str(key)]);
+            }
         }
         Ok(())
     }
@@ -254,20 +262,36 @@ impl Document {
         other: Option<&Bound<'_, PyAny>>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let mut pairs = match other {
-            Some(obj) => dict_ops::extract_update_pairs(obj)?,
-            None => Vec::new(),
+        let toml_src = match other {
+            Some(obj) => dict_ops::resolve_toml_source(obj, slf)?,
+            None => None,
         };
+        let mut extra_pairs = Vec::new();
+        if toml_src.is_none()
+            && let Some(obj) = other
+        {
+            extra_pairs = dict_ops::extract_update_pairs(obj)?;
+        }
         if let Some(kw) = kwargs {
             for (k, v) in kw.iter() {
                 let key: String = k.extract()?;
                 let val: Item = v.extract()?;
-                pairs.push((key, val));
+                extra_pairs.push((key, val));
             }
         }
         let mut doc = slf.borrow_mut();
-        let replaced_keys = dict_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?;
-        for key in replaced_keys {
+        let mut replaced = if let Some(ref src) = toml_src {
+            dict_ops::merge_table_entries(doc.inner.as_item_mut(), src.as_item()?)?
+        } else {
+            Vec::new()
+        };
+        if !extra_pairs.is_empty() {
+            replaced.extend(dict_ops::apply_update_pairs(
+                doc.inner.as_item_mut(),
+                extra_pairs,
+            )?);
+        }
+        for key in replaced {
             doc.bump_at(&[Key::Str(key)]);
         }
         Ok(())

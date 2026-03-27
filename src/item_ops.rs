@@ -267,7 +267,7 @@ fn require_str_key(key: &Bound<'_, PyAny>) -> PyResult<String> {
 
 fn require_int_key(key: &Bound<'_, PyAny>) -> PyResult<i64> {
     key.extract().map_err(|_| {
-        if key.extract::<String>().is_ok() {
+        if key.is_instance_of::<pyo3::types::PyString>() {
             PyTypeError::new_err("TOML array indices must be integers, not strings")
         } else {
             bad_key_type(key)

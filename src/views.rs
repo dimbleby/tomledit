@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyIterator, PySet, PyTuple};
+use pyo3::types::{PyIterator, PyList, PySet, PyTuple};
 
 use crate::dict_ops;
 use crate::document::Document;
@@ -51,6 +51,19 @@ fn get_keys(doc: &DocumentRs, path: &[Key]) -> PyResult<Vec<String>> {
     dict_ops::item_keys(item)
 }
 
+/// Build a Python list of key strings directly from the TOML iterator,
+/// without an intermediate Rust Vec.
+fn keys_to_pylist<'py>(
+    doc: &DocumentRs,
+    path: &[Key],
+    py: Python<'py>,
+) -> PyResult<Bound<'py, PyList>> {
+    let item = item_ops::navigate_path(doc, path)?;
+    let list = PyList::empty(py);
+    dict_ops::for_each_key(item, |k| list.append(k))?;
+    Ok(list)
+}
+
 fn get_len(doc: &DocumentRs, path: &[Key]) -> PyResult<usize> {
     let item = item_ops::navigate_path(doc, path)?;
     item_ops::item_len(item).ok_or_else(|| PyTypeError::new_err("TOML item has no len()"))
@@ -87,17 +100,16 @@ impl KeysView {
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
-        let keys = get_keys(&doc.inner, &self.path)?;
-        let list = keys.into_pyobject(py)?;
+        let list = keys_to_pylist(&doc.inner, &self.path, py)?;
         Ok(list.try_iter()?.unbind())
     }
 
     fn __contains__(&self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let Ok(key) = key.extract::<String>() else {
+        let Ok(key) = key.extract::<&str>() else {
             return Ok(false);
         };
         let doc = self.document.bind(py).borrow();
-        contains_key(&doc.inner, &self.path, &key)
+        contains_key(&doc.inner, &self.path, key)
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
@@ -197,15 +209,19 @@ impl ValuesView {
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
-        let keys = get_keys(&doc.inner, &self.path)?;
         let revision = doc.revision;
-        let proxies: Vec<Py<PyAny>> = keys
-            .into_iter()
-            .map(|k| {
-                ItemProxy::make_child_typed(&self.document, &self.path, revision, py, Key::Str(k))
-            })
-            .collect::<PyResult<_>>()?;
-        let list = proxies.into_pyobject(py)?;
+        let list = PyList::empty(py);
+        let item = item_ops::navigate_path(&doc.inner, &self.path)?;
+        dict_ops::for_each_key(item, |k| {
+            let proxy = ItemProxy::make_child_typed(
+                &self.document,
+                &self.path,
+                revision,
+                py,
+                Key::Str(k.to_owned()),
+            )?;
+            list.append(proxy)
+        })?;
         Ok(list.try_iter()?.unbind())
     }
 
@@ -260,22 +276,20 @@ impl ItemsView {
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
-        let keys = get_keys(&doc.inner, &self.path)?;
         let revision = doc.revision;
-        let pairs: Vec<(String, Py<PyAny>)> = keys
-            .into_iter()
-            .map(|k| {
-                let obj = ItemProxy::make_child_typed(
-                    &self.document,
-                    &self.path,
-                    revision,
-                    py,
-                    Key::Str(k.clone()),
-                )?;
-                Ok((k, obj))
-            })
-            .collect::<PyResult<_>>()?;
-        let list = pairs.into_pyobject(py)?;
+        let list = PyList::empty(py);
+        let item = item_ops::navigate_path(&doc.inner, &self.path)?;
+        dict_ops::for_each_key(item, |k| {
+            let obj = ItemProxy::make_child_typed(
+                &self.document,
+                &self.path,
+                revision,
+                py,
+                Key::Str(k.to_owned()),
+            )?;
+            let pair = (k, obj.into_bound(py));
+            list.append(pair.into_pyobject(py)?)
+        })?;
         Ok(list.try_iter()?.unbind())
     }
 
@@ -289,13 +303,14 @@ impl ItemsView {
         if tuple.len() != 2 {
             return Ok(false);
         }
-        let Ok(key) = tuple.get_item(0)?.extract::<String>() else {
+        let key_obj = tuple.get_item(0)?;
+        let Ok(key) = key_obj.extract::<&str>() else {
             return Ok(false);
         };
         let value = tuple.get_item(1)?;
 
         let doc = self.document.bind(py).borrow();
-        let target = item_ops::navigate_path(&doc.inner, &self.path)?.get(key.as_str());
+        let target = item_ops::navigate_path(&doc.inner, &self.path)?.get(key);
         match target {
             Some(item_rs) => crate::equality::item_eq(item_rs, &value),
             None => Ok(false),

@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyIterator, PyTuple};
+use pyo3::types::{PyDict, PyIterator, PyList, PyTuple};
 
 use toml_edit::DocumentMut as DocumentRs;
 
@@ -44,6 +44,12 @@ impl Document {
     pub(crate) fn bump_at(&mut self, path: &[Key]) {
         self.revision += 1;
         self.trie.stamp(path, self.revision);
+    }
+
+    /// Record a mutation at `path + [child]` without cloning the path.
+    pub(crate) fn bump_at_child(&mut self, path: &[Key], child: &Key) {
+        self.revision += 1;
+        self.trie.stamp_child(path, child, self.revision);
     }
 
     /// Check whether a proxy at `path` created at `revision` is still fresh.
@@ -90,8 +96,10 @@ impl Document {
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let keys: Vec<&str> = self.inner.iter().map(|(k, _)| k).collect();
-        let list = keys.into_pyobject(py)?;
+        let list = PyList::empty(py);
+        for (k, _) in self.inner.iter() {
+            list.append(k)?;
+        }
         Ok(list.try_iter()?.unbind())
     }
 

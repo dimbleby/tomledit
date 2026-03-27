@@ -49,15 +49,21 @@ impl MutationTrie {
     /// Any children below the target are pruned — the stamped node's revision
     /// already invalidates all descendant proxies.
     pub(crate) fn stamp(&mut self, path: &[Key], revision: u64) {
-        let mut node = &mut self.root;
-        for key in path {
-            node = node
-                .children
-                .entry(key.clone())
-                .or_insert_with(TrieNode::new);
-        }
+        let node = self.root.walk(path);
         node.revised_at = revision;
         node.children.clear();
+    }
+
+    /// Like `stamp`, but appends one extra key segment without cloning the
+    /// base path into a temporary Vec.
+    pub(crate) fn stamp_child(&mut self, path: &[Key], child: &Key, revision: u64) {
+        let parent = self.root.walk(path);
+        let child_node = parent
+            .children
+            .entry(child.clone())
+            .or_insert_with(TrieNode::new);
+        child_node.revised_at = revision;
+        child_node.children.clear();
     }
 }
 
@@ -67,6 +73,18 @@ impl TrieNode {
             revised_at: 0,
             children: HashMap::new(),
         }
+    }
+
+    /// Walk to the node at `path`, creating intermediates as needed.
+    fn walk(&mut self, path: &[Key]) -> &mut Self {
+        let mut node = self;
+        for key in path {
+            node = node
+                .children
+                .entry(key.clone())
+                .or_insert_with(TrieNode::new);
+        }
+        node
     }
 }
 
@@ -219,5 +237,44 @@ mod tests {
         assert!(!trie.is_valid(&[str_key("arr"), int_key(0)], 0));
         assert!(!trie.is_valid(&[str_key("arr"), int_key(1)], 0));
         assert!(!trie.is_valid(&[str_key("arr"), int_key(99)], 0));
+    }
+
+    #[test]
+    fn stamp_child_equivalent_to_stamp() {
+        let mut trie1 = MutationTrie::new();
+        trie1.stamp(&[str_key("arr"), int_key(2)], 1);
+
+        let mut trie2 = MutationTrie::new();
+        trie2.stamp_child(&[str_key("arr")], &int_key(2), 1);
+
+        // Both should produce identical validity results
+        for rev in [0, 1] {
+            assert_eq!(
+                trie1.is_valid(&[str_key("arr"), int_key(2)], rev),
+                trie2.is_valid(&[str_key("arr"), int_key(2)], rev),
+            );
+            assert_eq!(
+                trie1.is_valid(&[str_key("arr"), int_key(0)], rev),
+                trie2.is_valid(&[str_key("arr"), int_key(0)], rev),
+            );
+            assert_eq!(
+                trie1.is_valid(&[str_key("arr")], rev),
+                trie2.is_valid(&[str_key("arr")], rev),
+            );
+        }
+    }
+
+    #[test]
+    fn stamp_child_reuses_existing_node() {
+        let mut trie = MutationTrie::new();
+        // First stamp creates the node
+        trie.stamp_child(&[str_key("t")], &str_key("a"), 1);
+        assert!(!trie.is_valid(&[str_key("t"), str_key("a")], 0));
+        // Second stamp reuses it (no extra allocation)
+        trie.stamp_child(&[str_key("t")], &str_key("a"), 2);
+        assert!(!trie.is_valid(&[str_key("t"), str_key("a")], 1));
+        assert!(trie.is_valid(&[str_key("t"), str_key("a")], 2));
+        // Sibling unaffected
+        assert!(trie.is_valid(&[str_key("t"), str_key("b")], 0));
     }
 }

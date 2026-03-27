@@ -77,9 +77,7 @@ impl ItemProxy {
     /// Record a mutation at a child key under this proxy's path.
     /// The proxy itself stays valid (only the child node is bumped).
     pub(crate) fn bump_child(&self, doc: &mut Document, child_key: Key) {
-        let mut child_path = self.path.clone();
-        child_path.push(child_key);
-        doc.bump_at(&child_path);
+        doc.bump_at_child(&self.path, &child_key);
     }
 
     /// Record a structural mutation at this proxy's own path (e.g. clear,

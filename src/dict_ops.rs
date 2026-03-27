@@ -77,17 +77,35 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
 // Key operations
 // ---------------------------------------------------------------------------
 
-pub(crate) fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
+/// Iterate over table keys without collecting into a Vec.
+pub(crate) fn for_each_key(item: &ItemRs, mut f: impl FnMut(&str) -> PyResult<()>) -> PyResult<()> {
     match item {
-        ItemRs::Table(table) => Ok(table.iter().map(|(k, _)| k.to_owned()).collect()),
+        ItemRs::Table(table) => {
+            for (k, _) in table.iter() {
+                f(k)?;
+            }
+            Ok(())
+        }
         ItemRs::Value(ValueRs::InlineTable(it)) => {
-            Ok(it.iter().map(|(k, _)| k.to_owned()).collect())
+            for (k, _) in it.iter() {
+                f(k)?;
+            }
+            Ok(())
         }
         _ => Err(PyTypeError::new_err(format!(
             "TOML {} item has no keys()",
             item.type_name()
         ))),
     }
+}
+
+pub(crate) fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
+    let mut keys = Vec::new();
+    for_each_key(item, |k| {
+        keys.push(k.to_owned());
+        Ok(())
+    })?;
+    Ok(keys)
 }
 
 pub(crate) fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {

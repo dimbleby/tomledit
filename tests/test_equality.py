@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta, timezone
+from types import MappingProxyType
+from typing import TYPE_CHECKING
+
+from typing_extensions import override
 
 from tests.conftest import toml_literal
 from tomledit import Document
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # ---------------------------------------------------------------------------
 # Equality semantics
@@ -482,3 +491,55 @@ class TestTimeZoneEquality:
         doc = Document.parse("t = 12:30:15\n")
         naive = time(12, 30, 15)
         assert doc["t"] == naive
+
+
+class TestMappingEquality:
+    """Documents and DictItems should compare equal to any Mapping, not just dict."""
+
+    def test_document_eq_mapping_proxy(self) -> None:
+        doc = Document({"a": 1, "b": "hello"})
+        assert doc == MappingProxyType({"a": 1, "b": "hello"})
+
+    def test_document_ne_mapping_proxy(self) -> None:
+        doc = Document({"a": 1})
+        assert doc != MappingProxyType({"a": 2})
+
+    def test_document_ne_mapping_proxy_extra_key(self) -> None:
+        doc = Document({"a": 1})
+        assert doc != MappingProxyType({"a": 1, "b": 2})
+
+    def test_dict_item_eq_mapping_proxy(self) -> None:
+        doc = Document.parse("[section]\na = 1\nb = 2\n")
+        assert doc["section"] == MappingProxyType({"a": 1, "b": 2})
+
+    def test_dict_item_ne_mapping_proxy(self) -> None:
+        doc = Document.parse("[section]\na = 1\n")
+        assert doc["section"] != MappingProxyType({"a": 99})
+
+    def test_document_eq_ordered_dict(self) -> None:
+        doc = Document({"x": 10, "y": 20})
+        assert doc == OrderedDict({"x": 10, "y": 20})
+
+    def test_document_eq_custom_mapping(self) -> None:
+        class MyMap(Mapping[str, object]):
+            def __init__(self, d: dict[str, object]) -> None:
+                self._d = d
+
+            @override
+            def __getitem__(self, key: str) -> object:
+                return self._d[key]
+
+            @override
+            def __iter__(self) -> Iterator[str]:
+                return iter(self._d)
+
+            @override
+            def __len__(self) -> int:
+                return len(self._d)
+
+        doc = Document({"k": "v"})
+        assert doc == MyMap({"k": "v"})
+
+    def test_document_ne_non_mapping(self) -> None:
+        doc = Document({"a": 1})
+        assert doc != [("a", 1)]

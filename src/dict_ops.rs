@@ -356,7 +356,7 @@ pub(crate) fn is_mapping_like(other: &Bound<'_, PyAny>) -> bool {
         || is_abc_mapping(other)
 }
 
-fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> bool {
+pub(crate) fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> bool {
     let py = obj.py();
     py.import("collections.abc")
         .and_then(|m| m.getattr("Mapping"))

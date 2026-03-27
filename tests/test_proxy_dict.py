@@ -1172,6 +1172,12 @@ class TestMergeOperators:
         result = doc1["t"] | doc2["u"]
         assert result.value == {"a": 1, "b": 99}
 
+    def test_inline_table_or_preserves_spacing(self) -> None:
+        doc1 = Document.parse("t = {a = 1}\n")
+        doc2 = Document.parse("u = {b = 2, c = 3}\n")
+        result = doc1["t"] | doc2["u"]
+        assert result.as_toml() == "{a = 1, b = 2, c = 3}"
+
     # -- NotImplemented / TypeError for non-mappings --
 
     def test_document_or_non_mapping_raises(self) -> None:
@@ -1205,6 +1211,23 @@ class TestMergeOperators:
             a = 1
             b = 99
         """)
+
+    # -- |= edge cases --
+
+    def test_document_ior_self_assign(self) -> None:
+        doc = Document.parse("a = 1\n")
+        doc |= doc
+        assert doc.as_toml() == "a = 1\n"
+
+    def test_dict_item_ior_with_own_document(self) -> None:
+        doc = Document.parse("[section]\na = 1\nb = 2\n")
+        doc["section"] |= doc
+        assert doc["section"]["a"] == 1
+
+    def test_dict_item_ior_same_document_different_paths(self) -> None:
+        doc = Document.parse("[a]\nx = 1\n[b]\ny = 2\n")
+        doc["a"] |= doc["b"]
+        assert doc["a"]["y"] == 2
 
 
 class TestViewContainsProxy:

@@ -187,17 +187,24 @@ impl DictProxy {
     }
 
     pub fn __ior__(
-        self_: PyRefMut<'_, Self>,
+        mut self_: PyRefMut<'_, Self>,
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        let pairs = dict_ops::extract_update_pairs(other)?;
+        let self_doc_py = self_.as_super().document.clone_ref(py);
+        let self_doc = self_doc_py.bind(py);
+        let toml_src = dict_ops::resolve_toml_source(other, self_doc)?;
         let base = self_.into_super();
-        let mut doc = base.document.bind(py).borrow_mut();
+        let mut doc = self_doc.borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        let replaced_keys = dict_ops::apply_update_pairs(item, pairs)?;
-        for key in replaced_keys {
+        let replaced = if let Some(ref src) = toml_src {
+            dict_ops::merge_table_entries(item, src.as_item()?)?
+        } else {
+            let pairs = dict_ops::extract_update_pairs(other)?;
+            dict_ops::apply_update_pairs(item, pairs)?
+        };
+        for key in replaced {
             base.bump_child(&mut doc, Key::Str(key));
         }
         Ok(())
@@ -205,28 +212,43 @@ impl DictProxy {
 
     #[pyo3(signature = (other=None, /, **kwargs))]
     pub fn update(
-        self_: PyRefMut<'_, Self>,
+        mut self_: PyRefMut<'_, Self>,
         py: Python<'_>,
         other: Option<&Bound<'_, PyAny>>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let mut pairs = match other {
-            Some(obj) => dict_ops::extract_update_pairs(obj)?,
-            None => Vec::new(),
+        let self_doc_py = self_.as_super().document.clone_ref(py);
+        let self_doc = self_doc_py.bind(py);
+        let toml_src = match other {
+            Some(obj) => dict_ops::resolve_toml_source(obj, self_doc)?,
+            None => None,
         };
+        let mut extra_pairs = Vec::new();
+        if toml_src.is_none()
+            && let Some(obj) = other
+        {
+            extra_pairs = dict_ops::extract_update_pairs(obj)?;
+        }
         if let Some(kw) = kwargs {
             for (k, v) in kw.iter() {
                 let key: String = k.extract()?;
                 let val: Item = v.extract()?;
-                pairs.push((key, val));
+                extra_pairs.push((key, val));
             }
         }
         let base = self_.into_super();
-        let mut doc = base.document.bind(py).borrow_mut();
+        let mut doc = self_doc.borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        let replaced_keys = dict_ops::apply_update_pairs(item, pairs)?;
-        for key in replaced_keys {
+        let mut replaced = if let Some(ref src) = toml_src {
+            dict_ops::merge_table_entries(item, src.as_item()?)?
+        } else {
+            Vec::new()
+        };
+        if !extra_pairs.is_empty() {
+            replaced.extend(dict_ops::apply_update_pairs(item, extra_pairs)?);
+        }
+        for key in replaced {
             base.bump_child(&mut doc, Key::Str(key));
         }
         Ok(())

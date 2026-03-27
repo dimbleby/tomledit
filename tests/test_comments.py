@@ -1325,3 +1325,80 @@ class TestComment:
             name = "Bob"  # the owner name
             age = 30
         """)
+
+
+class TestIorPreservesComments:
+    """|= preserves comments from both target and source."""
+
+    def test_ior_preserves_target_comments_on_overlap(self) -> None:
+        target = Document.parse("# target comment\na = 1\n")
+        source = Document.parse("# source comment\na = 99\n")
+        target |= source
+        assert target.as_toml() == toml_literal("""
+            # target comment
+            a = 99
+        """)
+
+    def test_ior_preserves_source_block_comment(self) -> None:
+        target = Document.parse("a = 1\n")
+        source = Document.parse("# block comment\nb = 2\n")
+        target |= source
+        assert target.as_toml() == toml_literal("""
+            a = 1
+            # block comment
+            b = 2
+        """)
+
+    def test_ior_preserves_source_inline_comment(self) -> None:
+        target = Document.parse("a = 1\n")
+        source = Document.parse("b = 2 # inline note\n")
+        target |= source
+        assert target.as_toml() == toml_literal("""
+            a = 1
+            b = 2 # inline note
+        """)
+
+    def test_ior_dict_proxy_preserves_source_comment(self) -> None:
+        target = Document.parse("[section]\na = 1\n")
+        source = Document.parse("[section]\n# new key comment\nb = 2\n")
+        target["section"] |= source["section"]
+        assert target.as_toml() == toml_literal("""
+            [section]
+            a = 1
+            # new key comment
+            b = 2
+        """)
+
+
+class TestUpdatePreservesComments:
+    """update() preserves comments from both target and source."""
+
+    def test_update_preserves_target_comments_on_overlap(self) -> None:
+        target = Document.parse("# target comment\na = 1\n")
+        source = Document.parse("# source comment\na = 99\n")
+        target.update(source)
+        assert target.as_toml() == toml_literal("""
+            # target comment
+            a = 99
+        """)
+
+    def test_update_preserves_source_block_comment(self) -> None:
+        target = Document.parse("a = 1\n")
+        source = Document.parse("# block comment\nb = 2\n")
+        target.update(source)
+        assert target.as_toml() == toml_literal("""
+            a = 1
+            # block comment
+            b = 2
+        """)
+
+    def test_update_proxy_preserves_source_comment(self) -> None:
+        target = Document.parse("[section]\na = 1\n")
+        source = Document.parse("[section]\n# new key comment\nb = 2\n")
+        target["section"].update(source["section"])
+        assert target.as_toml() == toml_literal("""
+            [section]
+            a = 1
+            # new key comment
+            b = 2
+        """)

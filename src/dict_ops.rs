@@ -8,7 +8,7 @@ use toml_edit::Value as ValueRs;
 use crate::comments;
 use crate::document::Document;
 use crate::item::Item;
-use crate::item_ops::{self, unsupported_op};
+use crate::item_ops::{self, Key, unsupported_op};
 use crate::item_proxy::ItemProxy;
 
 // ---------------------------------------------------------------------------
@@ -237,8 +237,13 @@ pub(crate) fn merge_table_entries(target: &mut ItemRs, source: &ItemRs) -> PyRes
         let src_val = src.get(&key).unwrap().clone();
         set_with_decor_preservation(target, &key, Item(src_val));
 
-        // For NEW keys, copy the source key's decor (block comments).
-        if !existed && let Some((src_key, _)) = src.get_key_value(&key) {
+        // For NEW keys in non-inline tables, copy the source key's decor
+        // (block comments).  Inline tables handle their own separator
+        // formatting, so copying decor would break spacing.
+        if !existed
+            && !target.is_value()
+            && let Some((src_key, _)) = src.get_key_value(&key)
+        {
             let decor = src_key.leaf_decor().clone();
             let tgt = target.as_table_like_mut().expect("target checked above");
             if let Some(mut km) = tgt.key_mut(&key) {
@@ -255,6 +260,69 @@ pub(crate) fn merge_table_entries(target: &mut ItemRs, source: &ItemRs) -> PyRes
     Ok(replaced)
 }
 
+/// A TOML source resolved for merging, holding any necessary borrow guards.
+///
+/// Callers obtain this via [`resolve_toml_source`], then call [`.as_item()`]
+/// to get the `&ItemRs` reference.  The `PyRef` guard keeps the source
+/// document borrowed so the reference remains valid while the caller mutates
+/// its own document.
+pub(crate) enum TomlSource<'py> {
+    /// Source is from a different document — borrow guard kept alive, path
+    /// navigated on demand (empty path = document root).
+    Borrowed {
+        doc_ref: PyRef<'py, Document>,
+        path: Vec<Key>,
+    },
+    /// Source is from the same document — had to clone.
+    Owned(ItemRs),
+}
+
+impl TomlSource<'_> {
+    pub(crate) fn as_item(&self) -> PyResult<&ItemRs> {
+        match self {
+            Self::Borrowed { doc_ref, path } => item_ops::navigate_path(&doc_ref.inner, path),
+            Self::Owned(item) => Ok(item),
+        }
+    }
+}
+
+/// Resolve a TOML-aware source for merging.
+///
+/// When `other` is an [`ItemProxy`] or [`Document`], returns a
+/// [`TomlSource`] that borrows the underlying item zero-copy — **unless**
+/// the source shares the same document as `self_doc`, in which case it
+/// clones to avoid a double-borrow.
+///
+/// Returns `None` when `other` is a plain Python object.
+pub(crate) fn resolve_toml_source<'py>(
+    other: &Bound<'py, PyAny>,
+    self_doc: &Bound<'py, Document>,
+) -> PyResult<Option<TomlSource<'py>>> {
+    if let Ok(proxy) = other.cast::<ItemProxy>() {
+        let proxy_ref = proxy.borrow();
+        let doc_bound = proxy_ref.document.bind(other.py());
+        let doc_ref = doc_bound.borrow();
+        proxy_ref.check_fresh(&doc_ref)?;
+        if doc_bound.is(self_doc) {
+            let item = proxy_ref.navigate(&doc_ref.inner)?.clone();
+            return Ok(Some(TomlSource::Owned(item)));
+        }
+        let path = proxy_ref.path.clone();
+        return Ok(Some(TomlSource::Borrowed { doc_ref, path }));
+    }
+    if let Ok(doc_bound) = other.cast::<Document>() {
+        if doc_bound.is(self_doc) {
+            let item = doc_bound.borrow().inner.as_item().clone();
+            return Ok(Some(TomlSource::Owned(item)));
+        }
+        return Ok(Some(TomlSource::Borrowed {
+            doc_ref: doc_bound.borrow(),
+            path: Vec::new(),
+        }));
+    }
+    Ok(None)
+}
+
 /// Merge `other` (a Python object) into `target`, dispatching to
 /// [`merge_table_entries`] when `other` is a TOML-aware type (preserving
 /// key decor / block comments) and falling back to [`extract_update_pairs`]
@@ -265,10 +333,10 @@ pub(crate) fn merge_other_into(
     py: Python<'_>,
 ) -> PyResult<Vec<String>> {
     if let Ok(proxy) = other.cast::<ItemProxy>() {
-        let pb = proxy.borrow();
-        let other_doc = pb.document.bind(py).borrow();
-        pb.check_fresh(&other_doc)?;
-        let other_item = pb.navigate(&other_doc.inner)?;
+        let proxy = proxy.borrow();
+        let other_doc = proxy.document.bind(py).borrow();
+        proxy.check_fresh(&other_doc)?;
+        let other_item = proxy.navigate(&other_doc.inner)?;
         return merge_table_entries(target, other_item);
     }
     if let Ok(doc_bound) = other.cast::<Document>() {

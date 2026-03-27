@@ -2,6 +2,7 @@ use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use toml_edit::Item as ItemRs;
+use toml_edit::TableLike;
 use toml_edit::Value as ValueRs;
 
 use crate::comments;
@@ -9,6 +10,15 @@ use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, unsupported_op};
 use crate::item_proxy::ItemProxy;
+
+// ---------------------------------------------------------------------------
+// Table-like extraction helpers
+// ---------------------------------------------------------------------------
+
+/// Extract a shared `TableLike` reference, or return a `TypeError`.
+pub(crate) fn as_dict_like<'a>(item: &'a ItemRs, op: &str) -> PyResult<&'a dyn TableLike> {
+    item.as_table_like().ok_or_else(|| unsupported_op(item, op))
+}
 
 // ---------------------------------------------------------------------------
 // Decor preservation
@@ -81,24 +91,11 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
 
 /// Iterate over table keys without collecting into a Vec.
 pub(crate) fn for_each_key(item: &ItemRs, mut f: impl FnMut(&str) -> PyResult<()>) -> PyResult<()> {
-    match item {
-        ItemRs::Table(table) => {
-            for (k, _) in table.iter() {
-                f(k)?;
-            }
-            Ok(())
-        }
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            for (k, _) in it.iter() {
-                f(k)?;
-            }
-            Ok(())
-        }
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item has no keys()",
-            item.type_name()
-        ))),
+    let tbl = as_dict_like(item, "keys()")?;
+    for (k, _) in tbl.iter() {
+        f(k)?;
     }
+    Ok(())
 }
 
 pub(crate) fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
@@ -111,9 +108,10 @@ pub(crate) fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
 }
 
 pub(crate) fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
+    if let Some(tbl) = item.as_table_like() {
+        return Ok(tbl.contains_key(key));
+    }
     match item {
-        ItemRs::Table(table) => Ok(table.contains_key(key)),
-        ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.contains_key(key)),
         ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => Err(PyTypeError::new_err(
             "TOML array indices must be integers, not strings",
         )),
@@ -126,18 +124,20 @@ pub(crate) fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
 
 /// Remove and return the last `(key, Item)` pair from a table-like item.
 pub(crate) fn item_popitem(item: &mut ItemRs, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
-    let last_key = match item {
-        ItemRs::Table(table) => table.iter().last().map(|(k, _)| k.to_owned()),
-        ItemRs::Value(ValueRs::InlineTable(it)) => it.iter().last().map(|(k, _)| k.to_owned()),
-        _ => return Err(unsupported_op(item, "popitem()")),
-    };
-    let key = last_key.ok_or_else(|| PyKeyError::new_err("popitem(): table is empty"))?;
-    let removed = match item {
-        ItemRs::Table(table) => table.remove(&key).expect("key just found"),
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            ItemRs::Value(item_ops::it_remove(it, &key).expect("key just found"))
+    let (key, removed) = match item {
+        ItemRs::Table(table) => {
+            let k = table.iter().last().map(|(k, _)| k.to_owned());
+            let k = k.ok_or_else(|| PyKeyError::new_err("popitem(): table is empty"))?;
+            let v = table.remove(&k).expect("key just found");
+            (k, v)
         }
-        _ => unreachable!(),
+        ItemRs::Value(ValueRs::InlineTable(it)) => {
+            let k = it.iter().last().map(|(k, _)| k.to_owned());
+            let k = k.ok_or_else(|| PyKeyError::new_err("popitem(): table is empty"))?;
+            let v = ItemRs::Value(item_ops::it_remove(it, &k).expect("key just found"));
+            (k, v)
+        }
+        _ => return Err(unsupported_op(item, "popitem()")),
     };
     let py_val = item_ops::item_to_py(&removed, py)?;
     Ok((key, py_val))
@@ -194,12 +194,9 @@ pub(crate) fn apply_update_pairs(
     item: &mut ItemRs,
     pairs: Vec<(String, Item)>,
 ) -> PyResult<Vec<String>> {
-    if !(item.is_table() || item.is_inline_table()) {
-        return Err(unsupported_op(item, "update()"));
-    }
     let mut replaced_keys = Vec::new();
     for (key, val) in pairs {
-        let existed = item_has_key(item, &key).unwrap_or(false);
+        let existed = as_dict_like(item, "update()")?.contains_key(&key);
         set_with_decor_preservation(item, &key, val);
         if existed {
             replaced_keys.push(key);

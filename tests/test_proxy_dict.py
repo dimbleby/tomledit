@@ -974,6 +974,12 @@ class TestPopitem:
         assert val == 2
         assert list(doc["t"]) == ["a"]
 
+    def test_inline_table_popitem_preserves_comments(self) -> None:
+        doc = Document.parse("t = {a = 1, b = 2, c = 3}\n")
+        doc["t"]["a"].inline_comment = "# keep me"
+        doc["t"].popitem()  # removes "c"
+        assert doc["t"]["a"].inline_comment == "# keep me"
+
 
 class TestMergeOperators:
     """| and |= operators (PEP 584)."""

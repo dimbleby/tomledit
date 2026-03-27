@@ -43,19 +43,13 @@ pub(crate) fn item_len(item: &ItemRs) -> Option<usize> {
 }
 
 pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
+    if let Some(tbl) = item.as_table_like() {
+        let Ok(key) = value.extract::<&str>() else {
+            return Ok(false);
+        };
+        return Ok(tbl.contains_key(key));
+    }
     match item {
-        ItemRs::Table(table) => {
-            let Ok(key) = value.extract::<&str>() else {
-                return Ok(false);
-            };
-            Ok(table.contains_key(key))
-        }
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            let Ok(key) = value.extract::<&str>() else {
-                return Ok(false);
-            };
-            Ok(it.contains_key(key))
-        }
         ItemRs::Value(ValueRs::Array(arr)) => {
             for v in arr.iter() {
                 if equality::value_eq(v, value)? {
@@ -228,11 +222,10 @@ pub(crate) enum IterKind<'a> {
 }
 
 pub(crate) fn item_iter_kind<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
+    if let Some(tbl) = item.as_table_like() {
+        return Ok(IterKind::TableKeys(tbl.iter().map(|(k, _)| k).collect()));
+    }
     match item {
-        ItemRs::Table(table) => Ok(IterKind::TableKeys(table.iter().map(|(k, _)| k).collect())),
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            Ok(IterKind::TableKeys(it.iter().map(|(k, _)| k).collect()))
-        }
         ItemRs::Value(ValueRs::Array(arr)) => Ok(IterKind::ArrayLen(arr.len())),
         ItemRs::ArrayOfTables(aot) => Ok(IterKind::ArrayLen(aot.len())),
         _ => Err(PyTypeError::new_err(format!(
@@ -482,15 +475,11 @@ pub(crate) fn item_pop(
 }
 
 pub(crate) fn item_clear(item: &mut ItemRs) -> PyResult<()> {
+    if let Some(tbl) = item.as_table_like_mut() {
+        tbl.clear();
+        return Ok(());
+    }
     match item {
-        ItemRs::Table(table) => {
-            table.clear();
-            Ok(())
-        }
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            it.clear();
-            Ok(())
-        }
         ItemRs::Value(ValueRs::Array(arr)) => {
             arr.clear();
             Ok(())
@@ -505,11 +494,10 @@ pub(crate) fn item_clear(item: &mut ItemRs) -> PyResult<()> {
 
 /// Normalize formatting of a single item (shallow).
 pub(crate) fn item_fmt(item: &mut ItemRs) {
-    match item {
-        ItemRs::Table(table) => table.fmt(),
-        ItemRs::Value(ValueRs::InlineTable(it)) => it.fmt(),
-        ItemRs::Value(ValueRs::Array(arr)) => arr.fmt(),
-        _ => {} // ArrayOfTables, scalars: no-op
+    if let Some(tbl) = item.as_table_like_mut() {
+        tbl.fmt();
+    } else if let ItemRs::Value(ValueRs::Array(arr)) = item {
+        arr.fmt();
     }
 }
 

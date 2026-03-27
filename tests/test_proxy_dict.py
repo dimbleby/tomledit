@@ -223,6 +223,15 @@ class TestProxyDictMethods:
         doc["meta"].pop("x")
         assert "x" not in doc["meta"]
 
+    def test_inline_table_pop_missing_raises(self) -> None:
+        doc = Document.parse("meta = {x = 1}\n")
+        with pytest.raises(KeyError):
+            doc["meta"].pop("nonexistent")
+
+    def test_inline_table_pop_missing_default(self) -> None:
+        doc = Document.parse("meta = {x = 1}\n")
+        assert doc["meta"].pop("nonexistent", 42) == 42
+
     def test_inline_table_update(self) -> None:
         doc = Document.parse("meta = {x = 1}\n")
         doc["meta"].update({"y": 2})

@@ -69,6 +69,8 @@ pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult
             }
             Ok(false)
         }
+        // ScalarProxy overrides __contains__ to forward to the inner value,
+        // so in practice this is only reached for tables, arrays, and AoT.
         _ => Err(PyTypeError::new_err(
             "TOML scalar item does not support 'in' (use .value to get the Python object)",
         )),
@@ -88,6 +90,7 @@ pub(crate) fn item_bool(item: &ItemRs) -> bool {
             ValueRs::InlineTable(it) => !it.is_empty(),
             ValueRs::Datetime(_) => true,
         },
+        // ItemRs::None is an internal toml_edit placeholder never exposed to Python.
         ItemRs::None => false,
     }
 }
@@ -444,8 +447,10 @@ pub(crate) fn item_pop(
                 let key = is_last.then_some(Key::Int(idx));
                 Ok((Item(ItemRs::Table(aot.remove(idx))), key))
             }
+            // Only called from DictProxy (tables) and ListProxy (arrays).
             _ => Err(unsupported_op(item, "pop()")),
         },
+        // key=None is only used by ListProxy.pop() (arrays/AoT).
         None => match item {
             ItemRs::Value(ValueRs::Array(arr)) => {
                 if arr.is_empty() {

@@ -355,10 +355,6 @@ impl ItemProxy {
 
     pub fn __contains__(&self, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = value.py();
-        // Resolve ItemProxy to its Python value so equality comparison doesn't
-        // re-borrow the document through dunder methods.
-        let resolved = resolve_proxy(py, value)?;
-        let value = resolved.as_ref().map_or(value, |v| v.bind(py));
         let doc = self.document.bind(py).borrow();
         self.check_fresh(&doc)?;
         let item = self.navigate(&doc.inner)?;
@@ -396,19 +392,6 @@ impl ItemProxy {
 
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = other.py();
-
-        // Proxy-vs-proxy: compare underlying items directly in Rust.
-        if let Ok(other_proxy) = other.cast::<Self>() {
-            let other_proxy = other_proxy.borrow();
-            let doc = self.document.bind(py).borrow();
-            self.check_fresh(&doc)?;
-            let self_item = self.navigate(&doc.inner)?;
-            let other_doc = other_proxy.document.bind(py).borrow();
-            other_proxy.check_fresh(&other_doc)?;
-            let other_item = other_proxy.navigate(&other_doc.inner)?;
-            return Ok(equality::items_structural_eq(self_item, other_item));
-        }
-
         let doc = self.document.bind(py).borrow();
         self.check_fresh(&doc)?;
         let item = self.navigate(&doc.inner)?;

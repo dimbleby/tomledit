@@ -6,6 +6,7 @@ use pyo3::types::{
 use toml_edit::Item as ItemRs;
 
 use crate::item_ops::datetime_to_py;
+use crate::item_proxy::ItemProxy;
 
 /// Semantically compare two toml_edit Datetimes, treating Offset::Z and
 /// Offset::Custom { minutes: 0 } as equivalent, and normalizing optional
@@ -84,8 +85,22 @@ pub(crate) fn items_structural_eq(a: &ItemRs, b: &ItemRs) -> bool {
     }
 }
 
-/// Compare a toml_edit Value to a Python object for equality.
+/// Compare a toml_edit Value to a Python object that may be an [`ItemProxy`].
+///
+/// Proxy fast path stays in Rust via [`values_structural_eq`]; plain Python
+/// objects are compared by extracting the appropriate Python type.
 pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+    if let Ok(proxy) = other.cast::<ItemProxy>() {
+        let py = other.py();
+        let proxy = proxy.borrow();
+        let doc = proxy.document.bind(py).borrow();
+        proxy.check_fresh(&doc)?;
+        let other_item = proxy.navigate(&doc.inner)?;
+        return Ok(match other_item {
+            ItemRs::Value(v) => values_structural_eq(value, v),
+            _ => false,
+        });
+    }
     match value {
         toml_edit::Value::Boolean(b) => {
             if let Ok(other_b) = other.extract::<bool>() {
@@ -114,8 +129,6 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
         }
         toml_edit::Value::Datetime(dt) => {
             if let Ok(py_dt) = other.cast::<PyDateTime>() {
-                // Convert TOML datetime to Python and let Python's __eq__
-                // handle instant comparison for offset-aware datetimes.
                 let toml_py = datetime_to_py(dt.value(), other.py())?;
                 return toml_py.bind(other.py()).eq(py_dt);
             }
@@ -133,7 +146,6 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
                 if let (None, Some(t), None) =
                     (&dt.value().date, &dt.value().time, &dt.value().offset)
                 {
-                    // TOML local time must not equal a timezone-aware Python time.
                     if py_time.get_tzinfo().is_some() {
                         return Ok(false);
                     }
@@ -179,16 +191,29 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
     Ok(false)
 }
 
-/// Compare a toml_edit Table's entries to a Python dict for equality.
-pub(crate) fn table_entries_eq<'a>(
-    iter: impl Iterator<Item = (&'a str, &'a ItemRs)>,
-    len: usize,
-    other_dict: &Bound<'_, PyDict>,
-) -> PyResult<bool> {
-    if len != other_dict.len() {
+/// Compare a toml_edit Table to a Python object that may be an [`ItemProxy`].
+///
+/// Proxy fast path stays in Rust via [`tables_structural_eq`]; plain Python
+/// dicts are compared entry-by-entry.
+pub(crate) fn table_eq(table: &toml_edit::Table, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+    if let Ok(proxy) = other.cast::<ItemProxy>() {
+        let py = other.py();
+        let proxy = proxy.borrow();
+        let doc = proxy.document.bind(py).borrow();
+        proxy.check_fresh(&doc)?;
+        let other_item = proxy.navigate(&doc.inner)?;
+        return Ok(match other_item {
+            ItemRs::Table(t) => tables_structural_eq(table, t),
+            _ => false,
+        });
+    }
+    let Ok(other_dict) = other.cast::<PyDict>() else {
+        return Ok(false);
+    };
+    if table.len() != other_dict.len() {
         return Ok(false);
     }
-    for (k, v) in iter {
+    for (k, v) in table.iter() {
         let Some(other_v) = other_dict.get_item(k)? else {
             return Ok(false);
         };
@@ -199,16 +224,22 @@ pub(crate) fn table_entries_eq<'a>(
     Ok(true)
 }
 
-/// Compare a toml_edit Item to a Python object for equality.
+/// Compare a toml_edit Item to a Python object that may be an [`ItemProxy`].
+///
+/// Proxy fast path stays in Rust; plain Python objects are compared
+/// element-wise.
 pub(crate) fn item_eq(item: &ItemRs, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+    if let Ok(proxy) = other.cast::<ItemProxy>() {
+        let py = other.py();
+        let proxy = proxy.borrow();
+        let doc = proxy.document.bind(py).borrow();
+        proxy.check_fresh(&doc)?;
+        let other_item = proxy.navigate(&doc.inner)?;
+        return Ok(items_structural_eq(item, other_item));
+    }
     match item {
         ItemRs::Value(value) => value_eq(value, other),
-        ItemRs::Table(table) => {
-            let Ok(other_dict) = other.cast::<PyDict>() else {
-                return Ok(false);
-            };
-            table_entries_eq(table.iter(), table.len(), other_dict)
-        }
+        ItemRs::Table(table) => table_eq(table, other),
         ItemRs::ArrayOfTables(aot) => {
             let Ok(other_list) = other.cast::<PyList>() else {
                 return Ok(false);
@@ -218,10 +249,7 @@ pub(crate) fn item_eq(item: &ItemRs, other: &Bound<'_, PyAny>) -> PyResult<bool>
             }
             for (i, table) in aot.iter().enumerate() {
                 let other_elem = other_list.get_item(i)?;
-                let Ok(other_dict) = other_elem.cast::<PyDict>() else {
-                    return Ok(false);
-                };
-                if !table_entries_eq(table.iter(), table.len(), other_dict)? {
+                if !table_eq(table, &other_elem)? {
                     return Ok(false);
                 }
             }

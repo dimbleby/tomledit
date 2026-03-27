@@ -330,10 +330,8 @@ impl Document {
                 self.inner.as_item(),
                 other_doc.inner.as_item(),
             ))
-        } else if let Ok(other_dict) = other.cast::<PyDict>() {
-            equality::table_entries_eq(self.inner.iter(), self.inner.len(), other_dict)
         } else {
-            Ok(false)
+            equality::table_eq(self.inner.as_table(), other)
         }
     }
 

@@ -88,18 +88,27 @@ impl ListProxy {
 
     #[pyo3(signature = (value, /))]
     pub fn remove(
-        self_: PyRefMut<'_, Self>,
+        mut self_: PyRefMut<'_, Self>,
         py: Python<'_>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        let resolved = resolve_proxy(py, value)?;
-        let value = resolved.as_ref().map_or(value, |v| v.bind(py));
+        // Phase 1: find the index (shared borrow — value_eq can
+        // shared-borrow a proxy's document without conflict).
+        let index = {
+            let base = self_.as_super();
+            let doc = base.document.bind(py).borrow();
+            base.check_fresh(&doc)?;
+            let item = base.navigate(&doc.inner)?;
+            let target = list_ops::as_array_like(item, "remove()")?;
+            list_ops::item_index(target, value, None, None)?
+        };
+        // Phase 2: remove at that index (mutable borrow).
         let mut base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
         let target = list_ops::as_array_like_mut(item, "remove()")?;
-        let affected_key = list_ops::item_remove(target, value)?;
+        let affected_key = list_ops::item_remove_at(target, index)?;
         base.bump_affected(&mut doc, affected_key);
         Ok(())
     }
@@ -130,8 +139,6 @@ impl ListProxy {
         py: Python<'_>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<usize> {
-        let resolved = resolve_proxy(py, value)?;
-        let value = resolved.as_ref().map_or(value, |v| v.bind(py));
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
@@ -148,8 +155,6 @@ impl ListProxy {
         start: Option<i64>,
         stop: Option<i64>,
     ) -> PyResult<usize> {
-        let resolved = resolve_proxy(py, value)?;
-        let value = resolved.as_ref().map_or(value, |v| v.bind(py));
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;

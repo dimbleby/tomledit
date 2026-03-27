@@ -11,6 +11,7 @@ use pyo3::types::{PyIterator, PyList, PySet, PyTuple};
 
 use crate::dict_ops;
 use crate::document::Document;
+use crate::equality;
 use crate::item_ops::{self, Key};
 use crate::item_proxy::ItemProxy;
 
@@ -231,7 +232,7 @@ impl ValuesView {
         let parent = item_ops::navigate_path(&doc.inner, &self.path)?;
         for key in &keys {
             if let Some(item) = parent.get(key.as_str())
-                && crate::equality::item_eq(item, value)?
+                && equality::item_eq(item, value)?
             {
                 return Ok(true);
             }
@@ -312,7 +313,7 @@ impl ItemsView {
         let doc = self.document.bind(py).borrow();
         let target = item_ops::navigate_path(&doc.inner, &self.path)?.get(key);
         match target {
-            Some(item_rs) => crate::equality::item_eq(item_rs, &value),
+            Some(item_rs) => equality::item_eq(item_rs, &value),
             None => Ok(false),
         }
     }

@@ -25,6 +25,7 @@ Repository = "https://github.com/dimbleby/tomledit"
 dev = [
   "mypy>=1.19.1",
   "pytest>=8.4.2",
+  "typing-extensions>=4.15.0",
 ]
 
 [build-system]

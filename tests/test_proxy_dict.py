@@ -1289,3 +1289,23 @@ class TestViewContainsProxy:
     def test_dictitem_items_contains_proxy(self) -> None:
         doc = Document.parse('[t]\nname = "Bob"\n')
         assert ("name", doc["t"]["name"]) in doc["t"].items()
+
+
+class TestProxyKeyContainment:
+    """Proxy string values should work as keys in 'in' checks."""
+
+    def test_proxy_key_in_document(self) -> None:
+        doc = Document.parse('key = "a"\na = 1\n')
+        assert doc["key"] in doc
+
+    def test_proxy_key_in_dict_proxy(self) -> None:
+        doc = Document.parse('[s]\nname = "age"\nage = 30\n')
+        assert doc["s"]["name"] in doc["s"]
+
+    def test_proxy_key_in_keys_view(self) -> None:
+        doc = Document.parse('key = "a"\na = 1\n')
+        assert doc["key"] in doc.keys()  # noqa: SIM118
+
+    def test_proxy_key_in_dict_proxy_keys_view(self) -> None:
+        doc = Document.parse('[s]\nname = "age"\nage = 30\n')
+        assert doc["s"]["name"] in doc["s"].keys()  # noqa: SIM118

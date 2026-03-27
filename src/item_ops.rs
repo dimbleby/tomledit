@@ -9,6 +9,7 @@ use crate::comments;
 use crate::dict_ops;
 use crate::equality;
 use crate::item::Item;
+use crate::item_proxy::ItemProxy;
 use crate::list_ops;
 
 // ---------------------------------------------------------------------------
@@ -32,6 +33,27 @@ pub(crate) fn it_remove(it: &mut toml_edit::InlineTable, key: &str) -> Option<to
 // Read operations
 // ---------------------------------------------------------------------------
 
+/// Extract a string suitable for use as a TOML key from `value`.
+///
+/// Fast path: `value` is a plain Python string.
+/// Proxy path: `value` is an `ItemProxy` wrapping a TOML string value —
+/// navigates the proxy in Rust to get the string without converting to Python.
+/// Returns `None` when the value is not (or does not wrap) a string.
+pub(crate) fn extract_key_str(value: &Bound<'_, PyAny>) -> Option<String> {
+    if let Ok(s) = value.extract::<String>() {
+        return Some(s);
+    }
+    let proxy = value.cast::<ItemProxy>().ok()?;
+    let proxy = proxy.borrow();
+    let doc = proxy.document.bind(value.py()).borrow();
+    proxy.check_fresh(&doc).ok()?;
+    let item = proxy.navigate(&doc.inner).ok()?;
+    match item {
+        ItemRs::Value(ValueRs::String(s)) => Some(s.value().to_owned()),
+        _ => None,
+    }
+}
+
 pub(crate) fn item_len(item: &ItemRs) -> Option<usize> {
     match item {
         ItemRs::Table(t) => Some(t.len()),
@@ -44,11 +66,15 @@ pub(crate) fn item_len(item: &ItemRs) -> Option<usize> {
 
 pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
     if let Some(tbl) = item.as_table_like() {
-        let Ok(key) = value.extract::<&str>() else {
+        let Some(key) = extract_key_str(value) else {
             return Ok(false);
         };
-        return Ok(tbl.contains_key(key));
+        return Ok(tbl.contains_key(&key));
     }
+    // For array containment, resolve proxies to plain Python values so that
+    // value_eq / table_eq can compare without re-borrowing through dunders.
+    let resolved = crate::item_proxy::resolve_proxy(value.py(), value)?;
+    let value = resolved.as_ref().map_or(value, |v| v.bind(value.py()));
     match item {
         ItemRs::Value(ValueRs::Array(arr)) => {
             for v in arr.iter() {

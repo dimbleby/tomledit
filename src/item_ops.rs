@@ -45,11 +45,15 @@ pub(crate) fn item_len(item: &ItemRs) -> Option<usize> {
 pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
     match item {
         ItemRs::Table(table) => {
-            let key: &str = value.extract()?;
+            let Ok(key) = value.extract::<&str>() else {
+                return Ok(false);
+            };
             Ok(table.contains_key(key))
         }
         ItemRs::Value(ValueRs::InlineTable(it)) => {
-            let key: &str = value.extract()?;
+            let Ok(key) = value.extract::<&str>() else {
+                return Ok(false);
+            };
             Ok(it.contains_key(key))
         }
         ItemRs::Value(ValueRs::Array(arr)) => {

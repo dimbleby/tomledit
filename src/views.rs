@@ -106,11 +106,11 @@ impl KeysView {
     }
 
     fn __contains__(&self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let Ok(key) = key.extract::<&str>() else {
+        let Some(key) = crate::item_ops::extract_key_str(key) else {
             return Ok(false);
         };
         let doc = self.document.bind(py).borrow();
-        contains_key(&doc.inner, &self.path, key)
+        contains_key(&doc.inner, &self.path, &key)
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {

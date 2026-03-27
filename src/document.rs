@@ -88,8 +88,10 @@ impl Document {
     }
 
     pub fn __contains__(&self, key: &Bound<'_, PyAny>) -> bool {
-        key.extract::<&str>()
-            .is_ok_and(|k| self.inner.contains_key(k))
+        let Some(key) = item_ops::extract_key_str(key) else {
+            return false;
+        };
+        self.inner.contains_key(&key)
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {

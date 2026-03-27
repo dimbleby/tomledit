@@ -366,3 +366,25 @@ class TestDictProxyPopDoubleBorrow:
         result = doc["server"].pop(key)
         assert result == 80
         assert "port" not in doc["server"]
+
+
+class TestPopNonStringKey:
+    """pop() with non-string keys should behave like dict, not raise TypeError."""
+
+    def test_document_pop_int_key_with_default(self) -> None:
+        doc = Document({"a": 1})
+        assert doc.pop(42, "fallback") == "fallback"  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
+
+    def test_document_pop_int_key_no_default(self) -> None:
+        doc = Document({"a": 1})
+        with pytest.raises(KeyError):
+            doc.pop(42)  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
+
+    def test_dict_proxy_pop_int_key_with_default(self) -> None:
+        doc = Document.parse("[s]\na = 1\n")
+        assert doc["s"].pop(42, "nope") == "nope"
+
+    def test_dict_proxy_pop_int_key_no_default(self) -> None:
+        doc = Document.parse("[s]\na = 1\n")
+        with pytest.raises(KeyError):
+            doc["s"].pop(42)

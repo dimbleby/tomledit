@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use toml_edit::DocumentMut as DocumentRs;
@@ -105,21 +105,25 @@ impl DictProxy {
         let resolved = item_proxy::resolve_proxy(py, key)?;
         let key = resolved.as_ref().map_or(key, |v| v.bind(py));
 
-        let mut base = self_.into_super();
+        let Ok(key_str) = key.extract::<&str>() else {
+            return match default_val {
+                Some(d) => Ok(d),
+                None => Err(PyKeyError::new_err(key.repr()?.to_string())),
+            };
+        };
+
+        let base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
 
-        match item_ops::item_pop(item, Some(key)) {
+        match item_ops::table_pop(item, key_str) {
             Ok((removed, affected_key)) => {
                 let result = item_ops::item_to_py(&removed.0, py)?;
-                base.bump_affected(&mut doc, affected_key);
+                base.bump_child(&mut doc, affected_key);
                 Ok(result)
             }
-            Err(e)
-                if default_val.is_some()
-                    && e.is_instance_of::<pyo3::exceptions::PyKeyError>(py) =>
-            {
+            Err(e) if default_val.is_some() && e.is_instance_of::<PyKeyError>(py) => {
                 Ok(default_val.unwrap())
             }
             Err(e) => Err(e),

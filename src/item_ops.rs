@@ -406,25 +406,31 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
 /// `affected_key` is `Some(key)` when only that key was removed (no index
 /// shifting — safe for targeted invalidation), or `None` when indices
 /// shifted and the whole container must be invalidated.
+/// Remove a key from a table-like item, returning the removed item and key.
+pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
+    match item {
+        ItemRs::Table(table) => match table.remove(key) {
+            Some(v) => Ok((Item(v), Key::Str(key.into()))),
+            None => Err(PyKeyError::new_err(key.to_owned())),
+        },
+        ItemRs::Value(ValueRs::InlineTable(it)) => match it_remove(it, key) {
+            Some(v) => Ok((Item(ItemRs::Value(v)), Key::Str(key.into()))),
+            None => Err(PyKeyError::new_err(key.to_owned())),
+        },
+        _ => Err(unsupported_op(item, "pop()")),
+    }
+}
+
 pub(crate) fn item_pop(
     item: &mut ItemRs,
     key: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<(Item, Option<Key>)> {
     match key {
         Some(key_obj) => match item {
-            ItemRs::Table(table) => {
+            ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
                 let key: &str = key_obj.extract()?;
-                match table.remove(key) {
-                    Some(v) => Ok((Item(v), Some(Key::Str(key.into())))),
-                    None => Err(PyKeyError::new_err(key.to_owned())),
-                }
-            }
-            ItemRs::Value(ValueRs::InlineTable(it)) => {
-                let key: &str = key_obj.extract()?;
-                match it_remove(it, key) {
-                    Some(v) => Ok((Item(ItemRs::Value(v)), Some(Key::Str(key.into())))),
-                    None => Err(PyKeyError::new_err(key.to_owned())),
-                }
+                let (removed, k) = table_pop(item, key)?;
+                Ok((removed, Some(k)))
             }
             ItemRs::Value(ValueRs::Array(arr)) => {
                 let idx = list_ops::resolve_index(key_obj.extract::<i64>()?, arr.len())?;

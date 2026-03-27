@@ -208,9 +208,7 @@ impl DictProxy {
             let pairs = dict_ops::extract_update_pairs(other)?;
             dict_ops::apply_update_pairs(item, pairs)?
         };
-        for key in replaced {
-            base.bump_child(&mut doc, Key::Str(key));
-        }
+        base.bump_child_keys(&mut doc, replaced);
         Ok(())
     }
 
@@ -252,9 +250,7 @@ impl DictProxy {
         if !extra_pairs.is_empty() {
             replaced.extend(dict_ops::apply_update_pairs(item, extra_pairs)?);
         }
-        for key in replaced {
-            base.bump_child(&mut doc, Key::Str(key));
-        }
+        base.bump_child_keys(&mut doc, replaced);
         Ok(())
     }
 

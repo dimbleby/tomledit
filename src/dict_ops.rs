@@ -59,23 +59,20 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         .get(key)
         .and_then(|e| e.as_value())
         .map(|v| v.decor().clone());
-    match (old_decor, value.0.into_value()) {
-        (Some(decor), Ok(mut new_value)) => {
-            if let Some(prefix) = decor.prefix() {
-                new_value.decor_mut().set_prefix(prefix.clone());
-            }
-            if let Some(suffix) = decor.suffix() {
-                new_value.decor_mut().set_suffix(suffix.clone());
-            }
-            item[key] = ItemRs::Value(new_value);
+    // into_value() only fails for Item::None which we never produce.
+    let mut new_value = value
+        .0
+        .into_value()
+        .expect("Item should be convertible to Value");
+    if let Some(decor) = old_decor {
+        if let Some(prefix) = decor.prefix() {
+            new_value.decor_mut().set_prefix(prefix.clone());
         }
-        (_, Ok(new_value)) => {
-            item[key] = ItemRs::Value(new_value);
-        }
-        (_, Err(new_item)) => {
-            item[key] = new_item;
+        if let Some(suffix) = decor.suffix() {
+            new_value.decor_mut().set_suffix(suffix.clone());
         }
     }
+    item[key] = ItemRs::Value(new_value);
 
     if let Some(mut ic) = saved_ic {
         ic.push(String::new());

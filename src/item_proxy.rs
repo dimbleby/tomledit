@@ -502,14 +502,11 @@ impl ItemProxy {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_fresh(&doc)?;
         // Slot-based paths (arrays, inline tables) need pre-validated raw format.
-        let raw = || -> PyResult<String> {
-            Ok(match value {
-                Some(text) => comments::validate_inline_comment(text)?,
-                None => String::new(),
-            })
+        let raw = match value {
+            Some(text) => comments::validate_inline_comment(text)?,
+            None => String::new(),
         };
         if let Some(Key::Int(idx)) = self.path.last() {
-            let raw = raw()?;
             let parent = self.navigate_parent_mut(&mut doc.inner)?;
             let array = parent
                 .as_value_mut()
@@ -523,7 +520,7 @@ impl ItemProxy {
         {
             let parent = self.navigate_parent_mut(&mut doc.inner)?;
             if let Some(it) = parent.as_value_mut().and_then(|v| v.as_inline_table_mut()) {
-                comments::set_it_item_comment(it, key, &raw()?);
+                comments::set_it_item_comment(it, key, &raw);
                 return Ok(());
             }
         }

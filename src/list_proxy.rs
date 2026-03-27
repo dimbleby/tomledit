@@ -50,14 +50,10 @@ impl ListProxy {
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
 
-        match item_ops::item_pop(item, index) {
-            Ok((removed, affected_key)) => {
-                let result = item_ops::item_to_py(&removed.0, py)?;
-                base.bump_affected(&mut doc, affected_key);
-                Ok(result)
-            }
-            Err(e) => Err(e),
-        }
+        let (removed, affected_key) = item_ops::item_pop(item, index)?;
+        let result = item_ops::item_to_py(&removed.0, py)?;
+        base.bump_affected(&mut doc, affected_key);
+        Ok(result)
     }
 
     #[pyo3(signature = (value, /))]

@@ -5,6 +5,7 @@ use pyo3::types::{
 };
 use toml_edit::Item as ItemRs;
 
+use crate::dict_ops;
 use crate::item_ops::datetime_to_py;
 use crate::item_proxy::ItemProxy;
 
@@ -194,7 +195,7 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
 /// Compare a toml_edit Table to a Python object that may be an [`ItemProxy`].
 ///
 /// Proxy fast path stays in Rust via [`tables_structural_eq`]; plain Python
-/// dicts are compared entry-by-entry.
+/// dicts and other Mappings are compared entry-by-entry.
 pub(crate) fn table_eq(table: &toml_edit::Table, other: &Bound<'_, PyAny>) -> PyResult<bool> {
     if let Ok(proxy) = other.cast::<ItemProxy>() {
         let py = other.py();
@@ -207,14 +208,15 @@ pub(crate) fn table_eq(table: &toml_edit::Table, other: &Bound<'_, PyAny>) -> Py
             _ => false,
         });
     }
-    let Ok(other_dict) = other.cast::<PyDict>() else {
+    if !dict_ops::is_abc_mapping(other) {
         return Ok(false);
-    };
-    if table.len() != other_dict.len() {
+    }
+    let other_len: usize = other.len()?;
+    if table.len() != other_len {
         return Ok(false);
     }
     for (k, v) in table.iter() {
-        let Some(other_v) = other_dict.get_item(k)? else {
+        let Ok(other_v) = other.get_item(k) else {
             return Ok(false);
         };
         if !item_eq(v, &other_v)? {

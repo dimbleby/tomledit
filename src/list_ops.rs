@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
@@ -197,8 +197,8 @@ pub(crate) fn require_array_index(item: &ItemRs, index: i64) -> PyResult<usize> 
     match item {
         ItemRs::Value(ValueRs::Array(arr)) => resolve_index(index, arr.len()),
         ItemRs::ArrayOfTables(aot) => resolve_index(index, aot.len()),
-        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => Err(PyTypeError::new_err(
-            "TOML table keys must be strings, not integers",
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => Err(PyKeyError::new_err(
+            index.to_string(),
         )),
         _ => Err(PyTypeError::new_err(format!(
             "TOML {} item is not subscriptable (use .value to get the Python object)",

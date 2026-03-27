@@ -101,7 +101,7 @@ class TestWrongTypeErrors:
             x = 1
         """)
         )
-        with pytest.raises(TypeError, match="indices must be integers or strings"):
+        with pytest.raises(KeyError):
             doc["tbl"][1.5]  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
 
     def test_setitem_int_key_on_table_raises(self) -> None:
@@ -126,7 +126,7 @@ class TestWrongTypeErrors:
             a = 1
         """)
         )
-        with pytest.raises(TypeError, match="strings, not integers"):
+        with pytest.raises(KeyError):
             del doc["t"][0]
 
     def test_delitem_str_key_on_array_raises(self) -> None:
@@ -249,10 +249,10 @@ class TestProxyAsKey:
         with pytest.raises(TypeError, match="strings, not integers"):
             doc["server"][idx] = "test"  # type: ignore[index]  # ty: ignore[invalid-assignment]
 
-    def test_delitem_table_with_int_proxy_gives_type_error(self) -> None:
+    def test_delitem_table_with_int_proxy_gives_key_error(self) -> None:
         doc = Document.parse("idx = 1\n[server]\nport = 80\n")
         idx = doc["idx"]
-        with pytest.raises(TypeError, match="strings, not integers"):
+        with pytest.raises(KeyError):
             del doc["server"][idx]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
@@ -388,3 +388,17 @@ class TestPopNonStringKey:
         doc = Document.parse("[s]\na = 1\n")
         with pytest.raises(KeyError):
             doc["s"].pop(42)
+
+
+class TestNonStringKeyErrors:
+    """Document __getitem__/__delitem__ raise KeyError for non-string keys."""
+
+    def test_document_getitem_int_raises_key_error(self) -> None:
+        doc = Document({"a": 1})
+        with pytest.raises(KeyError):
+            doc[42]  # type: ignore[index]  # ty: ignore[invalid-argument-type]
+
+    def test_document_delitem_int_raises_key_error(self) -> None:
+        doc = Document({"a": 1})
+        with pytest.raises(KeyError):
+            del doc[42]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]

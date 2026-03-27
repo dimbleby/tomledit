@@ -302,7 +302,12 @@ pub(crate) fn item_getitem(item: &ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Ke
     } else if let Ok(k) = key.extract::<i64>() {
         Ok(Key::Int(list_ops::require_array_index(item, k)?))
     } else {
-        Err(bad_key_type(key))
+        match item {
+            ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
+                Err(PyKeyError::new_err(key.repr()?.to_string()))
+            }
+            _ => Err(bad_key_type(key)),
+        }
     }
 }
 
@@ -361,14 +366,18 @@ pub(crate) fn item_setitem(
 pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Option<Key>> {
     match item {
         ItemRs::Table(table) => {
-            let k = require_str_key(key)?;
+            let Ok(k) = key.extract::<String>() else {
+                return Err(PyKeyError::new_err(key.repr()?.to_string()));
+            };
             if table.remove(&k).is_none() {
                 return Err(PyKeyError::new_err(k));
             }
             Ok(Some(Key::Str(k)))
         }
         ItemRs::Value(ValueRs::InlineTable(it)) => {
-            let k = require_str_key(key)?;
+            let Ok(k) = key.extract::<String>() else {
+                return Err(PyKeyError::new_err(key.repr()?.to_string()));
+            };
             if it_remove(it, &k).is_none() {
                 return Err(PyKeyError::new_err(k));
             }

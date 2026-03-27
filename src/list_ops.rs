@@ -7,7 +7,7 @@ use toml_edit::Value as ValueRs;
 use crate::comments;
 use crate::equality;
 use crate::item::Item;
-use crate::item_ops::into_value;
+use crate::item_ops::{Key, into_value};
 
 // ---------------------------------------------------------------------------
 // Array-like enum — constrains list operations to valid item types
@@ -491,10 +491,13 @@ pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()>
     }
 }
 
-pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> PyResult<()> {
+/// Insert an element.  Returns `true` when the insertion was at the end
+/// (append-like, no index shifting occurred).
+pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> PyResult<bool> {
     match target {
         ArrayLikeMut::Array(arr) => {
             let resolved = clamp_index(index, arr.len());
+            let at_end = resolved == arr.len();
             let mut ic = comments::save_inline_comments(arr);
             let mut v = into_value(value)?;
             let inline = comments::take_inline_comment(&mut v);
@@ -502,19 +505,26 @@ pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> 
             arr.insert(resolved, v);
             ic.insert(resolved, inline);
             comments::restore_inline_comments(arr, &ic);
-            Ok(())
+            Ok(at_end)
         }
         ArrayLikeMut::Aot(aot) => {
-            let table = require_table(value)?;
             let resolved = clamp_index(index, aot.len());
+            let at_end = resolved == aot.len();
+            let table = require_table(value)?;
             aot.insert(resolved, table);
             fix_inserted_aot_spacing(aot, resolved);
-            Ok(())
+            Ok(at_end)
         }
     }
 }
 
-pub(crate) fn item_remove(target: ArrayLikeMut<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
+/// Remove the first matching element.  Returns `Some(Key::Int(idx))` when
+/// only that element was removed (last position — no shifting), or `None`
+/// when earlier indices shifted and the whole container must be invalidated.
+pub(crate) fn item_remove(
+    target: ArrayLikeMut<'_>,
+    value: &Bound<'_, PyAny>,
+) -> PyResult<Option<Key>> {
     match target {
         ArrayLikeMut::Array(arr) => {
             let mut ic = comments::save_inline_comments(arr);
@@ -534,7 +544,7 @@ pub(crate) fn item_remove(target: ArrayLikeMut<'_>, value: &Bound<'_, PyAny>) ->
                     ic.remove(i);
                     comments::restore_inline_comments(arr, &ic);
                     apply_removal_decor(arr, &decor);
-                    return Ok(());
+                    return Ok((i == last).then_some(Key::Int(i)));
                 }
             }
             Err(PyValueError::new_err("value not in array"))
@@ -545,8 +555,9 @@ pub(crate) fn item_remove(target: ArrayLikeMut<'_>, value: &Bound<'_, PyAny>) ->
                     if let Some(table) = aot.get(i)
                         && equality::table_entries_eq(table.iter(), table.len(), other_dict)?
                     {
+                        let last = aot.len() - 1;
                         aot.remove(i);
-                        return Ok(());
+                        return Ok((i == last).then_some(Key::Int(i)));
                     }
                 }
             }

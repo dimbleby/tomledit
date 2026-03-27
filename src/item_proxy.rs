@@ -89,6 +89,15 @@ impl ItemProxy {
         self.revision = doc.revision;
     }
 
+    /// Targeted or broad invalidation depending on whether only a single key
+    /// was affected (`Some`) or indices shifted (`None`).
+    pub(crate) fn bump_affected(&mut self, doc: &mut Document, key: Option<Key>) {
+        match key {
+            Some(k) => self.bump_child(doc, k),
+            None => self.bump_self(doc),
+        }
+    }
+
     /// Clone the toml_edit item at this proxy's path.
     ///
     /// For array elements and inline-table values the inline comment is stored
@@ -310,10 +319,7 @@ impl ItemProxy {
         self.check_fresh(&doc)?;
         let item = self.navigate_mut(&mut doc.inner)?;
         let deleted_key = item_ops::item_delitem(item, key)?;
-        match deleted_key {
-            Key::Str(_) => self.bump_child(&mut doc, deleted_key),
-            Key::Int(_) => self.bump_self(&mut doc),
-        }
+        self.bump_affected(&mut doc, deleted_key);
         Ok(())
     }
 

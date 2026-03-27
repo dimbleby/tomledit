@@ -104,6 +104,18 @@ class TestProxyListMethods:
         with pytest.raises(ValueError, match="not in array"):
             doc["arr"].remove(99)
 
+    def test_remove_empty_array_raises(self) -> None:
+        doc = Document.parse("arr = []\n")
+        with pytest.raises(ValueError, match="not in array"):
+            doc["arr"].remove(1)
+
+    def test_remove_empty_aot_raises(self) -> None:
+        doc = Document({"items": []})
+        doc["items"].append({"a": 1})
+        doc["items"].pop()
+        with pytest.raises(ValueError, match="not in array"):
+            doc["items"].remove({"a": 1})
+
     def test_remove_aot(self) -> None:
         doc = Document.parse(
             toml_literal("""

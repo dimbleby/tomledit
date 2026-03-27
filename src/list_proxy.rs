@@ -51,9 +51,9 @@ impl ListProxy {
         let item = base.navigate_mut(&mut doc.inner)?;
 
         match item_ops::item_pop(item, index) {
-            Ok(removed) => {
+            Ok((removed, affected_key)) => {
                 let result = item_ops::item_to_py(&removed.0, py)?;
-                base.bump_self(&mut doc);
+                base.bump_affected(&mut doc, affected_key);
                 Ok(result)
             }
             Err(e) => Err(e),
@@ -83,8 +83,10 @@ impl ListProxy {
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
         let target = list_ops::as_array_like_mut(item, "insert()")?;
-        list_ops::item_insert(target, index, value)?;
-        base.bump_self(&mut doc);
+        let at_end = list_ops::item_insert(target, index, value)?;
+        if !at_end {
+            base.bump_self(&mut doc);
+        }
         Ok(())
     }
 
@@ -101,8 +103,8 @@ impl ListProxy {
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
         let target = list_ops::as_array_like_mut(item, "remove()")?;
-        list_ops::item_remove(target, value)?;
-        base.bump_self(&mut doc);
+        let affected_key = list_ops::item_remove(target, value)?;
+        base.bump_affected(&mut doc, affected_key);
         Ok(())
     }
 

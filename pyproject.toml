@@ -82,6 +82,6 @@ strict = true
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
 
-[tool.pytest.ini_options]
-addopts = "-m 'not slow'"
+[tool.pytest]
+addopts = ["-m", "not slow"]
 markers = ["slow: slow property-based tests (run with -m slow)"]

@@ -72,15 +72,15 @@ impl DictProxy {
         key: &Bound<'_, PyAny>,
         default: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
-        let Ok(key) = key.extract::<&str>() else {
+        let Some(key) = item_ops::extract_key_str(key) else {
             return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
         };
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
         let item = base.navigate(&doc.inner)?;
-        if dict_ops::item_has_key(item, key)? {
-            base.child_proxy_typed(py, Key::Str(key.to_owned()))
+        if dict_ops::item_has_key(item, &key)? {
+            base.child_proxy_typed(py, Key::Str(key))
         } else {
             Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()))
         }
@@ -117,7 +117,7 @@ impl DictProxy {
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
 
-        match item_ops::table_pop(item, &key_str) {
+        match dict_ops::table_pop(item, &key_str) {
             Ok((removed, affected_key)) => {
                 base.bump_child(&mut doc, affected_key);
                 let result = item_ops::item_to_py(&removed.0, py)?;
@@ -233,24 +233,26 @@ impl DictProxy {
     pub fn setdefault(
         self_: PyRefMut<'_, Self>,
         py: Python<'_>,
-        key: &str,
+        key: &Bound<'_, PyAny>,
         default: Option<Item>,
     ) -> PyResult<Py<PyAny>> {
+        let key = item_ops::extract_key_str(key)
+            .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         let base = self_.into_super();
         {
             let mut doc = base.document.bind(py).borrow_mut();
             base.check_fresh(&doc)?;
             let item = base.navigate_mut(&mut doc.inner)?;
 
-            if !dict_ops::item_has_key(item, key)? {
+            if !dict_ops::item_has_key(item, &key)? {
                 let default = default.ok_or_else(|| {
                     pyo3::exceptions::PyTypeError::new_err(
                         "setdefault() requires a default value: TOML has no null type",
                     )
                 })?;
-                dict_ops::set_with_decor_preservation(item, key, default);
+                dict_ops::set_with_decor_preservation(item, &key, default);
             }
         }
-        base.child_proxy_typed(py, Key::Str(key.to_owned()))
+        base.child_proxy_typed(py, Key::Str(key))
     }
 }

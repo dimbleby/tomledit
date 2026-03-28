@@ -1,11 +1,12 @@
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyIterator, PySlice};
+use pyo3::types::PyIterator;
 use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
 use crate::comments;
+use crate::dict_ops;
 use crate::dict_proxy::DictProxy;
 use crate::document::Document;
 use crate::equality;
@@ -232,31 +233,45 @@ impl ItemProxy {
     // ---- core protocol ----
 
     pub fn __getitem__(&self, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        use item_ops::SubscriptKey;
         let py = key.py();
+        let resolved = item_ops::resolve_subscript_key(py, key)?;
+        let doc = self.document.bind(py).borrow();
+        self.check_fresh(&doc)?;
+        let item = self.navigate(&doc.inner)?;
 
-        // Slice support: return a list of child proxies.
-        if let Ok(slice) = key.cast::<PySlice>() {
-            let doc = self.document.bind(py).borrow();
-            self.check_fresh(&doc)?;
-            let item = self.navigate(&doc.inner)?;
-            let target = list_ops::as_array_like(item, "slicing")?;
-            let si = slice.indices(target.len() as isize)?;
-            let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
-            let proxies: PyResult<Vec<Py<PyAny>>> = indices
-                .into_iter()
-                .map(|i| self.child_proxy_typed(py, Key::Int(i)))
-                .collect();
-            return Ok(proxies?.into_pyobject(py)?.into_any().unbind());
+        match resolved {
+            SubscriptKey::Slice(slice) => {
+                let target = list_ops::as_array_like(item, "slicing")?;
+                let si = slice.indices(target.len() as isize)?;
+                let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
+                let proxies: PyResult<Vec<Py<PyAny>>> = indices
+                    .into_iter()
+                    .map(|i| self.child_proxy_typed(py, Key::Int(i)))
+                    .collect();
+                Ok(proxies?.into_pyobject(py)?.into_any().unbind())
+            }
+            SubscriptKey::Str(k) => {
+                if !dict_ops::item_has_key(item, &k)? {
+                    return Err(PyKeyError::new_err(k));
+                }
+                self.child_proxy_typed(py, Key::Str(k))
+            }
+            SubscriptKey::Int(i) => {
+                let idx = list_ops::require_array_index(item, i)?;
+                self.child_proxy_typed(py, Key::Int(idx))
+            }
+            SubscriptKey::Other(bad_key) => {
+                // Match Python dict: unknown key types raise KeyError for
+                // tables, TypeError for arrays.
+                match item {
+                    ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
+                        Err(PyKeyError::new_err(bad_key.repr()?.to_string()))
+                    }
+                    _ => Err(item_ops::bad_key_type(&bad_key)),
+                }
+            }
         }
-
-        let new_key = {
-            let doc = self.document.bind(py).borrow();
-            self.check_fresh(&doc)?;
-            let item = self.navigate(&doc.inner)?;
-            item_ops::item_getitem(item, key)?
-        };
-
-        self.child_proxy_typed(py, new_key)
     }
 
     pub fn __setitem__(
@@ -264,69 +279,90 @@ impl ItemProxy {
         key: &Bound<'_, PyAny>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
+        use item_ops::SubscriptKey;
         let py = key.py();
+        let resolved = item_ops::resolve_subscript_key(py, key)?;
 
-        if let Ok(slice) = key.cast::<PySlice>() {
-            let values: Vec<Item> = value
-                .try_iter()?
-                .map(|r| r.and_then(|v| v.extract::<Item>()))
-                .collect::<PyResult<_>>()?;
-
-            let mut doc = self.document.bind(py).borrow_mut();
-            self.check_fresh(&doc)?;
-            let item = self.navigate_mut(&mut doc.inner)?;
-            let target = list_ops::as_array_like_mut(item, "slice assignment")?;
-            let si = slice.indices(target.len() as isize)?;
-            let old_len = target.len();
-            let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
-            list_ops::item_setitem_slice(target, si.start, si.stop, si.step, values)?;
-            if let Some(&min_idx) = indices.iter().min() {
-                self.bump_range(&mut doc, min_idx, old_len);
+        match resolved {
+            SubscriptKey::Slice(slice) => {
+                let values: Vec<Item> = value
+                    .try_iter()?
+                    .map(|r| r.and_then(|v| v.extract::<Item>()))
+                    .collect::<PyResult<_>>()?;
+                let mut doc = self.document.bind(py).borrow_mut();
+                self.check_fresh(&doc)?;
+                let item = self.navigate_mut(&mut doc.inner)?;
+                let target = list_ops::as_array_like_mut(item, "slice assignment")?;
+                let si = slice.indices(target.len() as isize)?;
+                let old_len = target.len();
+                let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
+                list_ops::item_setitem_slice(target, si.start, si.stop, si.step, values)?;
+                if let Some(&min_idx) = indices.iter().min() {
+                    self.bump_range(&mut doc, min_idx, old_len);
+                }
+                Ok(())
             }
-            return Ok(());
+            SubscriptKey::Str(k) => {
+                let value: Item = value.extract()?;
+                let mut doc = self.document.bind(py).borrow_mut();
+                self.check_fresh(&doc)?;
+                let item = self.navigate_mut(&mut doc.inner)?;
+                if let Some(replaced_key) = item_ops::item_setitem_str(item, k, value)? {
+                    self.bump_child(&mut doc, replaced_key);
+                }
+                Ok(())
+            }
+            SubscriptKey::Int(i) => {
+                let value: Item = value.extract()?;
+                let mut doc = self.document.bind(py).borrow_mut();
+                self.check_fresh(&doc)?;
+                let item = self.navigate_mut(&mut doc.inner)?;
+                let replaced_key = item_ops::item_setitem_int(item, i, value)?;
+                self.bump_child(&mut doc, replaced_key);
+                Ok(())
+            }
+            SubscriptKey::Other(bad_key) => Err(item_ops::bad_key_type(&bad_key)),
         }
-
-        // Resolve proxy keys before the mutable borrow — extract() on a
-        // ScalarItem triggers __index__ which re-borrows the document.
-        let resolved_key = resolve_proxy(py, key)?;
-        let key = resolved_key.as_ref().map_or(key, |v| v.bind(py));
-        let value: Item = value.extract()?;
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_fresh(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-        if let Some(replaced_key) = item_ops::item_setitem(item, key, value)? {
-            self.bump_child(&mut doc, replaced_key);
-        }
-        Ok(())
     }
 
     pub fn __delitem__(&mut self, key: &Bound<'_, PyAny>) -> PyResult<()> {
+        use item_ops::SubscriptKey;
         let py = key.py();
+        let resolved = item_ops::resolve_subscript_key(py, key)?;
 
-        if let Ok(slice) = key.cast::<PySlice>() {
-            let mut doc = self.document.bind(py).borrow_mut();
-            self.check_fresh(&doc)?;
-            let item = self.navigate_mut(&mut doc.inner)?;
-            let target = list_ops::as_array_like_mut(item, "slice deletion")?;
-            let si = slice.indices(target.len() as isize)?;
-            let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
-            if let Some(&min_idx) = indices.iter().min() {
-                let old_len = target.len();
-                list_ops::item_delitem_slice(target, &indices)?;
-                self.bump_range(&mut doc, min_idx, old_len);
+        match resolved {
+            SubscriptKey::Slice(slice) => {
+                let mut doc = self.document.bind(py).borrow_mut();
+                self.check_fresh(&doc)?;
+                let item = self.navigate_mut(&mut doc.inner)?;
+                let target = list_ops::as_array_like_mut(item, "slice deletion")?;
+                let si = slice.indices(target.len() as isize)?;
+                let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
+                if let Some(&min_idx) = indices.iter().min() {
+                    let old_len = target.len();
+                    list_ops::item_delitem_slice(target, &indices)?;
+                    self.bump_range(&mut doc, min_idx, old_len);
+                }
+                Ok(())
             }
-            return Ok(());
+            SubscriptKey::Str(k) => {
+                let mut doc = self.document.bind(py).borrow_mut();
+                self.check_fresh(&doc)?;
+                let item = self.navigate_mut(&mut doc.inner)?;
+                let deleted = item_ops::item_delitem_str(item, &k)?;
+                self.bump_affected(&mut doc, deleted);
+                Ok(())
+            }
+            SubscriptKey::Int(i) => {
+                let mut doc = self.document.bind(py).borrow_mut();
+                self.check_fresh(&doc)?;
+                let item = self.navigate_mut(&mut doc.inner)?;
+                let deleted = item_ops::item_delitem_int(item, i)?;
+                self.bump_affected(&mut doc, deleted);
+                Ok(())
+            }
+            SubscriptKey::Other(bad_key) => Err(item_ops::bad_key_type(&bad_key)),
         }
-
-        // Resolve proxy keys before the mutable borrow.
-        let resolved_key = resolve_proxy(py, key)?;
-        let key = resolved_key.as_ref().map_or(key, |v| v.bind(py));
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_fresh(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-        let deleted_key = item_ops::item_delitem(item, key)?;
-        self.bump_affected(&mut doc, deleted_key);
-        Ok(())
     }
 
     pub fn __len__(&self, py: Python<'_>) -> PyResult<usize> {

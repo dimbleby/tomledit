@@ -670,6 +670,26 @@ class TestPreciseArrayShiftInvalidation:
         with pytest.raises(RuntimeError, match="stale"):
             _ = p2.value
 
+    def test_non_overlapping_shifts_preserve_between(self) -> None:
+        doc = Document.parse("arr = [0, 1, 2, 3, 4, 5, 6, 7]")
+        doc["arr"].pop(1)  # shift from 1 → [0, 2, 3, 4, 5, 6, 7]
+        p3 = doc["arr"][3]  # proxy at index 3, created after first shift
+        doc["arr"].pop(5)  # shift from 5 → [0, 2, 3, 4, 5, 7]
+        # p3 is between the two shift thresholds: index 3 < 5
+        # and it was created after the first shift. Should be valid.
+        assert p3.value == 4
+
+    def test_replace_array_clears_old_shifts(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        doc["arr"].pop(0)  # shift from 0 — all indices affected
+        doc["arr"] = [10, 20, 30, 40]  # replace entire array
+        p1 = doc["arr"][1]  # proxy created after replacement
+        doc["arr"].pop(3)  # shift from 3
+        # p1 at index 1 < 3, so it should be valid.
+        # (Bug was: old shift from 0 survived the replacement and poisoned
+        # the new shift via min(0, 3) = 0, making index 1 falsely stale.)
+        assert p1.value == 20
+
 
 class TestViewStaleness:
     """Views go stale when their path is invalidated, just like proxies."""

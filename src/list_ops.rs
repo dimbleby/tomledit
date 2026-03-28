@@ -508,7 +508,10 @@ pub(crate) fn item_insert(
             arr.insert(resolved, v);
             ic.insert(resolved, inline);
             comments::restore_inline_comments(arr, &ic);
-            Ok((!at_end).then_some(Affected::Shift(resolved)))
+            Ok((!at_end).then_some(Affected::Range {
+                from: resolved,
+                to: arr.len(),
+            }))
         }
         ArrayLikeMut::Aot(aot) => {
             let resolved = clamp_index(index, aot.len());
@@ -516,7 +519,10 @@ pub(crate) fn item_insert(
             let table = require_table(value)?;
             aot.insert(resolved, table);
             fix_inserted_aot_spacing(aot, resolved);
-            Ok((!at_end).then_some(Affected::Shift(resolved)))
+            Ok((!at_end).then_some(Affected::Range {
+                from: resolved,
+                to: aot.len(),
+            }))
         }
     }
 }

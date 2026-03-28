@@ -52,10 +52,12 @@ impl Document {
         self.trie.stamp_child(path, child, self.revision);
     }
 
-    /// Record that an array at `path` shifted indices starting at `from_index`.
-    pub(crate) fn bump_shift(&mut self, path: &[Key], from_index: usize) {
+    /// Stamp each index in `from..to` as changed at `path`.
+    pub(crate) fn bump_range(&mut self, path: &[Key], from: usize, to: usize) {
         self.revision += 1;
-        self.trie.stamp_shift(path, from_index, self.revision);
+        for i in from..to {
+            self.trie.stamp_child(path, &Key::Int(i), self.revision);
+        }
     }
 
     /// Check whether a proxy at `path` created at `revision` is still fresh.

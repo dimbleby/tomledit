@@ -1,15 +1,28 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use toml_edit::Item as ItemRs;
-use toml_edit::TableLike;
-use toml_edit::Value as ValueRs;
+use toml_edit::{Decor, Item as ItemRs, TableLike, Value as ValueRs};
 
 use crate::comments;
 use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key, unsupported_op};
 use crate::item_proxy::ItemProxy;
+
+// ---------------------------------------------------------------------------
+// Decor helpers
+// ---------------------------------------------------------------------------
+
+/// Ensure a decor prefix starts with `\n` (the structural newline that
+/// separates a `[table]` or `[[aot]]` header from preceding content).
+/// Only needed when the table is not the first entry in its parent.
+fn ensure_leading_newline(decor: &mut Decor) {
+    match decor.prefix().and_then(|r| r.as_str()) {
+        Some(s) if s.starts_with('\n') => {}
+        Some(s) => decor.set_prefix(format!("\n{s}")),
+        None => decor.set_prefix("\n"),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Table-like extraction helpers
@@ -25,60 +38,90 @@ pub(crate) fn as_dict_like<'a>(item: &'a ItemRs, op: &str) -> PyResult<&'a dyn T
 // ---------------------------------------------------------------------------
 
 pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: Item) {
+    // Save the old block comment so we can restore it after replacement,
+    // regardless of whether the comment storage location changes.
+    let old_comment = comments::get_key_prefix_comment(item, key);
+
     // Tables and ArrayOfTables must stay as-is; into_value() would convert
     // a standard Table ([foo]) into an InlineTable (foo = {}).
     // Exception: inside inline tables, nested dicts MUST become inline tables.
     if (value.0.is_table() || value.0.is_array_of_tables()) && !item.is_inline_table() {
         let mut val = value.0;
-        // Clear position-specific decor so toml_edit applies its default
-        // blank-line-before-header formatting.  Without this, a table
-        // cloned from another document would carry the source's decor
-        // (e.g. no leading newline when it was the first table there).
+        // Clear position so toml_edit applies its default ordering.
+        // Decor (including comments) is kept — the restore at the end
+        // will overwrite with the target's comment when one exists,
+        // otherwise the source's comment comes through.
         if let Some(t) = val.as_table_mut() {
-            t.decor_mut().clear();
             t.set_position(None);
         }
         if let Some(aot) = val.as_array_of_tables_mut() {
             for t in aot.iter_mut() {
-                t.decor_mut().clear();
                 t.set_position(None);
             }
         }
         item[key] = val;
-        return;
+        // Clear the old key's leaf_decor so that comments from a previous
+        // scalar value don't leak into the output before the new header.
+        if let Some(mut km) = item.as_table_mut().and_then(|t| t.key_mut(key)) {
+            km.leaf_decor_mut().clear();
+        }
+        // A table/AoT that was first in its source document has no leading
+        // `\n`.  When inserted after other entries, add the structural
+        // newline so the header doesn't run into the preceding content.
+        if let Some(table) = item.as_table_mut() {
+            let is_first = table.iter().next().is_some_and(|(k, _)| k == key);
+            if !is_first && let Some(child) = table.get_mut(key) {
+                if let Some(t) = child.as_table_mut() {
+                    ensure_leading_newline(t.decor_mut());
+                }
+                if let Some(aot) = child.as_array_of_tables_mut()
+                    && let Some(first) = aot.iter_mut().next()
+                {
+                    ensure_leading_newline(first.decor_mut());
+                }
+            }
+        }
+    } else {
+        // For new keys in inline tables, preserve sibling inline comments
+        // (existing keys don't change key order, so no save/restore needed).
+        let saved_ic = item
+            .as_inline_table()
+            .filter(|it| !it.contains_key(key))
+            .map(comments::save_it_inline_comments);
+
+        let old_decor = item
+            .get(key)
+            .and_then(|e| e.as_value())
+            .map(|v| v.decor().clone());
+        // into_value() only fails for Item::None which we never produce.
+        let mut new_value = value
+            .0
+            .into_value()
+            .expect("Item should be convertible to Value");
+        if let Some(ref decor) = old_decor {
+            if let Some(prefix) = decor.prefix() {
+                new_value.decor_mut().set_prefix(prefix.clone());
+            }
+            if let Some(suffix) = decor.suffix() {
+                new_value.decor_mut().set_suffix(suffix.clone());
+            }
+        }
+        item[key] = ItemRs::Value(new_value);
+
+        if let Some(mut ic) = saved_ic {
+            ic.push(String::new());
+            if let Some(it) = item.as_inline_table_mut() {
+                comments::restore_it_inline_comments(it, &ic);
+            }
+        }
     }
 
-    // For new keys in inline tables, preserve sibling inline comments
-    // (existing keys don't change key order, so no save/restore needed).
-    let saved_ic = item
-        .as_inline_table()
-        .filter(|it| !it.contains_key(key))
-        .map(comments::save_it_inline_comments);
-
-    let old_decor = item
-        .get(key)
-        .and_then(|e| e.as_value())
-        .map(|v| v.decor().clone());
-    // into_value() only fails for Item::None which we never produce.
-    let mut new_value = value
-        .0
-        .into_value()
-        .expect("Item should be convertible to Value");
-    if let Some(decor) = old_decor {
-        if let Some(prefix) = decor.prefix() {
-            new_value.decor_mut().set_prefix(prefix.clone());
-        }
-        if let Some(suffix) = decor.suffix() {
-            new_value.decor_mut().set_suffix(suffix.clone());
-        }
-    }
-    item[key] = ItemRs::Value(new_value);
-
-    if let Some(mut ic) = saved_ic {
-        ic.push(String::new());
-        if let Some(it) = item.as_inline_table_mut() {
-            comments::restore_it_inline_comments(it, &ic);
-        }
+    // Restore the target's block comment only if the new item doesn't
+    // carry one of its own (e.g. copied from another document).
+    if comments::get_key_prefix_comment(item, key).is_none()
+        && let Some(ref c) = old_comment
+    {
+        let _ = comments::set_key_prefix_comment(item, key, Some(c));
     }
 }
 

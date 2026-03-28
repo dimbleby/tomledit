@@ -1418,6 +1418,52 @@ class TestComment:
 
     # ---- comments survive mutations ----
 
+    def test_comments_preserved_on_scalar_to_table(self) -> None:
+        """Replacing a scalar with a fresh table preserves the block comment."""
+        doc = Document({"a": "hello"})
+        doc["a"].comment = "# about a"
+        doc["a"].inline_comment = "# note"
+        doc["a"] = {"x": 1}
+        assert doc["a"].comment == "# about a"
+
+    def test_comments_preserved_on_scalar_to_aot(self) -> None:
+        """Replacing a scalar with a fresh AoT preserves the block comment."""
+        doc = Document({"a": "hello"})
+        doc["a"].comment = "# about a"
+        doc["a"] = [{"x": 1}]
+        assert doc["a"].comment == "# about a"
+
+    def test_comments_preserved_on_table_to_scalar(self) -> None:
+        """Replacing a table with a fresh scalar preserves the block comment."""
+        doc = Document.parse("# about b\n[b]\nx = 1\n")
+        assert doc["b"].comment == "# about b"
+        doc["b"] = "flat"
+        assert doc["b"].comment == "# about b"
+
+    def test_source_comment_wins_over_target(self) -> None:
+        """When the source already has a comment, it takes precedence."""
+        src = Document.parse("# source\n[b]\nx = 1\n")
+        dst = Document.parse("# target\n[a]\ny = 2\n")
+        dst["a"] = src["b"]
+        assert dst["a"].comment == "# source"
+
+    def test_source_comment_preserved_on_cross_doc_copy(self) -> None:
+        """Copying a commented table from another doc keeps its comment."""
+        src = Document.parse("# source comment\n[b]\nx = 1\n")
+        dst = Document({"a": "hello"})
+        dst["a"] = src["b"]
+        assert dst["a"].comment is not None
+        assert "source comment" in dst["a"].comment
+
+    def test_comments_preserved_on_scalar_to_scalar(self) -> None:
+        """Replacing a scalar with another scalar preserves comments."""
+        doc = Document({"a": "hello"})
+        doc["a"].comment = "# about a"
+        doc["a"].inline_comment = "# note"
+        doc["a"] = "world"
+        assert doc["a"].comment == "# about a"
+        assert doc["a"].inline_comment == "# note"
+
     def test_inline_comment_preserved_on_top_level_update(self) -> None:
         toml = 'title = "old" # important note\n'
         doc = Document.parse(toml)

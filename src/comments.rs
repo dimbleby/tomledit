@@ -131,27 +131,18 @@ pub(crate) fn set_suffix_comment(item: &mut ItemRs, comment: Option<&str>) -> Py
 /// `[[` bracket), not in the key's leaf decor (which would be *inside* the
 /// brackets).
 pub(crate) fn get_key_prefix_comment(parent: &ItemRs, key: &str) -> Option<String> {
-    if let ItemRs::Table(table) = parent
-        && let Some(ItemRs::Table(child)) = table.get(key)
-    {
-        let raw = child.decor().prefix()?.as_str()?;
-        return extract_block_comment(raw);
-    }
-    if let ItemRs::Table(table) = parent
-        && let Some(ItemRs::ArrayOfTables(aot)) = table.get(key)
-    {
-        let first = aot.iter().next()?;
-        let raw = first.decor().prefix()?.as_str()?;
+    if let ItemRs::Table(table) = parent {
+        let raw = match table.get(key)? {
+            ItemRs::Table(child) => child.decor().prefix()?.as_str()?,
+            ItemRs::ArrayOfTables(aot) => aot.iter().next()?.decor().prefix()?.as_str()?,
+            _ => return extract_block_comment(table.key(key)?.leaf_decor().prefix()?.as_str()?),
+        };
         return extract_block_comment(raw);
     }
     if let ItemRs::Value(ValueRs::InlineTable(it)) = parent {
         return get_it_block_comment(it, key);
     }
-    let raw = match parent {
-        ItemRs::Table(table) => table.key(key)?.leaf_decor().prefix()?.as_str()?,
-        _ => return None,
-    };
-    extract_block_comment(raw)
+    None
 }
 
 /// Build a block-comment prefix string, or fall back to `default` when
@@ -174,36 +165,30 @@ pub(crate) fn set_key_prefix_comment(
     key: &str,
     comment: Option<&str>,
 ) -> PyResult<()> {
-    if let ItemRs::Table(table) = parent
-        && let Some(ItemRs::Table(child)) = table.get_mut(key)
-    {
-        let prefix = comment_prefix(comment, "", "\n")?;
-        child.decor_mut().set_prefix(prefix);
-        return Ok(());
-    }
-    if let ItemRs::Table(table) = parent
-        && let Some(ItemRs::ArrayOfTables(aot)) = table.get_mut(key)
-    {
-        let Some(first) = aot.iter_mut().next() else {
-            return Ok(());
+    if let ItemRs::Table(table) = parent {
+        // For tables and AoT the comment lives in the child's own decor
+        // prefix.  For plain values it lives in the key's leaf decor.
+        let decor = match table.get_mut(key) {
+            Some(ItemRs::Table(child)) => Some(child.decor_mut()),
+            Some(ItemRs::ArrayOfTables(aot)) => aot.iter_mut().next().map(|t| t.decor_mut()),
+            _ => None,
         };
-        let prefix = comment_prefix(comment, "", "\n")?;
-        first.decor_mut().set_prefix(prefix);
+        if let Some(d) = decor {
+            let prefix = comment_prefix(comment, "", "\n")?;
+            d.set_prefix(prefix);
+            return Ok(());
+        }
+        let Some(mut km) = table.key_mut(key) else {
+            return Err(PyKeyError::new_err(key.to_owned()));
+        };
+        let prefix = comment_prefix(comment, "", "")?;
+        km.leaf_decor_mut().set_prefix(prefix);
         return Ok(());
     }
     if let ItemRs::Value(ValueRs::InlineTable(it)) = parent {
         return set_it_block_comment(it, key, comment);
     }
-    let key_mut = match parent {
-        ItemRs::Table(table) => table.key_mut(key),
-        _ => None,
-    };
-    let Some(mut km) = key_mut else {
-        return Err(PyKeyError::new_err(key.to_owned()));
-    };
-    let prefix = comment_prefix(comment, "", "")?;
-    km.leaf_decor_mut().set_prefix(prefix);
-    Ok(())
+    Err(PyKeyError::new_err(key.to_owned()))
 }
 
 // ---------------------------------------------------------------------------

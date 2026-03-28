@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import contextlib
-from typing import Protocol
+import copy
+from collections.abc import Callable
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -11,15 +12,8 @@ from hypothesis import strategies as st
 
 from tomledit import Document
 
-
-class Mutation(Protocol):
-    """Any object with an .apply(doc) method."""
-
-    def apply(self, doc: Document) -> None: ...
-
-
 # ---------------------------------------------------------------------------
-# Strategies
+# Strategies for TOML values and keys
 # ---------------------------------------------------------------------------
 
 # TOML-safe scalars (no inf/nan — TOML doesn't support them)
@@ -64,203 +58,332 @@ toml_keys = st.text(
 
 # Comments: valid `# ...` strings (no newlines, starts with #, printable only)
 # TOML forbids control characters U+0000-U+0008, U+000A-U+001F, U+007F in comments.
-inline_comments = st.text(
-    st.characters(
-        whitelist_categories=("L", "M", "N", "P", "S", "Z"),
-        blacklist_characters=("\n", "\r", "\x00"),
+_comment_chars = st.characters(
+    whitelist_categories=("L", "M", "N", "P", "S", "Z"),
+    blacklist_characters=("\n", "\r", "\x00"),
+)
+inline_comments = st.text(_comment_chars, min_size=0, max_size=30).map(
+    lambda s: f"# {s}"
+)
+
+# Multi-line block comments: 1-3 comment lines joined by newlines.
+block_comments = st.lists(
+    st.text(_comment_chars, min_size=0, max_size=30).map(lambda s: f"# {s}"),
+    min_size=1,
+    max_size=3,
+).map("\n".join)
+
+# Rich initial values: include nested tables and AoTs alongside scalars
+initial_values: st.SearchStrategy[object] = st.one_of(
+    toml_scalars,
+    st.dictionaries(toml_keys, toml_scalars, min_size=1, max_size=3),
+    st.lists(toml_scalars, min_size=1, max_size=4),
+    # AoT: list of dicts
+    st.lists(
+        st.dictionaries(toml_keys, toml_scalars, min_size=1, max_size=2),
+        min_size=1,
+        max_size=2,
     ),
-    min_size=0,
-    max_size=30,
-).map(lambda s: f"# {s}")
+)
+
+# Type-change values: all structural types including AoTs
+type_change_values = st.one_of(
+    toml_scalars,
+    st.dictionaries(toml_keys, toml_scalars, max_size=3),
+    st.lists(toml_scalars, min_size=1, max_size=4),
+    st.lists(
+        st.dictionaries(toml_keys, toml_scalars, min_size=1, max_size=3),
+        min_size=1,
+        max_size=3,
+    ),
+)
+
+# Type alias for mutation callables
+Mutation = Callable[[Document], None]
 
 
 # ---------------------------------------------------------------------------
-# Mutation commands — a small DSL for random document edits
+# Mutation strategies — each draws its own parameters and returns a callable
 # ---------------------------------------------------------------------------
 
 
-class SetKey:
-    """Set a top-level key to a value."""
+@st.composite
+def set_key(draw: st.DrawFn) -> Mutation:
+    key, value = draw(toml_keys), draw(toml_values)
 
-    def __init__(self, key: str, value: object) -> None:
-        self.key = key
-        self.value = value
+    def apply(doc: Document) -> None:
+        doc[key] = value
 
-    def apply(self, doc: Document) -> None:
-        doc[self.key] = self.value
-
-
-class DelKey:
-    """Delete a top-level key (if it exists)."""
-
-    def __init__(self, key: str) -> None:
-        self.key = key
-
-    def apply(self, doc: Document) -> None:
-        if self.key in doc:
-            del doc[self.key]
+    return apply
 
 
-class SetComment:
-    """Set a block comment on a top-level key (if it exists)."""
+@st.composite
+def del_key(draw: st.DrawFn) -> Mutation:
+    key = draw(toml_keys)
 
-    def __init__(self, key: str, comment: str) -> None:
-        self.key = key
-        self.comment = comment
+    def apply(doc: Document) -> None:
+        if key in doc:
+            del doc[key]
 
-    def apply(self, doc: Document) -> None:
-        if self.key in doc:
-            doc[self.key].comment = self.comment
+    return apply
 
 
-class SetInlineComment:
-    """Set an inline comment on a top-level key (if it exists)."""
+@st.composite
+def set_comment(draw: st.DrawFn) -> Mutation:
+    key = draw(toml_keys)
+    comment = draw(st.one_of(inline_comments, block_comments))
 
-    def __init__(self, key: str, comment: str) -> None:
-        self.key = key
-        self.comment = comment
+    def apply(doc: Document) -> None:
+        if key in doc:
+            doc[key].comment = comment
 
-    def apply(self, doc: Document) -> None:
-        if self.key in doc:
+    return apply
+
+
+@st.composite
+def set_inline_comment(draw: st.DrawFn) -> Mutation:
+    key, comment = draw(toml_keys), draw(inline_comments)
+
+    def apply(doc: Document) -> None:
+        if key in doc:
             with contextlib.suppress(TypeError):
-                doc[self.key].inline_comment = self.comment
+                doc[key].inline_comment = comment
+
+    return apply
 
 
-class UpdateDict:
-    """Merge a dict into the document."""
+@st.composite
+def clear_comment(draw: st.DrawFn) -> Mutation:
+    key = draw(toml_keys)
 
-    def __init__(self, data: dict[str, object]) -> None:
-        self.data = data
+    def apply(doc: Document) -> None:
+        if key in doc:
+            doc[key].comment = None
+            with contextlib.suppress(TypeError):
+                doc[key].inline_comment = None
 
-    def apply(self, doc: Document) -> None:
-        doc.update(self.data)
-
-
-class ArrayAppend:
-    """Set a key to a list, then append a value."""
-
-    def __init__(self, key: str, initial: list[object], extra: object) -> None:
-        self.key = key
-        self.initial = initial
-        self.extra = extra
-
-    def apply(self, doc: Document) -> None:
-        doc[self.key] = self.initial
-        doc[self.key].append(self.extra)
+    return apply
 
 
-class ArrayInsert:
-    """Set a key to a list, then insert at a position."""
+@st.composite
+def update_dict(draw: st.DrawFn) -> Mutation:
+    data = draw(st.dictionaries(toml_keys, toml_scalars, max_size=4))
 
-    def __init__(
-        self, key: str, initial: list[object], index: int, value: object
-    ) -> None:
-        self.key = key
-        self.initial = initial
-        self.index = index
-        self.value = value
+    def apply(doc: Document) -> None:
+        doc.update(data)
 
-    def apply(self, doc: Document) -> None:
-        doc[self.key] = self.initial
-        if self.initial:
-            idx = self.index % (len(self.initial) + 1)
-            doc[self.key].insert(idx, self.value)
+    return apply
 
 
-class ArrayRemove:
-    """Set a key to a list, then remove by index."""
+@st.composite
+def pop_key(draw: st.DrawFn) -> Mutation:
+    key = draw(toml_keys)
 
-    def __init__(self, key: str, initial: list[object], index: int) -> None:
-        self.key = key
-        self.initial = initial
-        self.index = index
+    def apply(doc: Document) -> None:
+        if key in doc:
+            doc.pop(key)
 
-    def apply(self, doc: Document) -> None:
-        doc[self.key] = self.initial
-        if self.initial:
-            idx = self.index % len(self.initial)
-            del doc[self.key][idx]
+    return apply
 
 
-class ArraySliceAssign:
-    """Set a key to a list, then replace a slice."""
+@st.composite
+def set_default(draw: st.DrawFn) -> Mutation:
+    key, value = draw(toml_keys), draw(toml_scalars)
 
-    def __init__(
-        self,
-        key: str,
-        initial: list[object],
-        start: int,
-        stop: int,
-        replacement: list[object],
-    ) -> None:
-        self.key = key
-        self.initial = initial
-        self.start = start
-        self.stop = stop
-        self.replacement = replacement
+    def apply(doc: Document) -> None:
+        doc.setdefault(key, value)
 
-    def apply(self, doc: Document) -> None:
-        doc[self.key] = self.initial
-        n = len(self.initial)
-        if n == 0:
-            return
-        lo = min(self.start % (n + 1), n)
-        hi = min(max(self.stop % (n + 1), lo), n)
-        doc[self.key][lo:hi] = self.replacement
+    return apply
 
 
-# Strategies for mutation commands
-set_key_cmd = st.builds(SetKey, toml_keys, toml_values)
-del_key_cmd = st.builds(DelKey, toml_keys)
-set_comment_cmd = st.builds(SetComment, toml_keys, inline_comments)
-set_inline_comment_cmd = st.builds(SetInlineComment, toml_keys, inline_comments)
-update_cmd = st.builds(
-    UpdateDict,
-    st.dictionaries(toml_keys, toml_scalars, max_size=4),
-)
-array_append_cmd = st.builds(
-    ArrayAppend,
-    toml_keys,
-    st.lists(toml_scalars, min_size=0, max_size=5),
-    toml_scalars,
-)
-array_insert_cmd = st.builds(
-    ArrayInsert,
-    toml_keys,
-    st.lists(toml_scalars, min_size=1, max_size=5),
-    st.integers(min_value=-10, max_value=10),
-    toml_scalars,
-)
-array_remove_cmd = st.builds(
-    ArrayRemove,
-    toml_keys,
-    st.lists(toml_scalars, min_size=1, max_size=5),
-    st.integers(min_value=-10, max_value=10),
-)
-array_slice_cmd = st.builds(
-    ArraySliceAssign,
-    toml_keys,
-    st.lists(toml_scalars, min_size=1, max_size=5),
-    st.integers(min_value=-10, max_value=10),
-    st.integers(min_value=-10, max_value=10),
-    st.lists(toml_scalars, min_size=0, max_size=4),
-)
+@st.composite
+def copy_roundtrip(draw: st.DrawFn) -> Mutation:
+    deep = draw(st.booleans())
+
+    def apply(doc: Document) -> None:
+        copied = copy.deepcopy(doc) if deep else copy.copy(doc)
+        Document.parse(copied.as_toml())
+
+    return apply
+
+
+@st.composite
+def set_nested_key(draw: st.DrawFn) -> Mutation:
+    outer, inner = draw(toml_keys), draw(toml_keys)
+    value = draw(toml_scalars)
+
+    def apply(doc: Document) -> None:
+        if outer in doc:
+            with contextlib.suppress(TypeError, KeyError):
+                doc[outer][inner] = value
+
+    return apply
+
+
+@st.composite
+def set_nested_comment(draw: st.DrawFn) -> Mutation:
+    outer, inner = draw(toml_keys), draw(toml_keys)
+    comment = draw(inline_comments)
+
+    def apply(doc: Document) -> None:
+        if outer in doc:
+            with contextlib.suppress(TypeError, KeyError, RuntimeError):
+                doc[outer][inner].comment = comment
+
+    return apply
+
+
+@st.composite
+def array_append(draw: st.DrawFn) -> Mutation:
+    key = draw(toml_keys)
+    initial = draw(st.lists(toml_scalars, min_size=0, max_size=5))
+    extra = draw(toml_scalars)
+
+    def apply(doc: Document) -> None:
+        doc[key] = initial
+        doc[key].append(extra)
+
+    return apply
+
+
+@st.composite
+def array_insert(draw: st.DrawFn) -> Mutation:
+    key = draw(toml_keys)
+    initial = draw(st.lists(toml_scalars, min_size=1, max_size=5))
+    index = draw(st.integers(min_value=-10, max_value=10))
+    value = draw(toml_scalars)
+
+    def apply(doc: Document) -> None:
+        doc[key] = initial
+        idx = index % (len(initial) + 1)
+        doc[key].insert(idx, value)
+
+    return apply
+
+
+@st.composite
+def array_remove(draw: st.DrawFn) -> Mutation:
+    key = draw(toml_keys)
+    initial = draw(st.lists(toml_scalars, min_size=1, max_size=5))
+    index = draw(st.integers(min_value=-10, max_value=10))
+
+    def apply(doc: Document) -> None:
+        doc[key] = initial
+        del doc[key][index % len(initial)]
+
+    return apply
+
+
+@st.composite
+def array_slice_assign(draw: st.DrawFn) -> Mutation:
+    key = draw(toml_keys)
+    initial = draw(st.lists(toml_scalars, min_size=1, max_size=5))
+    start = draw(st.integers(min_value=-10, max_value=10))
+    stop = draw(st.integers(min_value=-10, max_value=10))
+    replacement = draw(st.lists(toml_scalars, min_size=0, max_size=4))
+
+    def apply(doc: Document) -> None:
+        doc[key] = initial
+        n = len(initial)
+        lo = min(start % (n + 1), n)
+        hi = min(max(stop % (n + 1), lo), n)
+        doc[key][lo:hi] = replacement
+
+    return apply
+
+
+@st.composite
+def ior_merge(draw: st.DrawFn) -> Mutation:
+    data = draw(st.dictionaries(toml_keys, toml_scalars, max_size=4))
+
+    def apply(doc: Document) -> None:
+        doc |= Document(data)
+
+    return apply
+
+
+@st.composite
+def clear_collection(draw: st.DrawFn) -> Mutation:
+    """Clear a dict-like value. Skips lists — an empty AoT has no TOML
+    representation, and we can't distinguish AoT from regular array."""
+    key = draw(toml_keys)
+
+    def apply(doc: Document) -> None:
+        if key in doc:
+            with contextlib.suppress(TypeError, AttributeError):
+                doc[key].keys()
+                doc[key].clear()
+
+    return apply
+
+
+@st.composite
+def extend_list(draw: st.DrawFn) -> Mutation:
+    key = draw(toml_keys)
+    initial = draw(st.lists(toml_scalars, min_size=0, max_size=3))
+    extra = draw(st.lists(toml_scalars, min_size=1, max_size=4))
+
+    def apply(doc: Document) -> None:
+        doc[key] = initial
+        doc[key].extend(extra)
+
+    return apply
+
+
+@st.composite
+def array_element_comment(draw: st.DrawFn) -> Mutation:
+    key = draw(toml_keys)
+    initial = draw(st.lists(toml_scalars, min_size=1, max_size=5))
+    index = draw(st.integers(min_value=-10, max_value=10))
+    comment = draw(inline_comments)
+
+    def apply(doc: Document) -> None:
+        doc[key] = initial
+        doc[key][index % len(initial)].comment = comment
+
+    return apply
+
+
+@st.composite
+def type_change(draw: st.DrawFn) -> Mutation:
+    """Overwrite a key with a different structural type (scalar↔table↔list)."""
+    key = draw(toml_keys)
+    value = draw(type_change_values)
+
+    def apply(doc: Document) -> None:
+        if key in doc:
+            doc[key].comment = "# before type change"
+        doc[key] = value
+
+    return apply
+
 
 mutations = st.one_of(
-    set_key_cmd,
-    del_key_cmd,
-    set_comment_cmd,
-    set_inline_comment_cmd,
-    update_cmd,
-    array_append_cmd,
-    array_insert_cmd,
-    array_remove_cmd,
-    array_slice_cmd,
+    set_key(),
+    del_key(),
+    set_comment(),
+    set_inline_comment(),
+    clear_comment(),
+    update_dict(),
+    pop_key(),
+    set_default(),
+    copy_roundtrip(),
+    set_nested_key(),
+    set_nested_comment(),
+    array_append(),
+    array_insert(),
+    array_remove(),
+    array_slice_assign(),
+    ior_merge(),
+    clear_collection(),
+    extend_list(),
+    array_element_comment(),
+    type_change(),
 )
 
 
 # ---------------------------------------------------------------------------
-# Property tests
+# Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -282,13 +405,18 @@ def _collect_comments(doc: Document) -> dict[str, tuple[str | None, str | None]]
     return result
 
 
+# ---------------------------------------------------------------------------
+# Property tests
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.slow
 class TestRoundtripProperty:
     """No matter what mutations we apply, the result is always valid TOML
     whose values and comments survive a parse round-trip."""
 
     @given(
-        initial=st.dictionaries(toml_keys, toml_scalars, max_size=6),
+        initial=st.dictionaries(toml_keys, initial_values, max_size=6),
         comments=st.lists(
             st.tuples(toml_keys, inline_comments, inline_comments),
             max_size=4,
@@ -296,7 +424,7 @@ class TestRoundtripProperty:
         ops=st.lists(mutations, min_size=1, max_size=10),
     )
     @settings(
-        max_examples=1000,
+        max_examples=2000,
         suppress_health_check=[HealthCheck.too_slow],
     )
     def test_roundtrip(
@@ -309,9 +437,10 @@ class TestRoundtripProperty:
         for key, block, inline in comments:
             if key in doc:
                 doc[key].comment = block
-                doc[key].inline_comment = inline
+                with contextlib.suppress(TypeError):
+                    doc[key].inline_comment = inline
         for op in ops:
-            op.apply(doc)
+            op(doc)
 
         toml_text = doc.as_toml()
         comments_before = _collect_comments(doc)

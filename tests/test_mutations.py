@@ -338,6 +338,8 @@ class TestAssignTableToKey:
         doc = Document()
         doc["foo"] = {"foo": {"bar": "baz"}}
         assert doc.as_toml() == toml_literal("""
+            [foo]
+
             [foo.foo]
             bar = "baz"
         """)
@@ -346,6 +348,8 @@ class TestAssignTableToKey:
         doc = Document()
         doc["pkg"] = {"servers": [{"name": "a"}, {"name": "b"}]}
         assert doc.as_toml() == toml_literal("""
+            [pkg]
+
             [[pkg.servers]]
             name = "a"
 

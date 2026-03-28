@@ -1346,13 +1346,48 @@ class TestComment:
         assert doc["items"].inline_comment is None
 
     def test_comment_on_aot_itself_is_none(self) -> None:
-        """AoT has no key prefix — comment returns None."""
+        """AoT with no preceding comment returns None."""
         doc = Document.parse(
             toml_literal("""
             [[items]]
             name = "a"
         """)
         )
+        assert doc["items"].comment is None
+
+    def test_set_comment_on_aot(self) -> None:
+        """Setting a block comment on an AoT should work and round-trip."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
+        doc["items"].comment = "# about items"
+        assert doc["items"].comment == "# about items"
+        reparsed = Document.parse(doc.as_toml())
+        assert reparsed["items"].comment == "# about items"
+
+    def test_read_existing_comment_on_aot(self) -> None:
+        """A comment already present before [[aot]] should be readable."""
+        doc = Document.parse(
+            toml_literal("""
+            # about items
+            [[items]]
+            name = "a"
+        """)
+        )
+        assert doc["items"].comment == "# about items"
+
+    def test_clear_comment_on_aot(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            # about items
+            [[items]]
+            name = "a"
+        """)
+        )
+        doc["items"].comment = None
         assert doc["items"].comment is None
 
     def test_aot_element_block_comment_is_none(self) -> None:

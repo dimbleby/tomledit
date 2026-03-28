@@ -126,14 +126,22 @@ pub(crate) fn set_suffix_comment(item: &mut ItemRs, comment: Option<&str>) -> Py
 
 /// Get the comment before a key from the parent table's key decor.
 ///
-/// For standard tables (`[name]`), the block comment lives in the child
-/// Table's own decor prefix (before the `[` bracket), not in the key's
-/// leaf decor (which would be *inside* the brackets).
+/// For standard tables (`[name]`) and arrays of tables (`[[name]]`), the
+/// block comment lives in the child's own decor prefix (before the `[` or
+/// `[[` bracket), not in the key's leaf decor (which would be *inside* the
+/// brackets).
 pub(crate) fn get_key_prefix_comment(parent: &ItemRs, key: &str) -> Option<String> {
     if let ItemRs::Table(table) = parent
         && let Some(ItemRs::Table(child)) = table.get(key)
     {
         let raw = child.decor().prefix()?.as_str()?;
+        return extract_block_comment(raw);
+    }
+    if let ItemRs::Table(table) = parent
+        && let Some(ItemRs::ArrayOfTables(aot)) = table.get(key)
+    {
+        let first = aot.iter().next()?;
+        let raw = first.decor().prefix()?.as_str()?;
         return extract_block_comment(raw);
     }
     if let ItemRs::Value(ValueRs::InlineTable(it)) = parent {
@@ -146,24 +154,41 @@ pub(crate) fn get_key_prefix_comment(parent: &ItemRs, key: &str) -> Option<Strin
     extract_block_comment(raw)
 }
 
+/// Build a block-comment prefix string, or fall back to `default` when
+/// `comment` is `None`.
+fn comment_prefix(comment: Option<&str>, indent: &str, default: &str) -> PyResult<String> {
+    Ok(comment
+        .map(|t| build_block_comment(t, indent))
+        .transpose()?
+        .unwrap_or_else(|| default.to_owned()))
+}
+
 /// Set the comment before a key in the parent table's key decor.
 ///
-/// For standard tables (`[name]`), the block comment is stored in the child
-/// Table's own decor prefix (before the `[` bracket).  For plain key-value
-/// pairs the comment lives in the key's leaf decor prefix.
+/// For standard tables (`[name]`) and arrays of tables (`[[name]]`), the
+/// block comment is stored in the child's own decor prefix (before the
+/// `[` or `[[` bracket).  For plain key-value pairs the comment lives in
+/// the key's leaf decor prefix.
 pub(crate) fn set_key_prefix_comment(
     parent: &mut ItemRs,
     key: &str,
     comment: Option<&str>,
 ) -> PyResult<()> {
     if let ItemRs::Table(table) = parent
-        && table.get(key).is_some_and(|item| item.is_table())
+        && let Some(ItemRs::Table(child)) = table.get_mut(key)
     {
-        let child = table.get_mut(key).unwrap().as_table_mut().unwrap();
-        match comment {
-            Some(text) => child.decor_mut().set_prefix(build_block_comment(text, "")?),
-            None => child.decor_mut().set_prefix("\n"),
-        }
+        let prefix = comment_prefix(comment, "", "\n")?;
+        child.decor_mut().set_prefix(prefix);
+        return Ok(());
+    }
+    if let ItemRs::Table(table) = parent
+        && let Some(ItemRs::ArrayOfTables(aot)) = table.get_mut(key)
+    {
+        let Some(first) = aot.iter_mut().next() else {
+            return Ok(());
+        };
+        let prefix = comment_prefix(comment, "", "\n")?;
+        first.decor_mut().set_prefix(prefix);
         return Ok(());
     }
     if let ItemRs::Value(ValueRs::InlineTable(it)) = parent {
@@ -176,12 +201,8 @@ pub(crate) fn set_key_prefix_comment(
     let Some(mut km) = key_mut else {
         return Err(PyKeyError::new_err(key.to_owned()));
     };
-    match comment {
-        Some(text) => km
-            .leaf_decor_mut()
-            .set_prefix(build_block_comment(text, "")?),
-        None => km.leaf_decor_mut().set_prefix(""),
-    }
+    let prefix = comment_prefix(comment, "", "")?;
+    km.leaf_decor_mut().set_prefix(prefix);
     Ok(())
 }
 
@@ -384,10 +405,7 @@ pub(crate) fn set_value_prefix_comment(item: &mut ItemRs, comment: Option<&str>)
     };
     let raw = decor.prefix().and_then(|r| r.as_str()).unwrap_or_default();
     let mut parts = split_prefix(raw);
-    parts.block = match comment {
-        Some(text) => build_block_comment(text, &parts.indent)?,
-        None => String::new(),
-    };
+    parts.block = comment_prefix(comment, &parts.indent, "")?;
     let new_prefix = join_prefix(&parts);
     decor.set_prefix(new_prefix);
     Ok(())
@@ -469,10 +487,7 @@ fn set_it_block_comment(
     if let Some(ci) = canonical.filter(|_| comment.is_some()) {
         parts.indent = ci;
     }
-    parts.block = match comment {
-        Some(text) => build_block_comment(text, &parts.indent)?,
-        None => String::new(),
-    };
+    parts.block = comment_prefix(comment, &parts.indent, "")?;
 
     let new_prefix = if is_first && parts.block.is_empty() {
         // Clearing the first key: just the indent.  Can't use join_prefix here

@@ -184,6 +184,20 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
     Ok(pairs)
 }
 
+/// Extract key-value pairs from `**kwargs`.
+pub(crate) fn extract_kwargs(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Vec<(String, Item)>> {
+    let Some(kw) = kwargs else {
+        return Ok(Vec::new());
+    };
+    let mut pairs = Vec::with_capacity(kw.len());
+    for (k, v) in kw.iter() {
+        let key: String = k.extract()?;
+        let val: Item = v.extract()?;
+        pairs.push((key, val));
+    }
+    Ok(pairs)
+}
+
 /// Apply pre-extracted update pairs to an item.
 ///
 /// Returns the keys that replaced existing entries.
@@ -258,6 +272,38 @@ pub(crate) fn merge_table_entries(target: &mut ItemRs, source: &ItemRs) -> PyRes
     }
 
     Ok(replaced)
+}
+
+/// Pre-resolved update source, extracted before taking a mutable borrow
+/// on the target document.  This avoids double-borrow panics when the
+/// source contains proxies from the same document.
+pub(crate) enum ResolvedUpdate<'py> {
+    /// Source is a TOML-aware type (Document or DictItem).
+    Toml(TomlSource<'py>),
+    /// Source is a plain Python mapping or iterable of pairs.
+    Pairs(Vec<(String, Item)>),
+}
+
+impl ResolvedUpdate<'_> {
+    /// Apply this update to `target`, returning the keys that were replaced.
+    pub(crate) fn apply(self, target: &mut ItemRs) -> PyResult<Vec<String>> {
+        match self {
+            Self::Toml(src) => merge_table_entries(target, src.as_item()?),
+            Self::Pairs(pairs) => apply_update_pairs(target, pairs),
+        }
+    }
+}
+
+/// Resolve `other` into a [`ResolvedUpdate`], doing all Python object
+/// access before the caller takes a mutable borrow on the target document.
+pub(crate) fn resolve_update<'py>(
+    other: &Bound<'py, PyAny>,
+    self_doc: &Bound<'py, Document>,
+) -> PyResult<ResolvedUpdate<'py>> {
+    match resolve_toml_source(other, self_doc)? {
+        Some(src) => Ok(ResolvedUpdate::Toml(src)),
+        None => Ok(ResolvedUpdate::Pairs(extract_update_pairs(other)?)),
+    }
 }
 
 /// A TOML source resolved for merging, holding any necessary borrow guards.

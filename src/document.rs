@@ -265,18 +265,7 @@ impl Document {
     }
 
     pub fn __ior__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<()> {
-        let toml_src = dict_ops::resolve_toml_source(other, slf)?;
-        let mut doc = slf.borrow_mut();
-        let replaced = if let Some(src) = toml_src {
-            dict_ops::merge_table_entries(doc.inner.as_item_mut(), src.as_item()?)?
-        } else {
-            let pairs = dict_ops::extract_update_pairs(other)?;
-            dict_ops::apply_update_pairs(doc.inner.as_item_mut(), pairs)?
-        };
-        for key in replaced {
-            doc.bump_at(&[Key::Str(key)]);
-        }
-        Ok(())
+        Self::update(slf, Some(other), None)
     }
 
     #[pyo3(signature = (other=None, /, **kwargs))]
@@ -285,33 +274,19 @@ impl Document {
         other: Option<&Bound<'_, PyAny>>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let toml_src = match other {
-            Some(obj) => dict_ops::resolve_toml_source(obj, slf)?,
-            None => None,
-        };
-        let mut extra_pairs = Vec::new();
-        if toml_src.is_none()
-            && let Some(obj) = other
-        {
-            extra_pairs = dict_ops::extract_update_pairs(obj)?;
-        }
-        if let Some(kw) = kwargs {
-            for (k, v) in kw.iter() {
-                let key: String = k.extract()?;
-                let val: Item = v.extract()?;
-                extra_pairs.push((key, val));
-            }
-        }
+        let update = other
+            .map(|obj| dict_ops::resolve_update(obj, slf))
+            .transpose()?;
+        let kwarg_pairs = dict_ops::extract_kwargs(kwargs)?;
         let mut doc = slf.borrow_mut();
-        let mut replaced = if let Some(ref src) = toml_src {
-            dict_ops::merge_table_entries(doc.inner.as_item_mut(), src.as_item()?)?
-        } else {
-            Vec::new()
+        let mut replaced = match update {
+            Some(u) => u.apply(doc.inner.as_item_mut())?,
+            None => Vec::new(),
         };
-        if !extra_pairs.is_empty() {
+        if !kwarg_pairs.is_empty() {
             replaced.extend(dict_ops::apply_update_pairs(
                 doc.inner.as_item_mut(),
-                extra_pairs,
+                kwarg_pairs,
             )?);
         }
         for key in replaced {

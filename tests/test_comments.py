@@ -762,6 +762,21 @@ class TestComment:
         """)
         assert doc["key"].comment == "#"
 
+    def test_control_char_in_inline_comment_rejected(self) -> None:
+        doc = Document.parse("key = 42\n")
+        with pytest.raises(ValueError, match="invalid character"):
+            doc["key"].inline_comment = "# \x1f"
+
+    def test_control_char_in_block_comment_rejected(self) -> None:
+        doc = Document.parse("key = 42\n")
+        with pytest.raises(ValueError, match="invalid character"):
+            doc["key"].comment = "# hello\x07"
+
+    def test_tab_in_comment_allowed(self) -> None:
+        doc = Document.parse("key = 42\n")
+        doc["key"].inline_comment = "#\tindented"
+        assert doc["key"].inline_comment == "#\tindented"
+
     def test_inline_comment_on_aot_rejected(self) -> None:
         doc = Document.parse(
             toml_literal("""

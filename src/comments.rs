@@ -37,6 +37,15 @@ fn extract_block_comment(s: &str) -> Option<String> {
     }
 }
 
+/// Whether a character is forbidden in a TOML comment.
+///
+/// TOML comments allow tab (U+0009) and all characters from U+0020 onwards
+/// except U+007F (DEL).  Control characters U+0000–U+0008 and U+000A–U+001F
+/// are forbidden.
+fn is_invalid_comment_char(c: char) -> bool {
+    matches!(c, '\u{0000}'..='\u{0008}' | '\u{000A}'..='\u{001F}' | '\u{007F}')
+}
+
 /// Validate an inline comment and format it for storage in a decor suffix.
 pub(crate) fn validate_inline_comment(text: &str) -> PyResult<String> {
     if text.contains('\n') {
@@ -46,6 +55,12 @@ pub(crate) fn validate_inline_comment(text: &str) -> PyResult<String> {
     }
     if !text.starts_with('#') {
         return Err(PyValueError::new_err("comment must start with '#'"));
+    }
+    if let Some(c) = text.chars().find(|&c| is_invalid_comment_char(c)) {
+        return Err(PyValueError::new_err(format!(
+            "comment contains invalid character U+{:04X}",
+            c as u32
+        )));
     }
     Ok(format!(" {text}"))
 }
@@ -59,6 +74,12 @@ fn build_block_comment(text: &str, indent: &str) -> PyResult<String> {
         if l.is_empty() {
             out.push('\n');
         } else if l.starts_with('#') {
+            if let Some(c) = l.chars().find(|&c| is_invalid_comment_char(c)) {
+                return Err(PyValueError::new_err(format!(
+                    "comment contains invalid character U+{:04X}",
+                    c as u32
+                )));
+            }
             out.push_str(indent);
             out.push_str(l);
             out.push('\n');

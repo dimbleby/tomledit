@@ -255,4 +255,36 @@ impl DictProxy {
         }
         base.child_proxy_typed(py, Key::Str(key))
     }
+
+    /// Whether this table's header is implicit (suppressed in TOML output).
+    ///
+    /// An implicit table like ``[a]`` in ``[a.b]\nx = 1`` has no ``[a]``
+    /// header — it exists only because ``a.b`` requires it.  Inline tables
+    /// are never implicit; this always returns ``False`` for them.
+    ///
+    /// Setting to ``True`` suppresses the header; setting to ``False``
+    /// makes it explicit.  Silently ignored on inline tables.
+    #[getter]
+    pub fn get_implicit(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<bool> {
+        let base = self_.as_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_fresh(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        match item {
+            toml_edit::Item::Table(tbl) => Ok(tbl.is_implicit()),
+            _ => Ok(false),
+        }
+    }
+
+    #[setter]
+    pub fn set_implicit(self_: PyRef<'_, Self>, py: Python<'_>, implicit: bool) -> PyResult<()> {
+        let base = self_.as_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_fresh(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        if let toml_edit::Item::Table(tbl) = item {
+            tbl.set_implicit(implicit);
+        }
+        Ok(())
+    }
 }

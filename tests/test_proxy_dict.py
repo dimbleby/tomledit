@@ -1373,3 +1373,50 @@ class TestProxyKeyLookup:
         doc = Document.parse('key = "a"\na = 1\n')
         del doc[doc["key"]]  # type: ignore[arg-type] # ty: ignore[invalid-argument-type]
         assert "a" not in doc
+
+
+class TestImplicitProperty:
+    """Tests for the DictItem.implicit property."""
+
+    def test_default_is_not_implicit(self) -> None:
+        doc = Document({"tbl": {"x": 1}})
+        assert doc["tbl"].implicit is False
+
+    def test_set_implicit_suppresses_header(self) -> None:
+        doc = Document()
+        doc["a"] = {"b": {"x": 1}}
+        assert doc.as_toml() == "[a]\n\n[a.b]\nx = 1\n"
+        doc["a"].implicit = True
+        assert doc.as_toml() == "[a.b]\nx = 1\n"
+
+    def test_set_implicit_false_restores_header(self) -> None:
+        doc = Document.parse("[a.b]\nx = 1\n")
+        assert doc["a"].implicit is True
+        doc["a"].implicit = False
+        assert "[a]" in doc.as_toml()
+
+    def test_implicit_no_op_on_inline_table(self) -> None:
+        doc = Document.parse("a = {x = 1}")
+        assert doc["a"].implicit is False
+        doc["a"].implicit = True  # silently ignored
+        assert doc["a"].implicit is False
+
+    def test_cleared_table_roundtrips(self) -> None:
+        doc = Document({"a": {"x": 1, "y": 2}})
+        doc["a"].clear()
+        assert doc.value == {"a": {}}
+        reparsed = Document.parse(doc.as_toml())
+        assert reparsed.value == doc.value
+
+    def test_delete_all_keys_roundtrips(self) -> None:
+        doc = Document({"a": {"x": 1, "y": 2}})
+        del doc["a"]["x"]
+        del doc["a"]["y"]
+        assert doc.value == {"a": {}}
+        reparsed = Document.parse(doc.as_toml())
+        assert reparsed.value == doc.value
+
+    def test_parsed_implicit_table(self) -> None:
+        doc = Document.parse("[a.b]\nx = 1\n")
+        assert doc["a"].implicit is True
+        assert doc["a"]["b"].implicit is False

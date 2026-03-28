@@ -170,10 +170,7 @@ impl<'py> FromPyObject<'_, 'py> for Table {
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         let py_mapping = obj.cast::<PyMapping>()?;
         let pairs: Vec<(String, Item)> = extract_mapping_pairs(&py_mapping)?;
-        let mut table = TableRs::from_iter(pairs.into_iter().map(|(k, v)| (k, v.0)));
-        if !table.is_empty() {
-            table.set_implicit(true);
-        }
+        let table = TableRs::from_iter(pairs.into_iter().map(|(k, v)| (k, v.0)));
         Ok(Self(table))
     }
 }

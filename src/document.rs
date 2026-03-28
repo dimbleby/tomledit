@@ -169,13 +169,17 @@ impl Document {
         ItemProxy::into_typed(py, proxy)
     }
 
-    pub fn __setitem__(slf: &Bound<'_, Self>, key: &str, value: Item) {
+    pub fn __setitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>, value: Item) -> PyResult<()> {
+        let Some(key) = item_ops::extract_key_str(key) else {
+            return Err(PyTypeError::new_err("table keys must be strings"));
+        };
         let mut doc = slf.borrow_mut();
-        let replaced = doc.inner.contains_key(key);
-        dict_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, value);
+        let replaced = doc.inner.contains_key(&key);
+        dict_ops::set_with_decor_preservation(doc.inner.as_item_mut(), &key, value);
         if replaced {
-            doc.bump_at(&[Key::Str(key.to_owned())]);
+            doc.bump_at(&[Key::Str(key)]);
         }
+        Ok(())
     }
 
     pub fn __delitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<()> {

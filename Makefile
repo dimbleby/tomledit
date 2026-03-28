@@ -1,8 +1,9 @@
-.PHONY: help lint test fmt clippy rust-test pytest ruff-check ruff-format mypy ty coverage-build coverage clean
+.PHONY: help lint test fuzz fmt clippy rust-test pytest ruff-check ruff-format mypy ty coverage-build coverage clean
 
 help:
 	@echo "make build          Build and install (no-op if up to date)"
 	@echo "make test           Rust + Python tests (builds first)"
+	@echo "make fuzz           Hypothesis property tests (slow)"
 	@echo "make lint           All linters: fmt, clippy, ruff, mypy, ty"
 	@echo "make coverage       Instrumented build + coverage report"
 	@echo "make clean          Remove build artifacts and caches"
@@ -30,6 +31,9 @@ build: .build-stamp
 
 pytest: build
 	pytest
+
+fuzz: build
+	pytest -m slow -v
 
 ruff-check:
 	ruff check .

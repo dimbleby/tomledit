@@ -1,4 +1,5 @@
 .build-stamp
 .coverage-stamp
+.hypothesis/
 /target
 __pycache__/

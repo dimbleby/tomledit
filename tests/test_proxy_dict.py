@@ -1363,3 +1363,13 @@ class TestProxyKeyLookup:
     def test_dict_proxy_get_with_proxy_key(self) -> None:
         doc = Document.parse('[s]\nname = "age"\nage = 30\n')
         assert doc["s"].get(doc["s"]["name"]) == 30
+
+    def test_document_setitem_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "a"\na = 1\n')
+        doc[doc["key"]] = 99  # type: ignore[index] # ty: ignore[invalid-assignment]
+        assert doc["a"] == 99
+
+    def test_document_delitem_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "a"\na = 1\n')
+        del doc[doc["key"]]  # type: ignore[arg-type] # ty: ignore[invalid-argument-type]
+        assert "a" not in doc

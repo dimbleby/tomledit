@@ -65,4 +65,4 @@ coverage: coverage-build
 clean:
 	cargo clean
 	rm -f .build-stamp .coverage-stamp
-	rm -rf .mypy_cache .pytest_cache .ruff_cache
+	rm -rf .hypothesis .mypy_cache .pytest_cache .ruff_cache

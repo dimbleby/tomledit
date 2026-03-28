@@ -127,7 +127,7 @@ fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
                 as_str.is_none() || as_str.is_some_and(|s| s.starts_with('\n'))
             })
         });
-    let Some(spaced) = spaced else { return };
+    let spaced = spaced.unwrap_or(true);
 
     // Read the target's current prefix.  Distinguish between `None` (unset —
     // toml_edit will insert a default blank line) and `Some("")` (explicitly

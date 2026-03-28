@@ -5,12 +5,17 @@ from __future__ import annotations
 import contextlib
 import copy
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from tomledit import Document
+from tests.conftest import toml_literal
+from tomledit import DictItem, Document, ListItem
+
+if TYPE_CHECKING:
+    from tomledit import Item
 
 # ---------------------------------------------------------------------------
 # Strategies for TOML values and keys
@@ -387,22 +392,106 @@ mutations = st.one_of(
 # ---------------------------------------------------------------------------
 
 
-def _collect_comments(doc: Document) -> dict[str, tuple[str | None, str | None]]:
-    """Snapshot block + inline comments for every top-level key.
+CommentTree = dict[str, "str | None | CommentTree"]
 
-    Block comments (`.comment`) work on all item types including AoT.
-    Inline comments are not supported on AoT, so we collect None for those.
-    """
-    result: dict[str, tuple[str | None, str | None]] = {}
-    for key in doc:
-        item = doc[key]
-        block = item.comment
-        try:
-            inline = item.inline_comment
-        except TypeError:
-            inline = None
-        result[str(key)] = (block, inline)
+
+def _children(item: Document | Item) -> list[tuple[str, Item]]:
+    """Return (key, child) pairs for dict-like or list-like items."""
+    if isinstance(item, (Document, DictItem)):
+        return [(str(k), item[k]) for k in item]
+    if isinstance(item, ListItem):
+        return [(str(i), item[i]) for i in range(len(item))]
+    return []
+
+
+def _collect_comments(item: Document | Item) -> CommentTree:
+    """Recursively collect block comments, mirroring the document structure."""
+    result: CommentTree = {}
+    for key, child in _children(item):
+        result[key] = child.comment
+        nested = _collect_comments(child)
+        if nested:
+            result[f"{key}."] = nested
     return result
+
+
+def _collect_inline_comments(item: Document | Item) -> CommentTree:
+    """Recursively collect inline comments, mirroring the document structure."""
+    result: CommentTree = {}
+    for key, child in _children(item):
+        try:
+            result[key] = child.inline_comment
+        except TypeError:
+            result[key] = None
+        nested = _collect_inline_comments(child)
+        if nested:
+            result[f"{key}."] = nested
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Starting documents — either constructed from a random dict or parsed from
+# one of several TOML snippets with pre-existing comments and formatting.
+# ---------------------------------------------------------------------------
+
+_PARSED_SOURCES = [
+    toml_literal("""
+        # Top-level comment
+        title = "Example" # inline
+
+        # Owner section
+        [owner]
+        name = "Alice"
+        score = 42 # the answer
+
+        # Server list
+        [[servers]]
+        host = "alpha"
+
+        [[servers]]
+        host = "beta"
+
+        [settings]
+        debug = true
+        rates = [1, 2, 3]
+    """),
+    toml_literal("""
+        [package]
+        name = "demo"
+        version = "0.1.0"
+
+        [package.metadata]
+        # nested comment
+        key = "value" # inline
+    """),
+    toml_literal("""
+        # standalone scalars
+        flag = true
+        count = 99
+        ratio = 3.14
+        label = "hello"
+    """),
+]
+
+
+@st.composite
+def starting_document(draw: st.DrawFn) -> Document:
+    """Either build from a random dict or parse a pre-existing TOML source."""
+    use_parsed = draw(st.booleans())
+    if use_parsed:
+        source = draw(st.sampled_from(_PARSED_SOURCES))
+        return Document.parse(source)
+    initial = draw(st.dictionaries(toml_keys, initial_values, max_size=6))
+    doc = Document(initial)
+    comments = draw(
+        st.lists(st.tuples(toml_keys, inline_comments, inline_comments), max_size=4)
+    )
+    for key, block, inline in comments:
+        if key in doc:
+            doc[key].comment = block
+            with contextlib.suppress(TypeError):
+                doc[key].inline_comment = inline
+    return doc
 
 
 # ---------------------------------------------------------------------------
@@ -416,34 +505,32 @@ class TestRoundtripProperty:
     whose values and comments survive a parse round-trip."""
 
     @given(
-        initial=st.dictionaries(toml_keys, initial_values, max_size=6),
-        comments=st.lists(
-            st.tuples(toml_keys, inline_comments, inline_comments),
-            max_size=4,
-        ),
+        doc=starting_document(),
         ops=st.lists(mutations, min_size=1, max_size=10),
     )
     @settings(
-        max_examples=2000,
+        max_examples=3000,
         suppress_health_check=[HealthCheck.too_slow],
     )
-    def test_roundtrip(
-        self,
-        initial: dict[str, object],
-        comments: list[tuple[str, str, str]],
-        ops: list[Mutation],
-    ) -> None:
-        doc = Document(initial)
-        for key, block, inline in comments:
-            if key in doc:
-                doc[key].comment = block
-                with contextlib.suppress(TypeError):
-                    doc[key].inline_comment = inline
+    def test_roundtrip(self, doc: Document, ops: list[Mutation]) -> None:
         for op in ops:
             op(doc)
 
+        # repr must not crash
+        str(doc)
+
+        # Value extraction round-trip: .value produces something that can
+        # construct an equivalent document
+        assert Document(doc.value).value == doc.value
+
+        # TOML round-trip: parse(as_toml()) preserves values and comments
         toml_text = doc.as_toml()
-        comments_before = _collect_comments(doc)
+        block_before = _collect_comments(doc)
+        inline_before = _collect_inline_comments(doc)
         reparsed = Document.parse(toml_text)
         assert reparsed.value == doc.value
-        assert _collect_comments(reparsed) == comments_before
+        assert _collect_comments(reparsed) == block_before
+        assert _collect_inline_comments(reparsed) == inline_before
+
+        # Double round-trip: TOML text is stable after one parse
+        assert reparsed.as_toml() == toml_text

@@ -690,6 +690,19 @@ class TestPreciseArrayShiftInvalidation:
         # the new shift via min(0, 3) = 0, making index 1 falsely stale.)
         assert p1.value == 20
 
+    def test_negative_step_slice_assign_invalidates_all_changed(self) -> None:
+        doc = Document.parse("arr = [0, 1, 2, 3, 4]")
+        p0 = doc["arr"][0]
+        p2 = doc["arr"][2]
+        p4 = doc["arr"][4]
+        doc["arr"][::-1] = [4, 3, 2, 1, 0]
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p0.value
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p2.value
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p4.value
+
 
 class TestViewStaleness:
     """Views go stale when their path is invalidated, just like proxies."""

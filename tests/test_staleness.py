@@ -591,3 +591,126 @@ class TestEndOfArrayOptimizations:
         doc["arr"].pop()
         with pytest.raises((RuntimeError, IndexError)):
             _ = third.value
+
+
+class TestViewStaleness:
+    """Views go stale when their path is invalidated, just like proxies."""
+
+    def test_keys_view_stale_after_path_replaced(self) -> None:
+        doc = Document.parse("[foo]\na = 1\nb = 2")
+        view = doc["foo"].keys()
+        assert set(view) == {"a", "b"}
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            list(view)
+
+    def test_values_view_stale_after_path_replaced(self) -> None:
+        doc = Document.parse("[foo]\na = 1")
+        view = doc["foo"].values()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            list(view)
+
+    def test_items_view_stale_after_path_replaced(self) -> None:
+        doc = Document.parse("[foo]\na = 1")
+        view = doc["foo"].items()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            list(view)
+
+    def test_view_stale_len(self) -> None:
+        doc = Document.parse("[foo]\na = 1")
+        view = doc["foo"].keys()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            len(view)
+
+    def test_view_stale_contains(self) -> None:
+        doc = Document.parse("[foo]\na = 1")
+        view = doc["foo"].keys()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            "a" in view  # noqa: B015
+
+    def test_view_stale_repr(self) -> None:
+        doc = Document.parse("[foo]\na = 1")
+        view = doc["foo"].keys()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            repr(view)
+
+    def test_view_stale_after_path_deleted(self) -> None:
+        doc = Document.parse("[foo]\na = 1")
+        view = doc["foo"].keys()
+        del doc["foo"]
+        with pytest.raises(RuntimeError, match="stale"):
+            list(view)
+
+    def test_root_view_live_after_child_mutation(self) -> None:
+        """Root views stay live when children are modified."""
+        doc = Document.parse("a = 1\nb = 2")
+        view = doc.keys()
+        assert set(view) == {"a", "b"}
+        doc["c"] = 3
+        assert set(view) == {"a", "b", "c"}
+
+    def test_root_view_live_after_child_replacement(self) -> None:
+        doc = Document.parse("a = 1\nb = 2")
+        view = doc.keys()
+        doc["a"] = 99
+        assert set(view) == {"a", "b"}
+
+    def test_root_view_stale_after_clear(self) -> None:
+        doc = Document.parse("a = 1\nb = 2")
+        view = doc.keys()
+        doc.clear()
+        with pytest.raises(RuntimeError, match="stale"):
+            list(view)
+
+    def test_view_survives_sibling_mutation(self) -> None:
+        """A view on one subtree is not invalidated by changes to a sibling."""
+        doc = Document.parse("[foo]\na = 1\n[bar]\nb = 2")
+        view = doc["foo"].keys()
+        doc["bar"] = "replaced"
+        assert set(view) == {"a"}
+
+    def test_view_stale_set_operations(self) -> None:
+        doc = Document.parse("[foo]\na = 1\nb = 2")
+        view = doc["foo"].keys()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            view & {"a"}
+        with pytest.raises(RuntimeError, match="stale"):
+            view | {"a"}
+        with pytest.raises(RuntimeError, match="stale"):
+            view - {"a"}
+        with pytest.raises(RuntimeError, match="stale"):
+            view ^ {"a"}
+
+    def test_items_view_stale_contains(self) -> None:
+        doc = Document.parse("[foo]\na = 1")
+        view = doc["foo"].items()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            ("a", 1) in view  # noqa: B015
+
+    def test_items_view_stale_eq(self) -> None:
+        doc = Document.parse("[foo]\na = 1")
+        view = doc["foo"].items()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            view == {("a", 1)}  # noqa: B015
+
+    def test_keys_view_stale_reversed(self) -> None:
+        doc = Document.parse("[foo]\na = 1\nb = 2")
+        view = doc["foo"].keys()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            list(reversed(view))
+
+    def test_keys_view_stale_eq(self) -> None:
+        doc = Document.parse("[foo]\na = 1")
+        view = doc["foo"].keys()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            view == {"a"}  # noqa: B015

@@ -53,8 +53,14 @@ impl Document {
     }
 
     /// Check whether a proxy at `path` created at `revision` is still fresh.
-    pub(crate) fn is_fresh(&self, path: &[Key], revision: u64) -> bool {
-        self.trie.is_valid(path, revision)
+    pub(crate) fn check_fresh(&self, path: &[Key], revision: u64) -> PyResult<()> {
+        if self.trie.is_valid(path, revision) {
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "stale: the document has been modified since this reference was created",
+            ))
+        }
     }
 }
 
@@ -103,15 +109,18 @@ impl Document {
     }
 
     pub fn keys(slf: &Bound<'_, Self>) -> KeysView {
-        KeysView::new(slf.clone().unbind(), vec![])
+        let doc = slf.borrow();
+        KeysView::new(slf.clone().unbind(), vec![], doc.revision)
     }
 
     pub fn items(slf: &Bound<'_, Self>) -> ItemsView {
-        ItemsView::new(slf.clone().unbind(), vec![])
+        let doc = slf.borrow();
+        ItemsView::new(slf.clone().unbind(), vec![], doc.revision)
     }
 
     pub fn values(slf: &Bound<'_, Self>) -> ValuesView {
-        ValuesView::new(slf.clone().unbind(), vec![])
+        let doc = slf.borrow();
+        ValuesView::new(slf.clone().unbind(), vec![], doc.revision)
     }
 
     pub fn __len__(&self) -> usize {

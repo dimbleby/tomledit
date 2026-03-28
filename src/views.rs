@@ -1,7 +1,9 @@
 //! Live dictionary views (KeysView, ValuesView, ItemsView) for Document and
-//! Item proxies.  Each view holds a `Py<Document>` and a key path, just like
-//! `ItemProxy`, so it re-navigates on every access and always reflects the
-//! current state of the document.
+//! Item proxies.  Each view holds a `Py<Document>`, a key path, and a
+//! creation revision — just like `ItemProxy`.  It re-navigates on every
+//! access so it always reflects the current state of the document, but goes
+//! stale (raises `RuntimeError`) when the path itself has been invalidated
+//! by a mutation.
 
 use std::collections::HashSet;
 
@@ -16,10 +18,6 @@ use crate::item_ops::{self, Key};
 use crate::item_proxy::ItemProxy;
 
 use toml_edit::DocumentMut as DocumentRs;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 fn get_key_set(doc: &DocumentRs, path: &[Key]) -> PyResult<HashSet<String>> {
     Ok(get_keys(doc, path)?.into_iter().collect())
@@ -84,11 +82,16 @@ fn contains_key(doc: &DocumentRs, path: &[Key], key: &str) -> PyResult<bool> {
 pub(crate) struct KeysView {
     document: Py<Document>,
     path: Vec<Key>,
+    revision: u64,
 }
 
 impl KeysView {
-    pub(crate) fn new(document: Py<Document>, path: Vec<Key>) -> Self {
-        Self { document, path }
+    pub(crate) fn new(document: Py<Document>, path: Vec<Key>, revision: u64) -> Self {
+        Self {
+            document,
+            path,
+            revision,
+        }
     }
 }
 
@@ -96,11 +99,13 @@ impl KeysView {
 impl KeysView {
     fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         get_len(&doc.inner, &self.path)
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let list = keys_to_pylist(&doc.inner, &self.path, py)?;
         Ok(list.try_iter()?.unbind())
     }
@@ -110,11 +115,13 @@ impl KeysView {
             return Ok(false);
         };
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         contains_key(&doc.inner, &self.path, &key)
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let keys = get_keys(&doc.inner, &self.path)?;
         let inner: Vec<String> = keys.iter().map(|k| format!("'{k}'")).collect();
         Ok(format!("KeysView([{}])", inner.join(", ")))
@@ -122,6 +129,7 @@ impl KeysView {
 
     fn __reversed__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let mut keys = get_keys(&doc.inner, &self.path)?;
         keys.reverse();
         let list = keys.into_pyobject(py)?;
@@ -139,6 +147,7 @@ impl KeysView {
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PySet>> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let ours = get_key_set(&doc.inner, &self.path)?;
         let theirs = other_to_string_set(other)?;
         let result = &ours & &theirs;
@@ -151,6 +160,7 @@ impl KeysView {
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
         ours.call_method1("__or__", (other,))
     }
@@ -161,6 +171,7 @@ impl KeysView {
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PySet>> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let ours = get_key_set(&doc.inner, &self.path)?;
         let theirs = other_to_string_set(other)?;
         let result = &ours - &theirs;
@@ -173,12 +184,14 @@ impl KeysView {
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
         ours.call_method1("__xor__", (other,))
     }
 
     fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
         ours.eq(other)
     }
@@ -193,11 +206,16 @@ impl KeysView {
 pub(crate) struct ValuesView {
     document: Py<Document>,
     path: Vec<Key>,
+    revision: u64,
 }
 
 impl ValuesView {
-    pub(crate) fn new(document: Py<Document>, path: Vec<Key>) -> Self {
-        Self { document, path }
+    pub(crate) fn new(document: Py<Document>, path: Vec<Key>, revision: u64) -> Self {
+        Self {
+            document,
+            path,
+            revision,
+        }
     }
 }
 
@@ -205,11 +223,13 @@ impl ValuesView {
 impl ValuesView {
     fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         get_len(&doc.inner, &self.path)
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let revision = doc.revision;
         let list = PyList::empty(py);
         let item = item_ops::navigate_path(&doc.inner, &self.path)?;
@@ -228,6 +248,7 @@ impl ValuesView {
 
     fn __contains__(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let keys = get_keys(&doc.inner, &self.path)?;
         let parent = item_ops::navigate_path(&doc.inner, &self.path)?;
         for key in &keys {
@@ -242,6 +263,7 @@ impl ValuesView {
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let len = get_len(&doc.inner, &self.path)?;
         Ok(format!("ValuesView(<{len} values>)"))
     }
@@ -260,11 +282,16 @@ impl ValuesView {
 pub(crate) struct ItemsView {
     document: Py<Document>,
     path: Vec<Key>,
+    revision: u64,
 }
 
 impl ItemsView {
-    pub(crate) fn new(document: Py<Document>, path: Vec<Key>) -> Self {
-        Self { document, path }
+    pub(crate) fn new(document: Py<Document>, path: Vec<Key>, revision: u64) -> Self {
+        Self {
+            document,
+            path,
+            revision,
+        }
     }
 }
 
@@ -272,11 +299,13 @@ impl ItemsView {
 impl ItemsView {
     fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         get_len(&doc.inner, &self.path)
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let revision = doc.revision;
         let list = PyList::empty(py);
         let item = item_ops::navigate_path(&doc.inner, &self.path)?;
@@ -311,6 +340,7 @@ impl ItemsView {
         let value = tuple.get_item(1)?;
 
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let target = item_ops::navigate_path(&doc.inner, &self.path)?.get(key);
         match target {
             Some(item_rs) => equality::item_eq(item_rs, &value),
@@ -320,6 +350,7 @@ impl ItemsView {
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let len = get_len(&doc.inner, &self.path)?;
         Ok(format!("ItemsView(<{len} items>)"))
     }
@@ -333,6 +364,7 @@ impl ItemsView {
         }
 
         let doc = self.document.bind(py).borrow();
+        doc.check_fresh(&self.path, self.revision)?;
         let our_len = get_len(&doc.inner, &self.path)?;
         let other_len = other.len()?;
         if our_len != other_len {

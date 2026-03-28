@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyIterator, PySlice};
 use toml_edit::DocumentMut as DocumentRs;
@@ -65,13 +65,7 @@ impl ItemProxy {
     /// Check that no mutation has occurred along this proxy's path since
     /// it was created.
     pub(crate) fn check_fresh(&self, doc: &Document) -> PyResult<()> {
-        if !doc.is_fresh(&self.path, self.revision) {
-            Err(PyRuntimeError::new_err(
-                "this Item is stale: the document has been modified since it was created",
-            ))
-        } else {
-            Ok(())
-        }
+        doc.check_fresh(&self.path, self.revision)
     }
 
     /// Record a mutation at a child key under this proxy's path.

@@ -39,6 +39,7 @@ impl DictProxy {
         Ok(KeysView::new(
             base.document.clone_ref(py),
             base.path.clone(),
+            doc.revision,
         ))
     }
 
@@ -49,6 +50,7 @@ impl DictProxy {
         Ok(ValuesView::new(
             base.document.clone_ref(py),
             base.path.clone(),
+            doc.revision,
         ))
     }
 
@@ -59,6 +61,7 @@ impl DictProxy {
         Ok(ItemsView::new(
             base.document.clone_ref(py),
             base.path.clone(),
+            doc.revision,
         ))
     }
 

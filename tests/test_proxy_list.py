@@ -1076,6 +1076,31 @@ class TestBoundarySpacePreservation:
         doc["arr"].insert(1, 3)
         assert doc.as_toml() == "arr = [1, 3, 2 ]\n"
 
+    def test_slice_replace_first_preserves_leading_space(self) -> None:
+        doc = Document.parse("arr = [ 1, 2 ]\n")
+        doc["arr"][0:1] = [9]
+        assert doc.as_toml() == "arr = [ 9, 2 ]\n"
+
+    def test_slice_replace_last_preserves_trailing_space(self) -> None:
+        doc = Document.parse("arr = [ 1, 2 ]\n")
+        doc["arr"][1:2] = [9]
+        assert doc.as_toml() == "arr = [ 1, 9 ]\n"
+
+    def test_slice_replace_all_preserves_both_spaces(self) -> None:
+        doc = Document.parse("arr = [ 1, 2 ]\n")
+        doc["arr"][0:2] = [9, 8]
+        assert doc.as_toml() == "arr = [ 9, 8 ]\n"
+
+    def test_slice_insert_at_start_preserves_leading_space(self) -> None:
+        doc = Document.parse("arr = [ 1, 2 ]\n")
+        doc["arr"][0:0] = [9]
+        assert doc.as_toml() == "arr = [ 9, 1, 2 ]\n"
+
+    def test_slice_insert_at_end_preserves_trailing_space(self) -> None:
+        doc = Document.parse("arr = [ 1, 2 ]\n")
+        doc["arr"][2:2] = [9]
+        assert doc.as_toml() == "arr = [ 1, 2, 9 ]\n"
+
 
 class TestMultilineFormatPreservation:
     def test_insert_at_start_preserves_multiline(self) -> None:

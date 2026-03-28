@@ -70,6 +70,9 @@ jobs:
       - name: mypy
         run: uv run mypy
 
+      - name: ty check
+        run: uvx ty check
+
   rust:
     name: Rust
     runs-on: ubuntu-latest

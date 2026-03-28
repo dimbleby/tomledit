@@ -109,7 +109,7 @@ impl ListProxy {
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
         let target = list_ops::as_array_like_mut(item, "remove()")?;
-        let affected_key = list_ops::item_remove_at(target, index)?;
+        let (_removed, affected_key) = list_ops::item_remove_at(target, index)?;
         base.bump_affected(&mut doc, affected_key);
         Ok(())
     }

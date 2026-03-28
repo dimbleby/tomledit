@@ -408,22 +408,12 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
             }
             Ok(Some(Key::Str(k)))
         }
-        ItemRs::Value(ValueRs::Array(array)) => {
-            let idx = list_ops::resolve_index(require_int_key(key)?, array.len())?;
-            let is_last = idx == array.len() - 1;
-            let mut ic = comments::save_inline_comments(array);
-            let decor = list_ops::save_removal_decor(array, idx == 0, is_last);
-            array.remove(idx);
-            ic.remove(idx);
-            comments::restore_inline_comments(array, &ic);
-            list_ops::apply_removal_decor(array, &decor);
-            Ok(is_last.then_some(Key::Int(idx)))
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            let idx = list_ops::resolve_index(require_int_key(key)?, aot.len())?;
-            let is_last = idx == aot.len() - 1;
-            aot.remove(idx);
-            Ok(is_last.then_some(Key::Int(idx)))
+        ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => {
+            let idx_raw = require_int_key(key)?;
+            let target = list_ops::as_array_like_mut(item, "__delitem__")?;
+            let idx = list_ops::resolve_index(idx_raw, target.len())?;
+            let (_removed, key) = list_ops::item_remove_at(target, idx)?;
+            Ok(key)
         }
         _ => Err(PyTypeError::new_err(format!(
             "TOML {} item is not subscriptable",

@@ -520,34 +520,37 @@ pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> 
 /// Remove the element at `index`.  Returns `Some(Key::Int(idx))` when
 /// only the last element was removed (no shifting), or `None` when
 /// earlier indices shifted and the whole container must be invalidated.
-pub(crate) fn item_remove_at(target: ArrayLikeMut<'_>, index: usize) -> PyResult<Option<Key>> {
+pub(crate) fn item_remove_at(
+    target: ArrayLikeMut<'_>,
+    index: usize,
+) -> PyResult<(Item, Option<Key>)> {
     match target {
         ArrayLikeMut::Array(arr) => {
             if index >= arr.len() {
                 return Err(PyIndexError::new_err("array index out of range"));
             }
+            let is_last = index == arr.len() - 1;
             let mut ic = comments::save_inline_comments(arr);
-            let mut decor = save_removal_decor(arr, true, true);
-            let last = arr.len() - 1;
-            if index != 0 {
-                decor.first_prefix = None;
-            }
-            if index != last {
-                decor.last_suffix = None;
-            }
-            arr.remove(index);
+            let decor = save_removal_decor(arr, index == 0, is_last);
+            let removed = arr.remove(index);
             ic.remove(index);
             comments::restore_inline_comments(arr, &ic);
             apply_removal_decor(arr, &decor);
-            Ok((index == last).then_some(Key::Int(index)))
+            Ok((
+                Item(ItemRs::Value(removed)),
+                is_last.then_some(Key::Int(index)),
+            ))
         }
         ArrayLikeMut::Aot(aot) => {
             if index >= aot.len() {
                 return Err(PyIndexError::new_err("array index out of range"));
             }
-            let last = aot.len() - 1;
-            aot.remove(index);
-            Ok((index == last).then_some(Key::Int(index)))
+            let is_last = index == aot.len() - 1;
+            let removed = aot.remove(index);
+            Ok((
+                Item(ItemRs::Table(removed)),
+                is_last.then_some(Key::Int(index)),
+            ))
         }
     }
 }
@@ -680,21 +683,7 @@ pub(crate) fn list_pop(
             len - 1
         }
     };
-    let is_last = idx + 1 == len;
-    let removed = match target {
-        ArrayLikeMut::Array(arr) => {
-            let mut ic = comments::save_inline_comments(arr);
-            let decor = save_removal_decor(arr, idx == 0, is_last);
-            let removed = arr.remove(idx);
-            ic.remove(idx);
-            comments::restore_inline_comments(arr, &ic);
-            apply_removal_decor(arr, &decor);
-            Item(ItemRs::Value(removed))
-        }
-        ArrayLikeMut::Aot(aot) => Item(ItemRs::Table(aot.remove(idx))),
-    };
-    let key = is_last.then_some(Key::Int(idx));
-    Ok((removed, key))
+    item_remove_at(target, idx)
 }
 
 #[cfg(test)]

@@ -278,10 +278,10 @@ impl ItemProxy {
             let target = list_ops::as_array_like_mut(item, "slice assignment")?;
             let si = slice.indices(target.len() as isize)?;
             let old_len = target.len();
+            let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
             list_ops::item_setitem_slice(target, si.start, si.stop, si.step, values)?;
-            let from = si.start as usize;
-            if from < old_len {
-                self.bump_range(&mut doc, from, old_len);
+            if let Some(&min_idx) = indices.iter().min() {
+                self.bump_range(&mut doc, min_idx, old_len);
             }
             return Ok(());
         }

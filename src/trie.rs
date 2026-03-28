@@ -16,11 +16,6 @@ pub(crate) struct MutationTrie {
 struct TrieNode {
     /// Set to the revision at the time this node was last mutated. 0 = never.
     revised_at: u64,
-    /// When an array mutation shifts indices, records the lowest affected
-    /// index and the revision.  `is_valid` treats `Key::Int(i)` where
-    /// `i >= threshold` as stale if the revision is newer than the proxy's.
-    /// Multiple shifts accumulate by taking `min(threshold)`.
-    shifted_from: Option<(usize, u64)>,
     children: HashMap<Key, TrieNode>,
 }
 
@@ -34,9 +29,7 @@ impl MutationTrie {
     /// Check whether a proxy at `path` created at `revision` is still valid.
     ///
     /// Walks the trie from root along `path`. If any node along the way has
-    /// `revised_at > revision`, the proxy is stale. Additionally, for integer
-    /// keys, checks `shifted_from` — if the index is at or beyond the shift
-    /// threshold and the shift revision is newer, the proxy is stale.
+    /// `revised_at > revision`, the proxy is stale.
     pub(crate) fn is_valid(&self, path: &[Key], revision: u64) -> bool {
         let mut node = &self.root;
         let mut keys = path.iter();
@@ -47,13 +40,6 @@ impl MutationTrie {
             let Some(key) = keys.next() else {
                 return true;
             };
-            if let Key::Int(i) = key
-                && let Some((from, rev)) = node.shifted_from
-                && *i >= from
-                && rev > revision
-            {
-                return false;
-            }
             match node.children.get(key) {
                 Some(child) => node = child,
                 None => return true,
@@ -64,12 +50,10 @@ impl MutationTrie {
     /// Stamp the node at `path` with `revision`, marking it as revised.
     /// Creates intermediate nodes as needed (with `revised_at` 0).
     /// Any children below the target are pruned — the stamped node's revision
-    /// already invalidates all descendant proxies. Also clears `shifted_from`
-    /// since `revised_at` subsumes it.
+    /// already invalidates all descendant proxies.
     pub(crate) fn stamp(&mut self, path: &[Key], revision: u64) {
         let node = self.root.walk(path);
         node.revised_at = revision;
-        node.shifted_from = None;
         node.children.clear();
     }
 
@@ -84,23 +68,12 @@ impl MutationTrie {
         child_node.revised_at = revision;
         child_node.children.clear();
     }
-
-    /// Record that an array mutation shifted indices starting at `from_index`.
-    /// Accumulates with any prior shift by taking the minimum threshold.
-    pub(crate) fn stamp_shift(&mut self, path: &[Key], from_index: usize, revision: u64) {
-        let node = self.root.walk(path);
-        node.shifted_from = Some(match node.shifted_from {
-            Some((existing_from, _)) => (existing_from.min(from_index), revision),
-            None => (from_index, revision),
-        });
-    }
 }
 
 impl TrieNode {
     fn new() -> Self {
         Self {
             revised_at: 0,
-            shifted_from: None,
             children: HashMap::new(),
         }
     }
@@ -308,78 +281,84 @@ mod tests {
         assert!(trie.is_valid(&[str_key("t"), str_key("b")], 0));
     }
 
-    // -- stamp_shift tests --
+    // -- per-element range stamping tests --
+
+    /// Helper: stamp a range of integer children (simulates bump_range).
+    fn stamp_range(trie: &mut MutationTrie, path: &[Key], from: usize, to: usize, revision: u64) {
+        for i in from..to {
+            trie.stamp_child(path, &int_key(i), revision);
+        }
+    }
 
     #[test]
-    fn shift_invalidates_indices_at_and_after_threshold() {
+    fn range_invalidates_stamped_indices() {
         let mut trie = MutationTrie::new();
         let arr = [str_key("arr")];
-        trie.stamp_shift(&arr, 2, 1);
-        // Index 0, 1: below threshold → valid
+        stamp_range(&mut trie, &arr, 2, 5, 1);
+        // Index 0, 1: not stamped → valid
         assert!(trie.is_valid(&[str_key("arr"), int_key(0)], 0));
         assert!(trie.is_valid(&[str_key("arr"), int_key(1)], 0));
-        // Index 2, 3: at/above threshold → stale
+        // Index 2, 3, 4: stamped → stale
         assert!(!trie.is_valid(&[str_key("arr"), int_key(2)], 0));
         assert!(!trie.is_valid(&[str_key("arr"), int_key(3)], 0));
+        assert!(!trie.is_valid(&[str_key("arr"), int_key(4)], 0));
+        // Index 5: not stamped → valid
+        assert!(trie.is_valid(&[str_key("arr"), int_key(5)], 0));
         // Array node itself: still valid
         assert!(trie.is_valid(&arr, 0));
     }
 
     #[test]
-    fn shift_does_not_affect_string_keys() {
+    fn range_proxy_created_after_stamp_is_valid() {
         let mut trie = MutationTrie::new();
-        trie.stamp_shift(&[str_key("t")], 0, 1);
-        // String key children are unaffected by shift
-        assert!(trie.is_valid(&[str_key("t"), str_key("a")], 0));
-    }
-
-    #[test]
-    fn shift_accumulates_with_min_threshold() {
-        let mut trie = MutationTrie::new();
-        let arr = [str_key("arr")];
-        trie.stamp_shift(&arr, 5, 1);
-        trie.stamp_shift(&arr, 2, 2);
-        // Threshold is min(5, 2) = 2
-        assert!(trie.is_valid(&[str_key("arr"), int_key(1)], 0));
-        assert!(!trie.is_valid(&[str_key("arr"), int_key(2)], 0));
-    }
-
-    #[test]
-    fn shift_proxy_created_after_shift_is_valid() {
-        let mut trie = MutationTrie::new();
-        trie.stamp_shift(&[str_key("arr")], 2, 1);
-        // Proxy created at revision 1 (after the shift): valid
+        stamp_range(&mut trie, &[str_key("arr")], 2, 5, 1);
+        // Proxy created at revision 1 (after the stamp): valid
         assert!(trie.is_valid(&[str_key("arr"), int_key(3)], 1));
     }
 
     #[test]
-    fn stamp_clears_shifted_from() {
+    fn stamp_clears_children() {
         let mut trie = MutationTrie::new();
         let arr = [str_key("arr")];
-        trie.stamp_shift(&arr, 0, 1);
+        stamp_range(&mut trie, &arr, 0, 3, 1);
         // All elements stale
         assert!(!trie.is_valid(&[str_key("arr"), int_key(0)], 0));
-        // Structural stamp subsumes the shift
+        // Structural stamp subsumes the children
         trie.stamp(&arr, 2);
-        // Proxy created at revision 1 (after shift, before stamp):
+        // Proxy created at revision 1 (before stamp):
         // stamp set revised_at=2 on the node, so still stale via revised_at
         assert!(!trie.is_valid(&[str_key("arr"), int_key(0)], 1));
-        // Proxy created at revision 2: valid (both revised_at and shift cleared)
+        // Proxy created at revision 2: valid
         assert!(trie.is_valid(&[str_key("arr"), int_key(0)], 2));
     }
 
     #[test]
-    fn shift_interleaved_with_child_stamp() {
+    fn non_overlapping_ranges_preserve_between() {
+        // Two disjoint range stamps should not interfere with each other.
+        let mut trie = MutationTrie::new();
+        let arr = [str_key("arr")];
+        // First range: indices 1..8 (simulates pop(1) on 8-element array)
+        stamp_range(&mut trie, &arr, 1, 8, 1);
+        // Proxy at index 3 created after first range
+        // Second range: indices 5..7 (simulates pop(5) on 7-element array)
+        stamp_range(&mut trie, &arr, 5, 7, 2);
+        // Index 3 was stamped at rev 1 but proxy was created at rev 1 → valid
+        assert!(trie.is_valid(&[str_key("arr"), int_key(3)], 1));
+        // Index 5 was re-stamped at rev 2 → stale for proxy at rev 1
+        assert!(!trie.is_valid(&[str_key("arr"), int_key(5)], 1));
+    }
+
+    #[test]
+    fn range_interleaved_with_child_stamp() {
         let mut trie = MutationTrie::new();
         let arr = [str_key("arr")];
         // Replace arr[3] in place
         trie.stamp_child(&arr, &int_key(3), 1);
-        // Create proxy at arr[3] after replacement
-        // Then delete at index 1 → shift from 1
-        trie.stamp_shift(&arr, 1, 2);
-        // Proxy at arr[3] created at rev 1: index 3 >= 1, rev 2 > 1 → stale
+        // Delete at index 1 → range stamp indices 1..5
+        stamp_range(&mut trie, &arr, 1, 5, 2);
+        // Proxy at arr[3] created at rev 1: re-stamped at rev 2 → stale
         assert!(!trie.is_valid(&[str_key("arr"), int_key(3)], 1));
-        // Proxy at arr[0] created at rev 0: index 0 < 1 → valid
+        // Proxy at arr[0] created at rev 0: not in range → valid
         assert!(trie.is_valid(&[str_key("arr"), int_key(0)], 0));
     }
 }

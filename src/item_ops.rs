@@ -481,18 +481,22 @@ pub(crate) enum Affected {
     /// Only a single child key was changed (replaced in place, or
     /// removed at the end of an array without shifting).
     Child(Key),
-    /// Array indices shifted from this position onward.
-    Shift(usize),
+    /// Array indices from `from` up to (not including) `to` were
+    /// shifted or removed.
+    Range { from: usize, to: usize },
 }
 
 impl Affected {
     /// Compute invalidation for removing an element at `index` in an
     /// array of length `len` (measured *before* removal).
     pub(crate) fn for_removal(index: usize, len: usize) -> Self {
-        if index == len - 1 {
+        if index + 1 == len {
             Self::Child(Key::Int(index))
         } else {
-            Self::Shift(index)
+            Self::Range {
+                from: index,
+                to: len,
+            }
         }
     }
 }

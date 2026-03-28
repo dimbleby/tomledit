@@ -81,10 +81,10 @@ impl ItemProxy {
         self.revision = doc.revision;
     }
 
-    /// Record that an array at this proxy's path shifted indices from
-    /// `from_index` onward. The proxy (the array itself) stays valid.
-    pub(crate) fn bump_shift(&mut self, doc: &mut Document, from_index: usize) {
-        doc.bump_shift(&self.path, from_index);
+    /// Stamp each index in `from..to` as changed. The proxy (the array
+    /// itself) stays valid.
+    pub(crate) fn bump_range(&mut self, doc: &mut Document, from: usize, to: usize) {
+        doc.bump_range(&self.path, from, to);
         self.revision = doc.revision;
     }
 
@@ -93,7 +93,7 @@ impl ItemProxy {
     pub(crate) fn bump_affected(&mut self, doc: &mut Document, affected: Affected) {
         match affected {
             Affected::Child(k) => self.bump_child(doc, k),
-            Affected::Shift(from) => self.bump_shift(doc, from),
+            Affected::Range { from, to } => self.bump_range(doc, from, to),
         }
     }
 
@@ -277,8 +277,12 @@ impl ItemProxy {
             let item = self.navigate_mut(&mut doc.inner)?;
             let target = list_ops::as_array_like_mut(item, "slice assignment")?;
             let si = slice.indices(target.len() as isize)?;
+            let old_len = target.len();
             list_ops::item_setitem_slice(target, si.start, si.stop, si.step, values)?;
-            self.bump_shift(&mut doc, si.start as usize);
+            let from = si.start as usize;
+            if from < old_len {
+                self.bump_range(&mut doc, from, old_len);
+            }
             return Ok(());
         }
 
@@ -307,8 +311,9 @@ impl ItemProxy {
             let si = slice.indices(target.len() as isize)?;
             let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
             if let Some(&min_idx) = indices.iter().min() {
+                let old_len = target.len();
                 list_ops::item_delitem_slice(target, &indices)?;
-                self.bump_shift(&mut doc, min_idx);
+                self.bump_range(&mut doc, min_idx, old_len);
             }
             return Ok(());
         }

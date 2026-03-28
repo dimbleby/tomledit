@@ -91,6 +91,10 @@ class TestEquality:
         doc = Document.parse("meta = {x = 1, y = 2}\n")
         assert doc["meta"] == {"x": 1, "y": 2}
 
+    def test_inline_table_eq_mapping_proxy(self) -> None:
+        doc = Document.parse("meta = {x = 1, y = 2}\n")
+        assert doc["meta"] == MappingProxyType({"x": 1, "y": 2})
+
     def test_string_array_equals_list(self) -> None:
         doc = Document.parse('arr = ["a", "b"]\n')
         assert doc["arr"] == ["a", "b"]

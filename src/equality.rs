@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::types::{
-    PyBool, PyDate, PyDateAccess, PyDateTime, PyDict, PyList, PyString, PyTime, PyTimeAccess,
+    PyBool, PyDate, PyDateAccess, PyDateTime, PyList, PyString, PyTime, PyTimeAccess,
     PyTzInfoAccess,
 };
 use toml_edit::Item as ItemRs;
@@ -173,23 +173,36 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
             }
         }
         toml_edit::Value::InlineTable(it) => {
-            if let Ok(other_dict) = other.cast::<PyDict>() {
-                if it.len() != other_dict.len() {
-                    return Ok(false);
-                }
-                for (k, v) in it.iter() {
-                    let Some(other_v) = other_dict.get_item(k)? else {
-                        return Ok(false);
-                    };
-                    if !value_eq(v, &other_v)? {
-                        return Ok(false);
-                    }
-                }
-                return Ok(true);
-            }
+            return mapping_eq(it.iter(), it.len(), other, value_eq);
         }
     }
     Ok(false)
+}
+
+/// Compare a TOML mapping (inline table or regular table) entry-by-entry
+/// against a Python Mapping.
+fn mapping_eq<'a, V>(
+    entries: impl Iterator<Item = (&'a str, V)>,
+    len: usize,
+    other: &Bound<'_, PyAny>,
+    eq: impl Fn(V, &Bound<'_, PyAny>) -> PyResult<bool>,
+) -> PyResult<bool> {
+    if !dict_ops::is_mapping_like(other) {
+        return Ok(false);
+    }
+    let other_len: usize = other.len()?;
+    if len != other_len {
+        return Ok(false);
+    }
+    for (k, v) in entries {
+        let Ok(other_v) = other.get_item(k) else {
+            return Ok(false);
+        };
+        if !eq(v, &other_v)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Compare a toml_edit Table to a Python object that may be an [`ItemProxy`].
@@ -208,22 +221,7 @@ pub(crate) fn table_eq(table: &toml_edit::Table, other: &Bound<'_, PyAny>) -> Py
             _ => false,
         });
     }
-    if !dict_ops::is_abc_mapping(other) {
-        return Ok(false);
-    }
-    let other_len: usize = other.len()?;
-    if table.len() != other_len {
-        return Ok(false);
-    }
-    for (k, v) in table.iter() {
-        let Ok(other_v) = other.get_item(k) else {
-            return Ok(false);
-        };
-        if !item_eq(v, &other_v)? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
+    mapping_eq(table.iter(), table.len(), other, item_eq)
 }
 
 /// Compare a toml_edit Item to a Python object that may be an [`ItemProxy`].

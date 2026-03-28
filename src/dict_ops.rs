@@ -161,14 +161,12 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
         return Ok(pairs);
     }
 
-    // Mapping — use .keys() + __getitem__ protocol.
-    if is_abc_mapping(other) {
-        let keys = other.call_method0("keys")?;
+    // Mapping — iterate .items() for (key, value) pairs directly.
+    if is_mapping_like(other) {
+        let items = other.call_method0("items")?;
         let mut pairs = Vec::new();
-        for key_obj in keys.try_iter()? {
-            let key_obj = key_obj?;
-            let key: String = key_obj.extract()?;
-            let val: Item = other.get_item(&key_obj)?.extract()?;
+        for item in items.try_iter()? {
+            let (key, val): (String, Item) = item?.extract()?;
             pairs.push((key, val));
         }
         return Ok(pairs);
@@ -402,7 +400,7 @@ pub(crate) fn is_mapping_like(other: &Bound<'_, PyAny>) -> bool {
         || is_abc_mapping(other)
 }
 
-pub(crate) fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> bool {
+fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> bool {
     let py = obj.py();
     py.import("collections.abc")
         .and_then(|m| m.getattr("Mapping"))

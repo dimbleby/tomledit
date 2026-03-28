@@ -55,7 +55,8 @@ coverage: coverage-build
 	LLVM_TOOLS_PATH="$$(rustc --print sysroot)/lib/rustlib/$$(rustc -vV | awk '/^host:/ {print $$2}')/bin" && \
 	"$$LLVM_TOOLS_PATH/llvm-profdata" merge -sparse target/tomledit-*.profraw -o target/tomledit.profdata && \
 	LIB_PATH=$$(find target -name 'libtomledit.so' -path '*/release/*' | head -1) && \
-	"$$LLVM_TOOLS_PATH/llvm-cov" report "$$LIB_PATH" --instr-profile=target/tomledit.profdata --sources src/
+	"$$LLVM_TOOLS_PATH/llvm-cov" report "$$LIB_PATH" --instr-profile=target/tomledit.profdata --sources src/ \
+		--show-branch-summary=false
 
 clean:
 	cargo clean

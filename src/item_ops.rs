@@ -385,10 +385,8 @@ pub(crate) fn item_setitem(
 // Delitem
 // ---------------------------------------------------------------------------
 
-/// Delete an element.  Returns `Some(key)` when only that key was removed
-/// (no index shifting — safe for targeted invalidation), or `None` when
-/// indices shifted and the whole container must be invalidated.
-pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Option<Key>> {
+/// Delete an element.  Returns how existing proxies are affected.
+pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Affected> {
     match item {
         ItemRs::Table(table) => {
             let Ok(k) = key.extract::<String>() else {
@@ -397,7 +395,7 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
             if table.remove(&k).is_none() {
                 return Err(PyKeyError::new_err(k));
             }
-            Ok(Some(Key::Str(k)))
+            Ok(Affected::Child(Key::Str(k)))
         }
         ItemRs::Value(ValueRs::InlineTable(it)) => {
             let Ok(k) = key.extract::<String>() else {
@@ -406,14 +404,14 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
             if it_remove(it, &k).is_none() {
                 return Err(PyKeyError::new_err(k));
             }
-            Ok(Some(Key::Str(k)))
+            Ok(Affected::Child(Key::Str(k)))
         }
         ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => {
             let idx_raw = require_int_key(key)?;
             let target = list_ops::as_array_like_mut(item, "__delitem__")?;
             let idx = list_ops::resolve_index(idx_raw, target.len())?;
-            let (_removed, key) = list_ops::item_remove_at(target, idx)?;
-            Ok(key)
+            let (_removed, affected) = list_ops::item_remove_at(target, idx)?;
+            Ok(affected)
         }
         _ => Err(PyTypeError::new_err(format!(
             "TOML {} item is not subscriptable",
@@ -476,6 +474,27 @@ pub(crate) fn item_fmt(item: &mut ItemRs) {
 pub(crate) enum Key {
     Str(String),
     Int(usize),
+}
+
+/// Describes how a mutation affects existing proxies, for invalidation.
+pub(crate) enum Affected {
+    /// Only a single child key was changed (replaced in place, or
+    /// removed at the end of an array without shifting).
+    Child(Key),
+    /// Array indices shifted from this position onward.
+    Shift(usize),
+}
+
+impl Affected {
+    /// Compute invalidation for removing an element at `index` in an
+    /// array of length `len` (measured *before* removal).
+    pub(crate) fn for_removal(index: usize, len: usize) -> Self {
+        if index == len - 1 {
+            Self::Child(Key::Int(index))
+        } else {
+            Self::Shift(index)
+        }
+    }
 }
 
 pub(crate) fn navigate_path<'a>(doc: &'a DocumentRs, path: &[Key]) -> PyResult<&'a ItemRs> {

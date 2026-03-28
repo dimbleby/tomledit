@@ -469,14 +469,14 @@ class TestPreciseInvalidation:
         with pytest.raises(RuntimeError, match="stale"):
             _ = e1.value
 
-    def test_array_remove_invalidates_elements(self) -> None:
+    def test_array_remove_invalidates_shifted_elements(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]")
-        e0 = doc["arr"][0]
+        e2 = doc["arr"][2]
         arr = doc["arr"]
-        arr.remove(2)
+        arr.remove(2)  # removes value 2 at index 1
         assert len(arr) == 2
         with pytest.raises(RuntimeError, match="stale"):
-            _ = e0.value
+            _ = e2.value
 
     def test_clear_invalidates_everything(self) -> None:
         doc = Document.parse(
@@ -591,6 +591,84 @@ class TestEndOfArrayOptimizations:
         doc["arr"].pop()
         with pytest.raises((RuntimeError, IndexError)):
             _ = third.value
+
+
+class TestPreciseArrayShiftInvalidation:
+    """Mid-array mutations invalidate only indices at and after the shift point."""
+
+    def test_pop_middle_preserves_earlier(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 4, 5]")
+        p0 = doc["arr"][0]
+        p1 = doc["arr"][1]
+        p3 = doc["arr"][3]
+        p4 = doc["arr"][4]
+        doc["arr"].pop(2)  # remove index 2 → [1, 2, 4, 5]
+        assert p0.value == 1
+        assert p1.value == 2
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p3.value
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p4.value
+
+    def test_del_middle_preserves_earlier(self) -> None:
+        doc = Document.parse("arr = [10, 20, 30, 40]")
+        p0 = doc["arr"][0]
+        p3 = doc["arr"][3]
+        del doc["arr"][1]  # → [10, 30, 40]
+        assert p0.value == 10
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p3.value
+
+    def test_insert_middle_preserves_earlier(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]")
+        p0 = doc["arr"][0]
+        p2 = doc["arr"][2]
+        doc["arr"].insert(1, 99)  # → [1, 99, 2, 3]
+        assert p0.value == 1
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p2.value
+
+    def test_remove_by_value_preserves_earlier(self) -> None:
+        doc = Document.parse("arr = [10, 20, 30, 40]")
+        p0 = doc["arr"][0]
+        p3 = doc["arr"][3]
+        doc["arr"].remove(20)  # removes index 1 → [10, 30, 40]
+        assert p0.value == 10
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p3.value
+
+    def test_multiple_shifts_accumulate(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 4, 5]")
+        p0 = doc["arr"][0]
+        p1 = doc["arr"][1]
+        doc["arr"].pop(3)  # shift from 3 → [1, 2, 3, 5]
+        p1_fresh = doc["arr"][1]  # created after first shift
+        doc["arr"].pop(1)  # shift from 1 → [1, 3, 5]
+        assert p0.value == 1  # index 0 below min threshold
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p1.value  # old proxy at index 1, stale
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p1_fresh.value  # proxy at index 1 after first shift, stale from second
+
+    def test_slice_del_preserves_earlier(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 4, 5]")
+        p0 = doc["arr"][0]
+        p4 = doc["arr"][4]
+        del doc["arr"][2:4]  # remove indices 2,3 → [1, 2, 5]
+        assert p0.value == 1
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p4.value
+
+    def test_slice_assign_preserves_earlier(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 4, 5]")
+        p0 = doc["arr"][0]
+        p1 = doc["arr"][1]
+        p2 = doc["arr"][2]
+        doc["arr"][2:4] = [30, 40, 50]  # replace indices 2,3 with 3 values
+        assert p0.value == 1
+        assert p1.value == 2
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = p2.value
 
 
 class TestViewStaleness:

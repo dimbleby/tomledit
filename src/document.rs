@@ -52,6 +52,12 @@ impl Document {
         self.trie.stamp_child(path, child, self.revision);
     }
 
+    /// Record that an array at `path` shifted indices starting at `from_index`.
+    pub(crate) fn bump_shift(&mut self, path: &[Key], from_index: usize) {
+        self.revision += 1;
+        self.trie.stamp_shift(path, from_index, self.revision);
+    }
+
     /// Check whether a proxy at `path` created at `revision` is still fresh.
     pub(crate) fn check_fresh(&self, path: &[Key], revision: u64) -> PyResult<()> {
         if self.trie.is_valid(path, revision) {

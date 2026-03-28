@@ -6,7 +6,7 @@ use toml_edit::Value as ValueRs;
 use crate::comments;
 use crate::equality;
 use crate::item::Item;
-use crate::item_ops::{Key, into_value};
+use crate::item_ops::{Affected, into_value};
 
 // ---------------------------------------------------------------------------
 // Array-like enum — constrains list operations to valid item types
@@ -490,9 +490,13 @@ pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()>
     }
 }
 
-/// Insert an element.  Returns `true` when the insertion was at the end
-/// (append-like, no index shifting occurred).
-pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> PyResult<bool> {
+/// Insert an element.  Returns `Some(Affected::Shift(..))` when the
+/// insertion shifted existing indices, or `None` when appended at the end.
+pub(crate) fn item_insert(
+    target: ArrayLikeMut<'_>,
+    index: i64,
+    value: Item,
+) -> PyResult<Option<Affected>> {
     match target {
         ArrayLikeMut::Array(arr) => {
             let resolved = clamp_index(index, arr.len());
@@ -504,7 +508,7 @@ pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> 
             arr.insert(resolved, v);
             ic.insert(resolved, inline);
             comments::restore_inline_comments(arr, &ic);
-            Ok(at_end)
+            Ok((!at_end).then_some(Affected::Shift(resolved)))
         }
         ArrayLikeMut::Aot(aot) => {
             let resolved = clamp_index(index, aot.len());
@@ -512,45 +516,35 @@ pub(crate) fn item_insert(target: ArrayLikeMut<'_>, index: i64, value: Item) -> 
             let table = require_table(value)?;
             aot.insert(resolved, table);
             fix_inserted_aot_spacing(aot, resolved);
-            Ok(at_end)
+            Ok((!at_end).then_some(Affected::Shift(resolved)))
         }
     }
 }
 
-/// Remove the element at `index`.  Returns `Some(Key::Int(idx))` when
-/// only the last element was removed (no shifting), or `None` when
-/// earlier indices shifted and the whole container must be invalidated.
-pub(crate) fn item_remove_at(
-    target: ArrayLikeMut<'_>,
-    index: usize,
-) -> PyResult<(Item, Option<Key>)> {
+/// Remove the element at `index`.  Returns the removed item and an
+/// `Affected` descriptor for proxy invalidation.
+pub(crate) fn item_remove_at(target: ArrayLikeMut<'_>, index: usize) -> PyResult<(Item, Affected)> {
     match target {
         ArrayLikeMut::Array(arr) => {
             if index >= arr.len() {
                 return Err(PyIndexError::new_err("array index out of range"));
             }
-            let is_last = index == arr.len() - 1;
+            let affected = Affected::for_removal(index, arr.len());
             let mut ic = comments::save_inline_comments(arr);
-            let decor = save_removal_decor(arr, index == 0, is_last);
+            let decor = save_removal_decor(arr, index == 0, index == arr.len() - 1);
             let removed = arr.remove(index);
             ic.remove(index);
             comments::restore_inline_comments(arr, &ic);
             apply_removal_decor(arr, &decor);
-            Ok((
-                Item(ItemRs::Value(removed)),
-                is_last.then_some(Key::Int(index)),
-            ))
+            Ok((Item(ItemRs::Value(removed)), affected))
         }
         ArrayLikeMut::Aot(aot) => {
             if index >= aot.len() {
                 return Err(PyIndexError::new_err("array index out of range"));
             }
-            let is_last = index == aot.len() - 1;
+            let affected = Affected::for_removal(index, aot.len());
             let removed = aot.remove(index);
-            Ok((
-                Item(ItemRs::Table(removed)),
-                is_last.then_some(Key::Int(index)),
-            ))
+            Ok((Item(ItemRs::Table(removed)), affected))
         }
     }
 }
@@ -672,7 +666,7 @@ pub(crate) fn item_set_multiline(target: ArrayLikeMut<'_>, indent: usize) -> PyR
 pub(crate) fn list_pop(
     target: ArrayLikeMut<'_>,
     index: Option<&Bound<'_, PyAny>>,
-) -> PyResult<(Item, Option<Key>)> {
+) -> PyResult<(Item, Affected)> {
     let len = target.len();
     let idx = match index {
         Some(key_obj) => resolve_index(key_obj.extract::<i64>()?, len)?,

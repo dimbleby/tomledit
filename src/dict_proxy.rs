@@ -7,7 +7,7 @@ use crate::dict_ops;
 use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
-use crate::item_proxy::{self, ItemProxy};
+use crate::item_proxy::ItemProxy;
 use crate::views::{ItemsView, KeysView, ValuesView};
 
 /// A TOML table or inline table.
@@ -105,10 +105,7 @@ impl DictProxy {
             Some(default.get_item(0)?.unbind())
         };
 
-        let resolved = item_proxy::resolve_proxy(py, key)?;
-        let key = resolved.as_ref().map_or(key, |v| v.bind(py));
-
-        let Ok(key_str) = key.extract::<&str>() else {
+        let Some(key_str) = item_ops::extract_key_str(key) else {
             return match default_val {
                 Some(d) => Ok(d),
                 None => Err(PyKeyError::new_err(key.repr()?.to_string())),
@@ -120,7 +117,7 @@ impl DictProxy {
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
 
-        match item_ops::table_pop(item, key_str) {
+        match item_ops::table_pop(item, &key_str) {
             Ok((removed, affected_key)) => {
                 let result = item_ops::item_to_py(&removed.0, py)?;
                 base.bump_child(&mut doc, affected_key);

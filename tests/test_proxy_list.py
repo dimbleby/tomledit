@@ -404,6 +404,24 @@ class TestProxyListMethods:
             name = "b"
         """)
 
+    def test_insert_aot_beginning_single_element(self) -> None:
+        """Inserting at 0 in a 1-element AoT should produce spaced output,
+        matching the default spacing that append produces."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
+        doc["items"].insert(0, {"name": "z"})
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "z"
+
+            [[items]]
+            name = "a"
+        """)
+
     def test_clear_array(self) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
         doc["arr"].clear()

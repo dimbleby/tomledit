@@ -405,3 +405,18 @@ fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> bool {
         .and_then(|cls| obj.is_instance(&cls))
         .unwrap_or(false)
 }
+
+/// Remove a key from a table-like item, returning the removed item and key.
+pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
+    match item {
+        ItemRs::Table(table) => match table.remove(key) {
+            Some(v) => Ok((Item(v), Key::Str(key.into()))),
+            None => Err(PyKeyError::new_err(key.to_owned())),
+        },
+        ItemRs::Value(ValueRs::InlineTable(it)) => match item_ops::it_remove(it, key) {
+            Some(v) => Ok((Item(ItemRs::Value(v)), Key::Str(key.into()))),
+            None => Err(PyKeyError::new_err(key.to_owned())),
+        },
+        _ => Err(unsupported_op(item, "pop()")),
+    }
+}

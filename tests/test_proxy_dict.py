@@ -1324,3 +1324,32 @@ class TestProxyKeyContainment:
         """A proxy wrapping a non-string value is not a valid key."""
         doc = Document.parse("port = 8080\na = 1\n")
         assert doc["port"] not in doc
+
+
+class TestProxyKeyLookup:
+    """Proxy string values should work as keys in get/getitem/setdefault."""
+
+    def test_document_getitem_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "a"\na = 1\n')
+        assert doc[doc["key"]] == 1  # type: ignore[index] # ty: ignore[invalid-argument-type]
+
+    def test_document_get_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "a"\na = 1\n')
+        assert doc.get(doc["key"]) == 1  # type: ignore[call-overload] # ty: ignore[invalid-argument-type]
+
+    def test_document_get_missing_proxy_key(self) -> None:
+        doc = Document.parse('key = "missing"\na = 1\n')
+        assert doc.get(doc["key"]) is None  # type: ignore[call-overload] # ty: ignore[invalid-argument-type]
+
+    def test_document_setdefault_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "a"\na = 1\n')
+        result = doc.setdefault(doc["key"], 99)  # type: ignore[arg-type] # ty: ignore[invalid-argument-type]
+        assert result == 1  # existing value, not default
+
+    def test_dict_proxy_getitem_with_proxy_key(self) -> None:
+        doc = Document.parse('[s]\nname = "age"\nage = 30\n')
+        assert doc["s"][doc["s"]["name"]] == 30  # type: ignore[call-overload] # ty: ignore[invalid-argument-type]
+
+    def test_dict_proxy_get_with_proxy_key(self) -> None:
+        doc = Document.parse('[s]\nname = "age"\nage = 30\n')
+        assert doc["s"].get(doc["s"]["name"]) == 30

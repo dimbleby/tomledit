@@ -142,12 +142,12 @@ impl Document {
         default: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         let py = slf.py();
-        let Ok(key) = key.extract::<&str>() else {
+        let Some(key) = item_ops::extract_key_str(key) else {
             return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
         };
         let doc = slf.borrow();
-        if doc.inner.get(key).is_some() {
-            let proxy = Self::make_proxy(slf, key);
+        if doc.inner.get(&key).is_some() {
+            let proxy = Self::make_proxy(slf, &key);
             ItemProxy::into_typed(py, proxy)
         } else {
             Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()))
@@ -155,15 +155,15 @@ impl Document {
     }
 
     pub fn __getitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let Ok(key) = key.extract::<&str>() else {
+        let Some(key) = item_ops::extract_key_str(key) else {
             return Err(PyKeyError::new_err(key.repr()?.to_string()));
         };
         let proxy = {
             let doc = slf.borrow();
-            if !doc.inner.contains_key(key) {
-                return Err(PyKeyError::new_err(key.to_owned()));
+            if !doc.inner.contains_key(&key) {
+                return Err(PyKeyError::new_err(key.clone()));
             }
-            Self::make_proxy(slf, key)
+            Self::make_proxy(slf, &key)
         };
         let py = slf.py();
         ItemProxy::into_typed(py, proxy)
@@ -304,14 +304,16 @@ impl Document {
     #[pyo3(signature = (key, default=None, /))]
     pub fn setdefault(
         slf: &Bound<'_, Self>,
-        key: &str,
+        key: &Bound<'_, PyAny>,
         default: Option<Item>,
     ) -> PyResult<Py<PyAny>> {
         let py = slf.py();
+        let key = item_ops::extract_key_str(key)
+            .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         {
             let doc = slf.borrow();
-            if doc.inner.contains_key(key) {
-                let proxy = Self::make_proxy(slf, key);
+            if doc.inner.contains_key(&key) {
+                let proxy = Self::make_proxy(slf, &key);
                 return ItemProxy::into_typed(py, proxy);
             }
         }
@@ -322,9 +324,9 @@ impl Document {
         })?;
         {
             let mut doc = slf.borrow_mut();
-            dict_ops::set_with_decor_preservation(doc.inner.as_item_mut(), key, default);
+            dict_ops::set_with_decor_preservation(doc.inner.as_item_mut(), &key, default);
         }
-        let proxy = Self::make_proxy(slf, key);
+        let proxy = Self::make_proxy(slf, &key);
         ItemProxy::into_typed(py, proxy)
     }
 

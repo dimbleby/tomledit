@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDate, PyDateTime, PyDelta, PyDict, PyList, PyTime, PyTzInfo};
+use pyo3::types::{PyDate, PyDateTime, PyDelta, PyDict, PyList, PySlice, PyTime, PyTzInfo};
 use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
@@ -264,7 +264,7 @@ pub(crate) fn item_iter_kind<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
 // Misc helpers
 // ---------------------------------------------------------------------------
 
-fn bad_key_type(key: &Bound<'_, PyAny>) -> PyErr {
+pub(crate) fn bad_key_type(key: &Bound<'_, PyAny>) -> PyErr {
     let type_name = key
         .get_type()
         .name()
@@ -275,27 +275,55 @@ fn bad_key_type(key: &Bound<'_, PyAny>) -> PyErr {
     ))
 }
 
-fn require_str_key(key: &Bound<'_, PyAny>) -> PyResult<String> {
-    key.extract().map_err(|_| {
-        // Use a C-level type check instead of extract (which invokes
-        // __index__) to avoid re-borrowing the document through dunder
-        // methods when the key is a proxy.
-        if key.is_instance_of::<pyo3::types::PyInt>() {
+/// Error for using the wrong key type on a subscriptable item.
+/// Tables expect strings; arrays expect integers; scalars aren't subscriptable.
+fn subscript_type_error(item: &ItemRs) -> PyErr {
+    match item {
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
             PyTypeError::new_err("TOML table keys must be strings, not integers")
-        } else {
-            bad_key_type(key)
         }
-    })
+        ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => {
+            PyTypeError::new_err("TOML array indices must be integers, not strings")
+        }
+        _ => PyTypeError::new_err(format!("'{}' is not subscriptable", item.type_name())),
+    }
 }
 
-fn require_int_key(key: &Bound<'_, PyAny>) -> PyResult<i64> {
-    key.extract().map_err(|_| {
-        if key.is_instance_of::<pyo3::types::PyString>() {
-            PyTypeError::new_err("TOML array indices must be integers, not strings")
-        } else {
-            bad_key_type(key)
-        }
-    })
+/// A subscript key resolved from Python *before* borrowing the document.
+///
+/// Proxy values are resolved to their plain Python equivalents so that
+/// `extract()` works without re-borrowing the document.
+pub(crate) enum SubscriptKey<'py> {
+    Str(String),
+    Int(i64),
+    Slice(Bound<'py, PySlice>),
+    /// Key type that is neither string, integer, nor slice.
+    /// The callsite decides the error (e.g. `KeyError` for dicts, `TypeError`
+    /// for arrays) because the correct exception depends on the item type.
+    Other(Bound<'py, PyAny>),
+}
+
+/// Resolve a `__getitem__`/`__setitem__`/`__delitem__` key to a typed enum.
+///
+/// This must be called *before* borrowing the document, because resolving a
+/// proxy key borrows it internally.
+pub(crate) fn resolve_subscript_key<'py>(
+    py: Python<'py>,
+    key: &Bound<'py, PyAny>,
+) -> PyResult<SubscriptKey<'py>> {
+    if let Ok(slice) = key.cast::<PySlice>() {
+        return Ok(SubscriptKey::Slice(slice.clone()));
+    }
+    // Resolve proxy to plain Python value before extracting.
+    let resolved = crate::item_proxy::resolve_proxy(py, key)?;
+    let key = resolved.as_ref().map_or(key, |v| v.bind(py));
+    if let Ok(s) = key.extract::<String>() {
+        Ok(SubscriptKey::Str(s))
+    } else if let Ok(i) = key.extract::<i64>() {
+        Ok(SubscriptKey::Int(i))
+    } else {
+        Ok(SubscriptKey::Other(key.clone()))
+    }
 }
 
 pub(crate) fn unsupported_op(item: &ItemRs, op: &str) -> PyErr {
@@ -315,56 +343,43 @@ pub(crate) fn into_value(item: Item) -> PyResult<ValueRs> {
 }
 
 // ---------------------------------------------------------------------------
-// Getitem
-// ---------------------------------------------------------------------------
-
-pub(crate) fn item_getitem(item: &ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Key> {
-    if let Ok(k) = key.extract::<String>() {
-        if !dict_ops::item_has_key(item, &k)? {
-            return Err(PyKeyError::new_err(k));
-        }
-        Ok(Key::Str(k))
-    } else if let Ok(k) = key.extract::<i64>() {
-        Ok(Key::Int(list_ops::require_array_index(item, k)?))
-    } else {
-        match item {
-            ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
-                Err(PyKeyError::new_err(key.repr()?.to_string()))
-            }
-            _ => Err(bad_key_type(key)),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Setitem
 // ---------------------------------------------------------------------------
 
-/// Returns `Some(key)` if an existing value was replaced, `None` if a new key was added.
-pub(crate) fn item_setitem(
+/// Set a string-keyed entry (table / inline table).
+/// Returns `Some(key)` if an existing value was replaced, `None` if a new key
+/// was added.
+pub(crate) fn item_setitem_str(
     item: &mut ItemRs,
-    key: &Bound<'_, PyAny>,
+    key: String,
     value: Item,
 ) -> PyResult<Option<Key>> {
     match item {
         ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
-            let k = require_str_key(key)?;
-            let replaced = item.get(k.as_str()).is_some();
-            dict_ops::set_with_decor_preservation(item, &k, value);
-            Ok(if replaced { Some(Key::Str(k)) } else { None })
+            let replaced = item.get(key.as_str()).is_some();
+            dict_ops::set_with_decor_preservation(item, &key, value);
+            Ok(if replaced { Some(Key::Str(key)) } else { None })
         }
+        _ => Err(subscript_type_error(item)),
+    }
+}
+
+/// Set an integer-keyed entry (array / array of tables).
+/// Returns the key of the replaced element.
+pub(crate) fn item_setitem_int(item: &mut ItemRs, idx_raw: i64, value: Item) -> PyResult<Key> {
+    match item {
         ItemRs::Value(ValueRs::Array(array)) => {
-            let idx = list_ops::resolve_index(require_int_key(key)?, array.len())?;
+            let idx = list_ops::resolve_index(idx_raw, array.len())?;
             let mut v = into_value(value)?;
             let inline = comments::take_inline_comment(&mut v);
             array.replace(idx, v);
             if !inline.is_empty() {
                 comments::set_array_item_comment(array, idx, &inline);
             }
-            Ok(Some(Key::Int(idx)))
+            Ok(Key::Int(idx))
         }
         ItemRs::ArrayOfTables(aot) => {
-            let idx = list_ops::resolve_index(require_int_key(key)?, aot.len())?;
+            let idx = list_ops::resolve_index(idx_raw, aot.len())?;
             if !value.0.is_table() && !value.0.is_inline_table() {
                 return Err(PyTypeError::new_err(format!(
                     "cannot assign {} to array of tables (expected a table/dict)",
@@ -372,12 +387,9 @@ pub(crate) fn item_setitem(
                 )));
             }
             item[idx] = value.0;
-            Ok(Some(Key::Int(idx)))
+            Ok(Key::Int(idx))
         }
-        _ => Err(PyTypeError::new_err(format!(
-            "'{}' is not subscriptable",
-            item.type_name()
-        ))),
+        _ => Err(subscript_type_error(item)),
     }
 }
 
@@ -385,38 +397,29 @@ pub(crate) fn item_setitem(
 // Delitem
 // ---------------------------------------------------------------------------
 
-/// Delete an element.  Returns how existing proxies are affected.
-pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResult<Affected> {
+/// Delete a string-keyed entry (table / inline table).
+pub(crate) fn item_delitem_str(item: &mut ItemRs, key: &str) -> PyResult<Affected> {
+    if item.as_table_like().is_none() {
+        return Err(subscript_type_error(item));
+    }
+    let (_removed, k) = dict_ops::table_pop(item, key)?;
+    Ok(Affected::Child(k))
+}
+
+/// Delete an integer-keyed entry (array / array of tables).
+pub(crate) fn item_delitem_int(item: &mut ItemRs, idx_raw: i64) -> PyResult<Affected> {
     match item {
-        ItemRs::Table(table) => {
-            let Ok(k) = key.extract::<String>() else {
-                return Err(PyKeyError::new_err(key.repr()?.to_string()));
-            };
-            if table.remove(&k).is_none() {
-                return Err(PyKeyError::new_err(k));
-            }
-            Ok(Affected::Child(Key::Str(k)))
-        }
-        ItemRs::Value(ValueRs::InlineTable(it)) => {
-            let Ok(k) = key.extract::<String>() else {
-                return Err(PyKeyError::new_err(key.repr()?.to_string()));
-            };
-            if it_remove(it, &k).is_none() {
-                return Err(PyKeyError::new_err(k));
-            }
-            Ok(Affected::Child(Key::Str(k)))
-        }
         ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => {
-            let idx_raw = require_int_key(key)?;
             let target = list_ops::as_array_like_mut(item, "__delitem__")?;
             let idx = list_ops::resolve_index(idx_raw, target.len())?;
             let (_removed, affected) = list_ops::item_remove_at(target, idx)?;
             Ok(affected)
         }
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item is not subscriptable",
-            item.type_name()
-        ))),
+        // Tables: int key can never match → KeyError (dict semantics).
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
+            Err(PyKeyError::new_err(idx_raw.to_string()))
+        }
+        _ => Err(subscript_type_error(item)),
     }
 }
 
@@ -425,20 +428,6 @@ pub(crate) fn item_delitem(item: &mut ItemRs, key: &Bound<'_, PyAny>) -> PyResul
 // ---------------------------------------------------------------------------
 
 /// Remove a key from a table-like item, returning the removed item and key.
-pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
-    match item {
-        ItemRs::Table(table) => match table.remove(key) {
-            Some(v) => Ok((Item(v), Key::Str(key.into()))),
-            None => Err(PyKeyError::new_err(key.to_owned())),
-        },
-        ItemRs::Value(ValueRs::InlineTable(it)) => match it_remove(it, key) {
-            Some(v) => Ok((Item(ItemRs::Value(v)), Key::Str(key.into()))),
-            None => Err(PyKeyError::new_err(key.to_owned())),
-        },
-        _ => Err(unsupported_op(item, "pop()")),
-    }
-}
-
 pub(crate) fn item_clear(item: &mut ItemRs) -> PyResult<()> {
     if let Some(tbl) = item.as_table_like_mut() {
         tbl.clear();

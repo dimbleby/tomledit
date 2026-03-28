@@ -120,24 +120,22 @@ pub(crate) fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
 }
 
 /// Remove and return the last `(key, Item)` pair from a table-like item.
-pub(crate) fn item_popitem(item: &mut ItemRs, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
-    let (key, removed) = match item {
+pub(crate) fn item_popitem(item: &mut ItemRs) -> PyResult<(String, ItemRs)> {
+    match item {
         ItemRs::Table(table) => {
             let k = table.iter().last().map(|(k, _)| k.to_owned());
             let k = k.ok_or_else(|| PyKeyError::new_err("popitem(): table is empty"))?;
             let v = table.remove(&k).expect("key just found");
-            (k, v)
+            Ok((k, v))
         }
         ItemRs::Value(ValueRs::InlineTable(it)) => {
             let k = it.iter().last().map(|(k, _)| k.to_owned());
             let k = k.ok_or_else(|| PyKeyError::new_err("popitem(): table is empty"))?;
             let v = ItemRs::Value(item_ops::it_remove(it, &k).expect("key just found"));
-            (k, v)
+            Ok((k, v))
         }
-        _ => return Err(unsupported_op(item, "popitem()")),
-    };
-    let py_val = item_ops::item_to_py(&removed, py)?;
-    Ok((key, py_val))
+        _ => Err(unsupported_op(item, "popitem()")),
+    }
 }
 
 // ---------------------------------------------------------------------------

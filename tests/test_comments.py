@@ -451,6 +451,68 @@ class TestComment:
         assert doc["arr"][1].inline_comment == "# second"
         assert doc["arr"][2].inline_comment is None
 
+    # ---- insert does not inherit block comments ----
+
+    def test_insert_at_start_no_block_comment_inheritance(self) -> None:
+        """New element at position 0 must not inherit the old first
+        element's block comment (regression)."""
+        doc = Document.parse(
+            toml_literal("""
+            arr = [
+                # section A
+                "apple",
+                # section B
+                "carrot",
+                "potato",
+            ]
+        """)
+        )
+        doc["arr"].insert(0, "banana")
+        assert doc["arr"][0].comment is None  # banana (new)
+        assert doc["arr"][1].comment == "# section A"  # apple
+        assert doc["arr"][2].comment == "# section B"  # carrot
+
+    def test_insert_middle_no_block_comment_inheritance(self) -> None:
+        """New element inserted in the middle must not inherit any
+        existing element's block comment (regression)."""
+        doc = Document.parse(
+            toml_literal("""
+            arr = [
+                # section A
+                "apple",
+                # section B
+                "carrot",
+            ]
+        """)
+        )
+        doc["arr"].insert(1, "banana")
+        assert doc["arr"][0].comment == "# section A"  # apple
+        assert doc["arr"][1].comment is None  # banana (new)
+        assert doc["arr"][2].comment == "# section B"  # carrot
+
+    def test_insert_no_mixed_comment_inheritance(self) -> None:
+        """When elements have both block and inline comments, inserting a
+        new element must not inherit either block comment (regression)."""
+        doc = Document.parse(
+            toml_literal("""
+            vals = [
+                # section A
+                10, # ten
+                # section B
+                20, # twenty
+                30, # thirty
+            ]
+        """)
+        )
+        doc["vals"].insert(1, 15)
+        assert doc["vals"][0].comment == "# section A"
+        assert doc["vals"][0].inline_comment == "# ten"
+        assert doc["vals"][1].comment is None  # 15 (new)
+        assert doc["vals"][1].inline_comment is None
+        assert doc["vals"][2].comment == "# section B"
+        assert doc["vals"][2].inline_comment == "# twenty"
+        assert doc["vals"][3].inline_comment == "# thirty"
+
     # ---- removal preserves comments ----
 
     def test_pop_last_drops_its_comment(self) -> None:

@@ -74,8 +74,8 @@ pub(crate) fn as_array_like<'a>(item: &'a ItemRs, op: &str) -> PyResult<ArrayLik
 /// stripping any block comments that precede the indentation.
 /// Returns `None` when the prefix contains no newline (single-line array).
 fn indent_only(raw: &str) -> Option<String> {
-    let (_, indent) = raw.rsplit_once('\n')?;
-    Some(format!("\n{indent}"))
+    raw.rsplit_once('\n')
+        .map(|(_, indent)| format!("\n{indent}"))
 }
 
 /// Detect whether an array uses multiline formatting and return the element

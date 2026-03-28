@@ -128,4 +128,5 @@ jobs:
           LIB_PATH=$(find target -name 'libtomledit.so' -path '*/release/*' | head -1)
           "$LLVM_TOOLS_PATH/llvm-cov" report \
             "$LIB_PATH" \
-            --instr-profile=target/tomledit.profdata --sources src/
+            --instr-profile=target/tomledit.profdata --sources src/ \
+            --show-branch-summary=false

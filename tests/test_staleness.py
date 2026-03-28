@@ -871,3 +871,24 @@ class TestViewStaleness:
         doc["foo"] = "bar"
         with pytest.raises(RuntimeError, match="stale"):
             view == {"a"}  # noqa: B015
+
+
+class TestSliceOverInvalidation:
+    """Same-length slice replacement should not invalidate unaffected proxies."""
+
+    def test_same_length_slice_does_not_stale_later_proxy(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 4, 5]\n")
+        proxy_at_3 = doc["arr"][3]
+        assert proxy_at_3.value == 4
+        doc["arr"][1:3] = [20, 30]
+        # Indices 3 and 4 did not shift — proxy should still be valid
+        assert proxy_at_3.value == 4
+
+    def test_same_length_slice_does_stale_replaced_proxy(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3, 4, 5]\n")
+        proxy_at_1 = doc["arr"][1]
+        assert proxy_at_1.value == 2
+        doc["arr"][1:3] = [20, 30]
+        # Index 1 was replaced — proxy should be stale
+        with pytest.raises(RuntimeError, match="stale"):
+            proxy_at_1.value  # noqa: B018

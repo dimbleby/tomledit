@@ -296,9 +296,17 @@ impl ItemProxy {
                 let si = slice.indices(target.len() as isize)?;
                 let old_len = target.len();
                 let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
+                let new_count = values.len();
                 list_ops::item_setitem_slice(target, si.start, si.stop, si.step, values)?;
-                if let Some(&min_idx) = indices.iter().min() {
-                    self.bump_range(&mut doc, min_idx, old_len);
+                if new_count == indices.len() {
+                    // Same-length: stamp only the replaced indices.
+                    for &i in &indices {
+                        self.bump_child(&mut doc, Key::Int(i));
+                    }
+                } else {
+                    // Different length: everything from first affected onward may have shifted.
+                    let from = indices.iter().min().copied().unwrap_or(si.start as usize);
+                    self.bump_range(&mut doc, from, old_len);
                 }
                 Ok(())
             }

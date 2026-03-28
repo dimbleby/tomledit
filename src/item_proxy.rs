@@ -337,12 +337,12 @@ impl ItemProxy {
         use item_ops::SubscriptKey;
         let py = key.py();
         let resolved = item_ops::resolve_subscript_key(py, key)?;
+        let mut doc = self.document.bind(py).borrow_mut();
+        self.check_fresh(&doc)?;
+        let item = self.navigate_mut(&mut doc.inner)?;
 
         match resolved {
             SubscriptKey::Slice(slice) => {
-                let mut doc = self.document.bind(py).borrow_mut();
-                self.check_fresh(&doc)?;
-                let item = self.navigate_mut(&mut doc.inner)?;
                 let target = list_ops::as_array_like_mut(item, "slice deletion")?;
                 let si = slice.indices(target.len() as isize)?;
                 let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
@@ -354,17 +354,11 @@ impl ItemProxy {
                 Ok(())
             }
             SubscriptKey::Str(k) => {
-                let mut doc = self.document.bind(py).borrow_mut();
-                self.check_fresh(&doc)?;
-                let item = self.navigate_mut(&mut doc.inner)?;
                 let deleted = item_ops::item_delitem_str(item, &k)?;
                 self.bump_affected(&mut doc, deleted);
                 Ok(())
             }
             SubscriptKey::Int(i) => {
-                let mut doc = self.document.bind(py).borrow_mut();
-                self.check_fresh(&doc)?;
-                let item = self.navigate_mut(&mut doc.inner)?;
                 let deleted = item_ops::item_delitem_int(item, i)?;
                 self.bump_affected(&mut doc, deleted);
                 Ok(())

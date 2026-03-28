@@ -230,10 +230,12 @@ impl Document {
         }
     }
 
-    pub fn popitem(&mut self, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
-        let (key, val) = dict_ops::item_popitem(self.inner.as_item_mut(), py)?;
-        self.bump_at(&[Key::Str(key.clone())]);
-        Ok((key, val))
+    pub fn popitem(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
+        let mut doc = slf.borrow_mut();
+        let (key, removed) = dict_ops::item_popitem(doc.inner.as_item_mut())?;
+        doc.bump_at(&[Key::Str(key.clone())]);
+        let py_val = item_ops::item_to_py(&removed, py)?;
+        Ok((key, py_val))
     }
 
     pub fn __or__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {

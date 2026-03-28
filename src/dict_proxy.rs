@@ -119,8 +119,8 @@ impl DictProxy {
 
         match item_ops::table_pop(item, &key_str) {
             Ok((removed, affected_key)) => {
-                let result = item_ops::item_to_py(&removed.0, py)?;
                 base.bump_child(&mut doc, affected_key);
+                let result = item_ops::item_to_py(&removed.0, py)?;
                 Ok(result)
             }
             Err(e) if default_val.is_some() && e.is_instance_of::<PyKeyError>(py) => {
@@ -135,9 +135,10 @@ impl DictProxy {
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
-        let (key, val) = dict_ops::item_popitem(item, py)?;
+        let (key, removed) = dict_ops::item_popitem(item)?;
         base.bump_child(&mut doc, Key::Str(key.clone()));
-        Ok((key, val))
+        let py_val = item_ops::item_to_py(&removed, py)?;
+        Ok((key, py_val))
     }
 
     pub fn __or__(

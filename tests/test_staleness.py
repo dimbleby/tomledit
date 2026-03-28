@@ -27,6 +27,25 @@ class TestStaleProxyDetection:
         del doc["x"]
         assert proxy.value == 2
 
+    def test_stale_after_pop_on_doc(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            x = 1
+            y = 2
+        """)
+        )
+        proxy = doc["x"]
+        doc.pop("x")
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = proxy.value
+
+    def test_stale_after_popitem_on_doc(self) -> None:
+        doc = Document.parse("only = 1")
+        proxy = doc["only"]
+        doc.popitem()
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = proxy.value
+
     def test_sibling_valid_after_pop_on_doc(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -119,6 +138,33 @@ class TestStaleProxyViaProxy:
         t.clear()
         with pytest.raises(RuntimeError, match="stale"):
             _ = a.value
+
+    def test_stale_after_proxy_pop(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+        )
+        a = doc["t"]["a"]
+        t = doc["t"]
+        t.pop("a")
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = a.value
+
+    def test_stale_after_proxy_popitem(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            only = 1
+        """)
+        )
+        only = doc["t"]["only"]
+        t = doc["t"]
+        t.popitem()
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = only.value
 
     def test_valid_after_additive_proxy_update(self) -> None:
         doc = Document.parse(

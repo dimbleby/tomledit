@@ -10,7 +10,7 @@ use crate::dict_proxy::DictProxy;
 use crate::document::Document;
 use crate::equality;
 use crate::item::Item;
-use crate::item_ops::{self, Key};
+use crate::item_ops::{self, Affected, Key};
 use crate::list_ops;
 use crate::list_proxy::ListProxy;
 use crate::scalar_proxy::ScalarProxy;
@@ -74,19 +74,26 @@ impl ItemProxy {
         doc.bump_at_child(&self.path, &child_key);
     }
 
-    /// Record a structural mutation at this proxy's own path (e.g. clear,
-    /// array insert/remove). The proxy self-updates to stay valid.
+    /// Record a structural mutation at this proxy's own path (e.g. clear).
+    /// The proxy self-updates to stay valid.
     pub(crate) fn bump_self(&mut self, doc: &mut Document) {
         doc.bump_at(&self.path);
         self.revision = doc.revision;
     }
 
-    /// Targeted or broad invalidation depending on whether only a single key
-    /// was affected (`Some`) or indices shifted (`None`).
-    pub(crate) fn bump_affected(&mut self, doc: &mut Document, key: Option<Key>) {
-        match key {
-            Some(k) => self.bump_child(doc, k),
-            None => self.bump_self(doc),
+    /// Record that an array at this proxy's path shifted indices from
+    /// `from_index` onward. The proxy (the array itself) stays valid.
+    pub(crate) fn bump_shift(&mut self, doc: &mut Document, from_index: usize) {
+        doc.bump_shift(&self.path, from_index);
+        self.revision = doc.revision;
+    }
+
+    /// Invalidation dispatch based on the `Affected` descriptor returned
+    /// by list mutation helpers.
+    pub(crate) fn bump_affected(&mut self, doc: &mut Document, affected: Affected) {
+        match affected {
+            Affected::Child(k) => self.bump_child(doc, k),
+            Affected::Shift(from) => self.bump_shift(doc, from),
         }
     }
 
@@ -271,7 +278,7 @@ impl ItemProxy {
             let target = list_ops::as_array_like_mut(item, "slice assignment")?;
             let si = slice.indices(target.len() as isize)?;
             list_ops::item_setitem_slice(target, si.start, si.stop, si.step, values)?;
-            self.bump_self(&mut doc);
+            self.bump_shift(&mut doc, si.start as usize);
             return Ok(());
         }
 
@@ -299,8 +306,10 @@ impl ItemProxy {
             let target = list_ops::as_array_like_mut(item, "slice deletion")?;
             let si = slice.indices(target.len() as isize)?;
             let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
-            list_ops::item_delitem_slice(target, &indices)?;
-            self.bump_self(&mut doc);
+            if let Some(&min_idx) = indices.iter().min() {
+                list_ops::item_delitem_slice(target, &indices)?;
+                self.bump_shift(&mut doc, min_idx);
+            }
             return Ok(());
         }
 

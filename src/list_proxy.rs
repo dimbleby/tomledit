@@ -80,9 +80,9 @@ impl ListProxy {
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
         let target = list_ops::as_array_like_mut(item, "insert()")?;
-        let at_end = list_ops::item_insert(target, index, value)?;
-        if !at_end {
-            base.bump_self(&mut doc);
+        let affected = list_ops::item_insert(target, index, value)?;
+        if let Some(a) = affected {
+            base.bump_affected(&mut doc, a);
         }
         Ok(())
     }

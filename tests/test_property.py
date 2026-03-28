@@ -110,8 +110,7 @@ class SetComment:
 
     def apply(self, doc: Document) -> None:
         if self.key in doc:
-            with contextlib.suppress(TypeError):
-                doc[self.key].comment = self.comment
+            doc[self.key].comment = self.comment
 
 
 class SetInlineComment:
@@ -265,90 +264,57 @@ mutations = st.one_of(
 # ---------------------------------------------------------------------------
 
 
+def _collect_comments(doc: Document) -> dict[str, tuple[str | None, str | None]]:
+    """Snapshot block + inline comments for every top-level key.
+
+    Block comments (`.comment`) work on all item types including AoT.
+    Inline comments are not supported on AoT, so we collect None for those.
+    """
+    result: dict[str, tuple[str | None, str | None]] = {}
+    for key in doc:
+        item = doc[key]
+        block = item.comment
+        try:
+            inline = item.inline_comment
+        except TypeError:
+            inline = None
+        result[str(key)] = (block, inline)
+    return result
+
+
 @pytest.mark.slow
 class TestRoundtripProperty:
-    """No matter what mutations we apply, the result is always valid TOML."""
-
-    @given(ops=st.lists(mutations, min_size=1, max_size=10))
-    @settings(
-        max_examples=500,
-        suppress_health_check=[HealthCheck.too_slow],
-    )
-    def test_mutations_produce_valid_toml(
-        self,
-        ops: list[Mutation],
-    ) -> None:
-        doc = Document()
-        for op in ops:
-            op.apply(doc)
-        toml_text = doc.as_toml()
-        # The critical property: serialization must be parseable TOML.
-        Document.parse(toml_text)
-
-    @given(ops=st.lists(mutations, min_size=1, max_size=10))
-    @settings(
-        max_examples=500,
-        suppress_health_check=[HealthCheck.too_slow],
-    )
-    def test_values_survive_roundtrip(
-        self,
-        ops: list[Mutation],
-    ) -> None:
-        doc = Document()
-        for op in ops:
-            op.apply(doc)
-        toml_text = doc.as_toml()
-        reparsed = Document.parse(toml_text)
-        assert reparsed.value == doc.value
+    """No matter what mutations we apply, the result is always valid TOML
+    whose values and comments survive a parse round-trip."""
 
     @given(
-        initial=st.dictionaries(toml_keys, toml_scalars, min_size=1, max_size=6),
-        ops=st.lists(mutations, min_size=1, max_size=8),
-    )
-    @settings(
-        max_examples=300,
-        suppress_health_check=[HealthCheck.too_slow],
-    )
-    def test_mutations_on_populated_doc(
-        self,
-        initial: dict[str, object],
-        ops: list[Mutation],
-    ) -> None:
-        """Start from a non-empty document, mutate, roundtrip."""
-        doc = Document(initial)
-        for op in ops:
-            op.apply(doc)
-        toml_text = doc.as_toml()
-        reparsed = Document.parse(toml_text)
-        assert reparsed.value == doc.value
-
-    @given(
-        initial=st.dictionaries(toml_keys, toml_scalars, min_size=1, max_size=4),
+        initial=st.dictionaries(toml_keys, toml_scalars, max_size=6),
         comments=st.lists(
             st.tuples(toml_keys, inline_comments, inline_comments),
             max_size=4,
         ),
-        ops=st.lists(mutations, min_size=1, max_size=5),
+        ops=st.lists(mutations, min_size=1, max_size=10),
     )
     @settings(
-        max_examples=300,
+        max_examples=1000,
         suppress_health_check=[HealthCheck.too_slow],
     )
-    def test_commented_doc_survives_mutations(
+    def test_roundtrip(
         self,
         initial: dict[str, object],
         comments: list[tuple[str, str, str]],
         ops: list[Mutation],
     ) -> None:
-        """Start with a commented document, mutate, verify valid TOML."""
         doc = Document(initial)
-        # Add comments to existing keys
         for key, block, inline in comments:
             if key in doc:
                 doc[key].comment = block
                 doc[key].inline_comment = inline
         for op in ops:
             op.apply(doc)
+
         toml_text = doc.as_toml()
+        comments_before = _collect_comments(doc)
         reparsed = Document.parse(toml_text)
         assert reparsed.value == doc.value
+        assert _collect_comments(reparsed) == comments_before

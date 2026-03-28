@@ -70,12 +70,24 @@ pub(crate) fn as_array_like<'a>(item: &'a ItemRs, op: &str) -> PyResult<ArrayLik
 // Private helpers
 // ---------------------------------------------------------------------------
 
+/// Extract just the `\n{indent}` portion of a multiline prefix string,
+/// stripping any block comments that precede the indentation.
+/// Returns `None` when the prefix contains no newline (single-line array).
+fn indent_only(raw: &str) -> Option<String> {
+    let (_, indent) = raw.rsplit_once('\n')?;
+    Some(format!("\n{indent}"))
+}
+
 /// Detect whether an array uses multiline formatting and return the element
-/// decor prefix if so (e.g. `"\n    "`).  Returns `None` for single-line arrays.
+/// indentation prefix if so (e.g. `"\n    "`).  Returns `None` for single-line
+/// arrays.
+///
+/// Only the indentation is returned — any block comments on the first element
+/// are excluded so that newly inserted/appended values don't inherit them.
 fn multiline_prefix(arr: &toml_edit::Array) -> Option<String> {
     let first = arr.get(0)?;
     let raw = first.decor().prefix()?.as_str()?;
-    raw.contains('\n').then(|| raw.to_owned())
+    indent_only(raw)
 }
 
 /// Apply multiline decor to a newly created value, matching the array's style.
@@ -117,11 +129,16 @@ fn apply_last_suffix(arr: &mut toml_edit::Array, suffix: Option<String>) {
 
 /// Save the first element's leading prefix (whitespace after `[`).
 /// Returns `None` if the array is empty or the prefix is empty.
+///
+/// For multiline arrays, only the structural indentation (`\n` + indent)
+/// is saved — block comments that belong to the first element are excluded
+/// so they stay attached to that element after an insertion at position 0.
 fn save_first_prefix(arr: &toml_edit::Array) -> Option<String> {
-    arr.get(0)
+    let raw = arr
+        .get(0)
         .and_then(|v| value_prefix(v))
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
+        .filter(|s| !s.is_empty())?;
+    indent_only(raw).or_else(|| Some(raw.to_owned()))
 }
 
 /// Apply a saved leading prefix to the current first element.

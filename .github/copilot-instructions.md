@@ -12,29 +12,25 @@ others that share the same document.
 
 ## Build, Test, and Lint
 
+A `Makefile` provides the standard entry points:
+
 ```sh
-# Build and run tests (always use --reinstall-package after Rust changes)
-uv run --reinstall-package tomledit pytest
-
-# Run a single test
-uv run --reinstall-package tomledit pytest tests/test_comments.py::TestComment::test_set_comment -v
-
-# Rust lint, format, and unit tests
-cargo fmt
-cargo clippy --all-targets -- -D warnings
-cargo test
-
-# Python lint and format
-ruff check .
-ruff format .
-
-# Type checking
-uv run mypy
+make build          # Build and install the package (no-op if up to date)
+make test           # Rust unit tests + Python tests (builds first)
+make lint           # All linters: fmt, clippy, ruff, mypy, ty
+make coverage       # Instrumented build + llvm-cov report
+make clean          # Remove build artifacts and caches
 ```
 
-**After any Rust change you must `--reinstall-package tomledit`** — Python
-tests import a compiled `.so` and will silently run against stale code
-without it.  When only Python files changed, plain `uv run pytest` suffices.
+Individual targets: `fmt`, `clippy`, `rust-test`, `pytest`, `ruff-check`,
+`ruff-format`, `mypy`, `ty`, `coverage-build`.
+
+To run a single test after building:
+
+```sh
+make build
+pytest tests/test_comments.py::TestComment::test_set_comment -v
+```
 
 ### CI
 

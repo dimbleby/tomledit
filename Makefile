@@ -1,0 +1,63 @@
+.PHONY: help lint test fmt clippy rust-test pytest ruff-check ruff-format mypy ty coverage-build coverage clean
+
+help:
+	@echo "make build          Build and install (no-op if up to date)"
+	@echo "make test           Rust + Python tests (builds first)"
+	@echo "make lint           All linters: fmt, clippy, ruff, mypy, ty"
+	@echo "make coverage       Instrumented build + coverage report"
+	@echo "make clean          Remove build artifacts and caches"
+
+lint: fmt clippy ruff-check ruff-format mypy ty
+
+test: rust-test pytest
+
+fmt:
+	cargo fmt --check
+
+clippy:
+	cargo clippy --all-targets -- -D warnings
+
+rust-test:
+	LD_LIBRARY_PATH="$$(python3 -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" cargo test
+
+RUST_SOURCES := $(shell find src -name '*.rs')
+
+build: .build-stamp
+.build-stamp: $(RUST_SOURCES) pyproject.toml Cargo.toml Cargo.lock
+	uv sync --reinstall-package tomledit
+	@rm -f .coverage-stamp
+	@touch $@
+
+pytest: build
+	pytest
+
+ruff-check:
+	ruff check .
+
+ruff-format:
+	ruff format --check .
+
+mypy:
+	mypy
+
+ty:
+	ty check
+
+coverage-build: .coverage-stamp
+.coverage-stamp: $(RUST_SOURCES) pyproject.toml Cargo.toml Cargo.lock
+	RUSTFLAGS="-Cinstrument-coverage" uv run --reinstall-package tomledit true
+	@rm -f .build-stamp
+	@touch $@
+
+coverage: coverage-build
+	rm -f target/tomledit-*.profraw
+	LLVM_PROFILE_FILE="target/tomledit-%p-%m.profraw" pytest -q
+	LLVM_TOOLS_PATH="$$(rustc --print sysroot)/lib/rustlib/$$(rustc -vV | awk '/^host:/ {print $$2}')/bin" && \
+	"$$LLVM_TOOLS_PATH/llvm-profdata" merge -sparse target/tomledit-*.profraw -o target/tomledit.profdata && \
+	LIB_PATH=$$(find target -name 'libtomledit.so' -path '*/release/*' | head -1) && \
+	"$$LLVM_TOOLS_PATH/llvm-cov" report "$$LIB_PATH" --instr-profile=target/tomledit.profdata --sources src/
+
+clean:
+	cargo clean
+	rm -f .build-stamp .coverage-stamp
+	rm -rf .mypy_cache .pytest_cache .ruff_cache

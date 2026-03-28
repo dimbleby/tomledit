@@ -1,2 +1,4 @@
+.build-stamp
+.coverage-stamp
 /target
 __pycache__/

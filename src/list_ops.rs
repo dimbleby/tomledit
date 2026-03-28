@@ -91,6 +91,50 @@ fn apply_multiline_decor(arr: &toml_edit::Array, v: &mut ValueRs) {
     }
 }
 
+/// Read a value's prefix string.
+fn value_prefix(v: &ValueRs) -> Option<&str> {
+    v.decor().prefix().and_then(|r| r.as_str())
+}
+
+/// Read a value's suffix string.
+fn value_suffix(v: &ValueRs) -> Option<&str> {
+    v.decor().suffix().and_then(|r| r.as_str())
+}
+
+/// Strip the last element's trailing suffix (whitespace before `]`) and return
+/// it.  Returns `None` if the array is empty or the suffix is empty.
+fn strip_last_suffix(arr: &mut toml_edit::Array) -> Option<String> {
+    let last = arr.get_mut(arr.len().checked_sub(1)?)?;
+    let suffix = value_suffix(last).filter(|s| !s.is_empty())?.to_owned();
+    last.decor_mut().set_suffix("");
+    Some(suffix)
+}
+
+/// Apply a saved trailing suffix to the current last element.
+fn apply_last_suffix(arr: &mut toml_edit::Array, suffix: Option<String>) {
+    if let Some(s) = suffix
+        && let Some(last) = arr.get_mut(arr.len() - 1)
+    {
+        last.decor_mut().set_suffix(&s);
+    }
+}
+
+/// After inserting at index 0, copy the old first element's prefix (now at
+/// index 1) to the new first element.  The old prefix stays — it naturally
+/// becomes inter-element spacing.
+fn copy_first_prefix(arr: &mut toml_edit::Array) {
+    let prefix = arr
+        .get(1)
+        .and_then(|v| value_prefix(v))
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+    if let Some(p) = prefix
+        && let Some(first) = arr.get_mut(0)
+    {
+        first.decor_mut().set_prefix(&p);
+    }
+}
+
 /// After inserting a new table at position `pos`, ensure the affected element
 /// has the correct blank-line spacing to match its neighbours.
 ///
@@ -409,15 +453,12 @@ pub(crate) fn save_removal_decor(
     let at_least_two = arr.len() >= 2;
     RemovalDecor {
         first_prefix: (removing_first && at_least_two).then(|| {
-            arr.get(0)
-                .and_then(|v| v.decor().prefix().and_then(|r| r.as_str()))
+            value_prefix(arr.get(0).expect("at_least_two"))
                 .unwrap_or_default()
                 .to_owned()
         }),
         last_suffix: (removing_last && at_least_two).then(|| {
-            let last = arr.len() - 1;
-            arr.get(last)
-                .and_then(|v| v.decor().suffix().and_then(|r| r.as_str()))
+            value_suffix(arr.get(arr.len() - 1).expect("at_least_two"))
                 .unwrap_or_default()
                 .to_owned()
         }),
@@ -434,12 +475,7 @@ pub(crate) fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDec
     if let Some(ref old_first_prefix) = decor.first_prefix
         && let Some(new_first) = arr.get_mut(0)
     {
-        let cur = new_first
-            .decor()
-            .prefix()
-            .and_then(|r| r.as_str())
-            .unwrap_or_default()
-            .to_owned();
+        let cur = value_prefix(new_first).unwrap_or_default().to_owned();
         let fixed = if let Some((_inline, rest)) = cur.split_once('\n') {
             // Multiline: drop the removed element's inline-comment line,
             // keep block comments + indentation that belong to this element.
@@ -472,6 +508,7 @@ pub(crate) fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDec
 pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()> {
     match target {
         ArrayLikeMut::Array(arr) => {
+            let saved_suffix = strip_last_suffix(arr);
             let mut ic = comments::save_inline_comments(arr);
             let mut v = into_value(value)?;
             let inline = comments::take_inline_comment(&mut v);
@@ -479,6 +516,7 @@ pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()>
             arr.push(v);
             ic.push(inline);
             comments::restore_inline_comments(arr, &ic);
+            apply_last_suffix(arr, saved_suffix);
             Ok(())
         }
         ArrayLikeMut::Aot(aot) => {
@@ -501,6 +539,8 @@ pub(crate) fn item_insert(
         ArrayLikeMut::Array(arr) => {
             let resolved = clamp_index(index, arr.len());
             let at_end = resolved == arr.len();
+            let at_start = resolved == 0 && !arr.is_empty();
+            let saved_suffix = if at_end { strip_last_suffix(arr) } else { None };
             let mut ic = comments::save_inline_comments(arr);
             let mut v = into_value(value)?;
             let inline = comments::take_inline_comment(&mut v);
@@ -508,6 +548,10 @@ pub(crate) fn item_insert(
             arr.insert(resolved, v);
             ic.insert(resolved, inline);
             comments::restore_inline_comments(arr, &ic);
+            apply_last_suffix(arr, saved_suffix);
+            if at_start {
+                copy_first_prefix(arr);
+            }
             Ok((!at_end).then_some(Affected::Range {
                 from: resolved,
                 to: arr.len(),
@@ -561,6 +605,7 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
             // Validate all values up front.
             let converted: Vec<ValueRs> =
                 items.into_iter().map(into_value).collect::<PyResult<_>>()?;
+            let saved_suffix = strip_last_suffix(arr);
             let mut ic = comments::save_inline_comments(arr);
             for mut v in converted {
                 let inline = comments::take_inline_comment(&mut v);
@@ -569,6 +614,7 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
                 ic.push(inline);
             }
             comments::restore_inline_comments(arr, &ic);
+            apply_last_suffix(arr, saved_suffix);
             Ok(())
         }
         ArrayLikeMut::Aot(aot) => {

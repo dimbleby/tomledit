@@ -1048,6 +1048,35 @@ arr = [
 """
 
 
+class TestBoundarySpacePreservation:
+    """Inserting at boundaries should preserve the space after `[` and before `]`."""
+
+    def test_append_transfers_trailing_space(self) -> None:
+        doc = Document.parse("arr = [1, 2 ]\n")
+        doc["arr"].append(3)
+        assert doc.as_toml() == "arr = [1, 2, 3 ]\n"
+
+    def test_extend_transfers_trailing_space(self) -> None:
+        doc = Document.parse("arr = [1, 2 ]\n")
+        doc["arr"].extend([3, 4])
+        assert doc.as_toml() == "arr = [1, 2, 3, 4 ]\n"
+
+    def test_insert_at_end_transfers_trailing_space(self) -> None:
+        doc = Document.parse("arr = [1, 2 ]\n")
+        doc["arr"].insert(100, 3)
+        assert doc.as_toml() == "arr = [1, 2, 3 ]\n"
+
+    def test_insert_at_start_preserves_leading_space(self) -> None:
+        doc = Document.parse("arr = [ 1, 2]\n")
+        doc["arr"].insert(0, 0)
+        assert doc.as_toml() == "arr = [ 0, 1, 2]\n"
+
+    def test_insert_in_middle_keeps_trailing_space(self) -> None:
+        doc = Document.parse("arr = [1, 2 ]\n")
+        doc["arr"].insert(1, 3)
+        assert doc.as_toml() == "arr = [1, 3, 2 ]\n"
+
+
 class TestMultilineFormatPreservation:
     def test_insert_at_start_preserves_multiline(self) -> None:
         doc = Document.parse(MULTILINE_ARRAY)

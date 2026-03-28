@@ -35,6 +35,19 @@ fn other_to_string_set(other: &Bound<'_, PyAny>) -> PyResult<HashSet<String>> {
     Ok(set)
 }
 
+/// Convert any Python iterable to a `set`.  If `other` is already a set,
+/// this is a no-op; otherwise it calls `set(other)`.
+fn iterable_to_pyset<'py>(
+    py: Python<'py>,
+    other: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PySet>> {
+    if let Ok(s) = other.cast::<PySet>() {
+        return Ok(s.clone());
+    }
+    let set_type = py.get_type::<PySet>();
+    set_type.call1((other,))?.cast_into().map_err(Into::into)
+}
+
 /// Build a Python set from our string keys.
 fn keys_to_pyset<'py>(
     doc: &DocumentRs,
@@ -162,7 +175,8 @@ impl KeysView {
         let doc = self.document.bind(py).borrow();
         doc.check_fresh(&self.path, self.revision)?;
         let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
-        ours.call_method1("__or__", (other,))
+        let theirs = iterable_to_pyset(py, other)?;
+        ours.call_method1("__or__", (theirs,))
     }
 
     fn __sub__<'py>(
@@ -186,7 +200,8 @@ impl KeysView {
         let doc = self.document.bind(py).borrow();
         doc.check_fresh(&self.path, self.revision)?;
         let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
-        ours.call_method1("__xor__", (other,))
+        let theirs = iterable_to_pyset(py, other)?;
+        ours.call_method1("__xor__", (theirs,))
     }
 
     fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {

@@ -688,6 +688,16 @@ class TestViews:
         )
         assert doc.keys() ^ {"b", "c"} == {"a", "c"}
 
+    def test_keys_view_union_with_list(self) -> None:
+        """dict_keys.__or__ accepts any iterable, not just sets."""
+        doc = Document.parse("a = 1\n")
+        assert doc.keys() | ["b", "c"] == {"a", "b", "c"}
+
+    def test_keys_view_xor_with_list(self) -> None:
+        """dict_keys.__xor__ accepts any iterable, not just sets."""
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.keys() ^ ["b", "c"] == {"a", "c"}
+
     def test_keys_view_eq(self) -> None:
         doc = Document.parse(
             toml_literal("""

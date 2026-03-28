@@ -377,6 +377,19 @@ class TestDictProxyPopDoubleBorrow:
         assert result == 80
         assert "port" not in doc["server"]
 
+    def test_document_delitem_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "b"\na = 1\nb = 2\n')
+        key = doc["key"]
+        del doc[key]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        assert "b" not in doc
+
+    def test_document_pop_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "b"\na = 1\nb = 2\n')
+        key = doc["key"]
+        result = doc.pop(key)  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
+        assert result == 2
+        assert "b" not in doc
+
 
 class TestPopNonStringKey:
     """pop() with non-string keys should behave like dict, not raise TypeError."""

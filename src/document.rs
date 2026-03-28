@@ -178,20 +178,21 @@ impl Document {
         }
     }
 
-    pub fn __delitem__(&mut self, key: &Bound<'_, PyAny>) -> PyResult<()> {
-        let Ok(key) = key.extract::<&str>() else {
+    pub fn __delitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<()> {
+        let Some(key) = item_ops::extract_key_str(key) else {
             return Err(PyKeyError::new_err(key.repr()?.to_string()));
         };
-        if self.inner.remove(key).is_none() {
-            return Err(PyKeyError::new_err(key.to_owned()));
+        let mut doc = slf.borrow_mut();
+        if doc.inner.remove(&key).is_none() {
+            return Err(PyKeyError::new_err(key));
         }
-        self.bump_at(&[Key::Str(key.to_owned())]);
+        doc.bump_at(&[Key::Str(key)]);
         Ok(())
     }
 
     #[pyo3(signature = (key, /, *default))]
     pub fn pop(
-        &mut self,
+        slf: &Bound<'_, Self>,
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         default: &Bound<'_, PyTuple>,
@@ -209,21 +210,22 @@ impl Document {
             Some(default.get_item(0)?.unbind())
         };
 
-        let Ok(key) = key.extract::<&str>() else {
+        let Some(key) = item_ops::extract_key_str(key) else {
             return match default {
                 Some(d) => Ok(d),
                 None => Err(PyKeyError::new_err(key.repr()?.to_string())),
             };
         };
 
-        match self.inner.remove(key) {
+        let mut doc = slf.borrow_mut();
+        match doc.inner.remove(&key) {
             Some(item) => {
-                self.bump_at(&[Key::Str(key.to_owned())]);
+                doc.bump_at(&[Key::Str(key)]);
                 item_ops::item_to_py(&item, py)
             }
             None => match default {
                 Some(d) => Ok(d),
-                None => Err(PyKeyError::new_err(key.to_owned())),
+                None => Err(PyKeyError::new_err(key)),
             },
         }
     }

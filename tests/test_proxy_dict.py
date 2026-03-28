@@ -1229,6 +1229,16 @@ class TestMergeOperators:
         doc["a"] |= doc["b"]
         assert doc["a"]["y"] == 2
 
+    def test_document_ior_dict_with_proxy_values(self) -> None:
+        doc = Document.parse("x = 1\ny = 2\n")
+        doc |= {"z": doc["x"]}
+        assert doc["z"] == 1
+
+    def test_dict_item_ior_dict_with_proxy_values(self) -> None:
+        doc = Document.parse("[s]\nx = 1\ny = 2\n")
+        doc["s"] |= {"z": doc["s"]["x"]}
+        assert doc["s"]["z"] == 1
+
 
 class TestViewContainsProxy:
     """ValuesView/ItemsView.__contains__ must accept proxy values.

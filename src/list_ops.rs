@@ -75,11 +75,7 @@ pub(crate) fn as_array_like<'a>(item: &'a ItemRs, op: &str) -> PyResult<ArrayLik
 fn multiline_prefix(arr: &toml_edit::Array) -> Option<String> {
     let first = arr.get(0)?;
     let raw = first.decor().prefix()?.as_str()?;
-    if raw.contains('\n') {
-        Some(raw.to_owned())
-    } else {
-        None
-    }
+    raw.contains('\n').then(|| raw.to_owned())
 }
 
 /// Apply multiline decor to a newly created value, matching the array's style.
@@ -119,15 +115,17 @@ fn apply_last_suffix(arr: &mut toml_edit::Array, suffix: Option<String>) {
     }
 }
 
-/// After inserting at index 0, copy the old first element's prefix (now at
-/// index 1) to the new first element.  The old prefix stays — it naturally
-/// becomes inter-element spacing.
-fn copy_first_prefix(arr: &mut toml_edit::Array) {
-    let prefix = arr
-        .get(1)
+/// Save the first element's leading prefix (whitespace after `[`).
+/// Returns `None` if the array is empty or the prefix is empty.
+fn save_first_prefix(arr: &toml_edit::Array) -> Option<String> {
+    arr.get(0)
         .and_then(|v| value_prefix(v))
         .filter(|s| !s.is_empty())
-        .map(str::to_owned);
+        .map(str::to_owned)
+}
+
+/// Apply a saved leading prefix to the current first element.
+fn apply_first_prefix(arr: &mut toml_edit::Array, prefix: Option<String>) {
     if let Some(p) = prefix
         && let Some(first) = arr.get_mut(0)
     {
@@ -335,11 +333,17 @@ fn array_setitem_slice(
         let mut ic = comments::save_inline_comments(arr);
         let removes_first = start_idx == 0 && stop_idx > 0;
         let removes_last = stop_idx == arr.len() && stop_idx > start_idx;
-        let decor = save_removal_decor(
-            arr,
-            removes_first && converted.is_empty(),
-            removes_last && converted.is_empty(),
-        );
+        let inserting = !converted.is_empty();
+        let decor =
+            save_removal_decor(arr, removes_first && !inserting, removes_last && !inserting);
+
+        // Save boundary spacing (space after `[` / before `]`) before mutating.
+        let first_prefix = (start_idx == 0 && inserting)
+            .then(|| save_first_prefix(arr))
+            .flatten();
+        let last_suffix = (stop_idx == arr.len() && inserting)
+            .then(|| strip_last_suffix(arr))
+            .flatten();
 
         // Remove old elements from back to front.
         for i in (start_idx..stop_idx).rev() {
@@ -358,6 +362,11 @@ fn array_setitem_slice(
             }
             ic.insert(idx, inline);
         }
+
+        // Restore boundary spacing.
+        apply_first_prefix(arr, first_prefix);
+        apply_last_suffix(arr, last_suffix);
+
         comments::restore_inline_comments(arr, &ic);
         apply_removal_decor(arr, &decor);
         Ok(())
@@ -540,7 +549,8 @@ pub(crate) fn item_insert(
             let resolved = clamp_index(index, arr.len());
             let at_end = resolved == arr.len();
             let at_start = resolved == 0 && !arr.is_empty();
-            let saved_suffix = if at_end { strip_last_suffix(arr) } else { None };
+            let saved_suffix = at_end.then(|| strip_last_suffix(arr)).flatten();
+            let saved_prefix = at_start.then(|| save_first_prefix(arr)).flatten();
             let mut ic = comments::save_inline_comments(arr);
             let mut v = into_value(value)?;
             let inline = comments::take_inline_comment(&mut v);
@@ -549,9 +559,7 @@ pub(crate) fn item_insert(
             ic.insert(resolved, inline);
             comments::restore_inline_comments(arr, &ic);
             apply_last_suffix(arr, saved_suffix);
-            if at_start {
-                copy_first_prefix(arr);
-            }
+            apply_first_prefix(arr, saved_prefix);
             Ok((!at_end).then_some(Affected::Range {
                 from: resolved,
                 to: arr.len(),

@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyAttributeError, PyValueError};
+use pyo3::exceptions::PyAttributeError;
 use pyo3::prelude::*;
 
 use crate::item_proxy::{ItemProxy, resolve_proxy};
@@ -39,15 +39,7 @@ impl ScalarProxy {
 impl ScalarProxy {
     #[staticmethod]
     fn parse(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
-        let result = ItemProxy::parse(py, text)?;
-        if result.bind(py).is_instance_of::<ScalarProxy>() {
-            Ok(result)
-        } else {
-            Err(PyValueError::new_err(format!(
-                "ScalarItem.parse() requires a scalar value, got {}",
-                result.bind(py).get_type().qualname()?,
-            )))
-        }
+        crate::item_proxy::parse_as::<ScalarProxy>(py, text, "ScalarItem", "scalar")
     }
 
     // ---- attribute forwarding ----

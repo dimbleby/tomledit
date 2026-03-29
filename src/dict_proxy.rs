@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyKeyError, PyValueError};
+use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use toml_edit::DocumentMut as DocumentRs;
@@ -21,15 +21,7 @@ pub(crate) struct DictProxy;
 impl DictProxy {
     #[staticmethod]
     fn parse(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
-        let result = ItemProxy::parse(py, text)?;
-        if result.bind(py).is_instance_of::<DictProxy>() {
-            Ok(result)
-        } else {
-            Err(PyValueError::new_err(format!(
-                "DictItem.parse() requires a table value, got {}",
-                result.bind(py).get_type().qualname()?,
-            )))
-        }
+        crate::item_proxy::parse_as::<DictProxy>(py, text, "DictItem", "table")
     }
 
     pub fn keys(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<KeysView> {

@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use toml_edit::DocumentMut as DocumentRs;
@@ -93,17 +93,7 @@ impl DictProxy {
         key: &Bound<'_, PyAny>,
         default: &Bound<'_, PyTuple>,
     ) -> PyResult<Py<PyAny>> {
-        if default.len() > 1 {
-            return Err(PyTypeError::new_err(format!(
-                "pop expected at most 2 arguments, got {}",
-                1 + default.len()
-            )));
-        }
-        let default_val = if default.is_empty() {
-            None
-        } else {
-            Some(default.get_item(0)?.unbind())
-        };
+        let default_val = dict_ops::extract_pop_default(default)?;
 
         let Some(key_str) = item_ops::extract_key_str(key) else {
             return match default_val {

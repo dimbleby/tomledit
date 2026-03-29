@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyTuple};
 use toml_edit::{Decor, Item as ItemRs, TableLike, Value as ValueRs};
 
 use crate::comments;
@@ -9,6 +9,25 @@ use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key, unsupported_op};
 use crate::item_proxy::ItemProxy;
+
+// ---------------------------------------------------------------------------
+// Pop helpers
+// ---------------------------------------------------------------------------
+
+/// Validate and extract the optional default from `pop(key, /, *default)`.
+pub(crate) fn extract_pop_default(default: &Bound<'_, PyTuple>) -> PyResult<Option<Py<PyAny>>> {
+    if default.len() > 1 {
+        return Err(PyTypeError::new_err(format!(
+            "pop expected at most 2 arguments, got {}",
+            1 + default.len()
+        )));
+    }
+    if default.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(default.get_item(0)?.unbind()))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Inline-table comment-preserving helpers

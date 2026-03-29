@@ -201,18 +201,7 @@ impl Document {
         key: &Bound<'_, PyAny>,
         default: &Bound<'_, PyTuple>,
     ) -> PyResult<Py<PyAny>> {
-        if default.len() > 1 {
-            return Err(PyTypeError::new_err(format!(
-                "pop expected at most 2 arguments, got {}",
-                1 + default.len()
-            )));
-        }
-
-        let default = if default.is_empty() {
-            None
-        } else {
-            Some(default.get_item(0)?.unbind())
-        };
+        let default = dict_ops::extract_pop_default(default)?;
 
         let Some(key) = item_ops::extract_key_str(key) else {
             return match default {

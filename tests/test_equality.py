@@ -252,6 +252,22 @@ class TestProxyStructuralEquality:
         )
         assert doc["a"] != doc["b"]
 
+    def test_list_index_with_scalar_proxy(self) -> None:
+        """list.index(proxy) exercises value_eq's proxy fast-path."""
+        doc = Document.parse("arr = [1, 2, 3]\nx = 2\n")
+        assert doc["arr"].index(doc["x"]) == 1
+
+    def test_list_count_with_table_proxy(self) -> None:
+        """list.count(proxy) on AOT exercises table_eq's proxy fast-path."""
+        doc = Document.parse("[[items]]\nx = 1\n[[items]]\nx = 2\n")
+        ref = Document.parse("[t]\nx = 1\n")
+        assert doc["items"].count(ref["t"]) == 1
+
+    def test_list_count_proxy_type_mismatch(self) -> None:
+        """value_eq with a table proxy (or vice versa) returns false."""
+        doc = Document.parse("arr = [1, 2]\n[t]\nx = 1\n")
+        assert doc["arr"].count(doc["t"]) == 0
+
 
 # ---------------------------------------------------------------------------
 # Equality edge cases

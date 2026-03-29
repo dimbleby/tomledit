@@ -108,20 +108,7 @@ impl ItemProxy {
         self.check_fresh(&doc)?;
         let item = self.navigate(&doc.inner)?;
         let mut cloned = item.clone();
-        let element_comment = match self.path.last() {
-            Some(Key::Int(idx)) if self.path.len() >= 2 => {
-                let parent = self.navigate_parent(&doc.inner)?;
-                comments::get_array_inline_comment(parent, *idx)
-            }
-            Some(Key::Str(key)) if self.path.len() >= 2 => {
-                let parent = self.navigate_parent(&doc.inner)?;
-                parent
-                    .as_inline_table()
-                    .and_then(|it| comments::get_inline_table_inline_comment(it, key))
-            }
-            _ => None,
-        };
-        if let Some(comment) = element_comment
+        if let Some(comment) = self.element_inline_comment(&doc.inner)?
             && let Some(v) = cloned.as_value_mut()
         {
             v.decor_mut().set_suffix(format!(" {comment}"));
@@ -180,6 +167,26 @@ impl ItemProxy {
 
     fn navigate_parent_mut<'a>(&self, doc: &'a mut DocumentRs) -> PyResult<&'a mut ItemRs> {
         item_ops::navigate_path_mut(doc, &self.path[..self.path.len() - 1])
+    }
+
+    /// Get the inline comment for an element whose comment lives externally
+    /// (array elements store it in the next element's prefix; inline-table
+    /// entries store it in the next key's prefix or the trailing string).
+    ///
+    /// Returns `None` if this is not an element path or the parent is not
+    /// an array/inline-table.
+    fn element_inline_comment(&self, doc: &DocumentRs) -> PyResult<Option<String>> {
+        let last = match self.path.last() {
+            Some(k) if self.path.len() >= 2 => k,
+            _ => return Ok(None),
+        };
+        let parent = self.navigate_parent(doc)?;
+        match last {
+            Key::Int(idx) => Ok(comments::get_array_inline_comment(parent, *idx)),
+            Key::Str(key) => Ok(parent
+                .as_inline_table()
+                .and_then(|it| comments::get_inline_table_inline_comment(it, key))),
+        }
     }
 }
 
@@ -505,18 +512,8 @@ impl ItemProxy {
     pub fn inline_comment(&self, py: Python<'_>) -> PyResult<Option<String>> {
         let doc = self.document.bind(py).borrow();
         self.check_fresh(&doc)?;
-        if let Some(Key::Int(idx)) = self.path.last() {
-            let parent = self.navigate_parent(&doc.inner)?;
-            return Ok(comments::get_array_inline_comment(parent, *idx));
-        }
-        // Inline-table values: comment lives in next key's prefix / trailing.
-        if let Some(Key::Str(key)) = self.path.last()
-            && self.path.len() >= 2
-        {
-            let parent = self.navigate_parent(&doc.inner)?;
-            if let Some(it) = parent.as_inline_table() {
-                return Ok(comments::get_inline_table_inline_comment(it, key));
-            }
+        if let Some(comment) = self.element_inline_comment(&doc.inner)? {
+            return Ok(Some(comment));
         }
         let item = self.navigate(&doc.inner)?;
         Ok(comments::get_inline_comment(item))

@@ -78,10 +78,18 @@ block_comments = st.lists(
     max_size=3,
 ).map("\n".join)
 
-# Rich initial values: include nested tables and AoTs alongside scalars
+# Mixed inner values: scalars, lists-of-scalars, and dicts-of-scalars so that
+# dict/list containers can hold heterogeneous children.
+_inner_values = st.one_of(
+    toml_scalars,
+    st.lists(toml_scalars, min_size=1, max_size=3),
+    st.dictionaries(toml_keys, toml_scalars, min_size=1, max_size=2),
+)
+
+# Rich initial values: include nested tables, dicts-with-lists, and AoTs
 initial_values: st.SearchStrategy[object] = st.one_of(
     toml_scalars,
-    st.dictionaries(toml_keys, toml_scalars, min_size=1, max_size=3),
+    st.dictionaries(toml_keys, _inner_values, min_size=1, max_size=3),
     st.lists(toml_scalars, min_size=1, max_size=4),
     # AoT: list of dicts
     st.lists(
@@ -94,7 +102,7 @@ initial_values: st.SearchStrategy[object] = st.one_of(
 # Type-change values: all structural types including AoTs
 type_change_values = st.one_of(
     toml_scalars,
-    st.dictionaries(toml_keys, toml_scalars, max_size=3),
+    st.dictionaries(toml_keys, _inner_values, max_size=3),
     st.lists(toml_scalars, min_size=1, max_size=4),
     st.lists(
         st.dictionaries(toml_keys, toml_scalars, min_size=1, max_size=3),

@@ -24,7 +24,7 @@ rust-test:
 RUST_SOURCES := $(shell find src -name '*.rs')
 
 build: .build-stamp
-.build-stamp: $(RUST_SOURCES) pyproject.toml Cargo.toml Cargo.lock
+.build-stamp: $(RUST_SOURCES) Cargo.toml Cargo.lock pyproject.toml uv.lock
 	uv sync --reinstall-package tomledit
 	@rm -f .coverage-stamp
 	@touch $@
@@ -48,8 +48,8 @@ ty:
 	ty check
 
 coverage-build: .coverage-stamp
-.coverage-stamp: $(RUST_SOURCES) pyproject.toml Cargo.toml Cargo.lock
-	RUSTFLAGS="-Cinstrument-coverage" uv run --reinstall-package tomledit true
+.coverage-stamp: $(RUST_SOURCES) Cargo.toml Cargo.lock pyproject.toml uv.lock
+	RUSTFLAGS="-Cinstrument-coverage" uv sync --reinstall-package tomledit
 	@rm -f .build-stamp
 	@touch $@
 

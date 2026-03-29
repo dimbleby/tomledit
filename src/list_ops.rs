@@ -4,6 +4,7 @@ use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
 use crate::comments;
+use crate::comments::CommentPreservation;
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{Affected, into_value};
@@ -293,7 +294,7 @@ pub(crate) fn item_delitem_slice(target: ArrayLikeMut<'_>, indices: &[usize]) ->
 
     match target {
         ArrayLikeMut::Array(arr) => {
-            let mut ic = comments::save_element_comments(arr);
+            let mut ic = arr.save_inline_comments();
             let removing_first = sorted.last() == Some(&0);
             let removing_last = !sorted.is_empty() && sorted.first() == Some(&(arr.len() - 1));
             let decor = save_removal_decor(arr, removing_first, removing_last);
@@ -301,7 +302,7 @@ pub(crate) fn item_delitem_slice(target: ArrayLikeMut<'_>, indices: &[usize]) ->
                 arr.remove(idx);
                 ic.remove(idx);
             }
-            comments::restore_element_comments(arr, &ic);
+            arr.restore_inline_comments(&ic);
             apply_removal_decor(arr, &decor);
             Ok(())
         }
@@ -347,7 +348,7 @@ fn array_setitem_slice(
         let start_idx = start as usize;
         let stop_idx = stop as usize;
 
-        let mut ic = comments::save_element_comments(arr);
+        let mut ic = arr.save_inline_comments();
         let removes_first = start_idx == 0 && stop_idx > 0;
         let removes_last = stop_idx == arr.len() && stop_idx > start_idx;
         let inserting = !converted.is_empty();
@@ -384,7 +385,7 @@ fn array_setitem_slice(
         apply_first_prefix(arr, first_prefix);
         apply_last_suffix(arr, last_suffix);
 
-        comments::restore_element_comments(arr, &ic);
+        arr.restore_inline_comments(&ic);
         apply_removal_decor(arr, &decor);
         Ok(())
     } else {
@@ -401,7 +402,7 @@ fn array_setitem_slice(
             let inline = comments::take_value_inline_comment(&mut v);
             arr.replace(idx, v);
             if !inline.is_empty() {
-                comments::set_element_inline_comment(arr, idx, &inline);
+                comments::set_array_inline_comment(arr, idx, &inline);
             }
         }
         Ok(())
@@ -491,7 +492,7 @@ pub(crate) fn save_removal_decor(
     }
 }
 
-/// Apply saved decoration fixes after a removal + `restore_element_comments`.
+/// Apply saved decoration fixes after a removal + `restore_inline_comments`.
 pub(crate) fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDecor) {
     // --- First-element prefix ---
     // The new first element inherits a prefix meant to follow a comma (e.g.
@@ -535,13 +536,13 @@ pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()>
     match target {
         ArrayLikeMut::Array(arr) => {
             let saved_suffix = strip_last_suffix(arr);
-            let mut ic = comments::save_element_comments(arr);
+            let mut ic = arr.save_inline_comments();
             let mut v = into_value(value)?;
             let inline = comments::take_value_inline_comment(&mut v);
             apply_multiline_decor(arr, &mut v);
             arr.push(v);
             ic.push(inline);
-            comments::restore_element_comments(arr, &ic);
+            arr.restore_inline_comments(&ic);
             apply_last_suffix(arr, saved_suffix);
             Ok(())
         }
@@ -568,13 +569,13 @@ pub(crate) fn item_insert(
             let at_start = resolved == 0 && !arr.is_empty();
             let saved_suffix = at_end.then(|| strip_last_suffix(arr)).flatten();
             let saved_prefix = at_start.then(|| save_first_prefix(arr)).flatten();
-            let mut ic = comments::save_element_comments(arr);
+            let mut ic = arr.save_inline_comments();
             let mut v = into_value(value)?;
             let inline = comments::take_value_inline_comment(&mut v);
             apply_multiline_decor(arr, &mut v);
             arr.insert(resolved, v);
             ic.insert(resolved, inline);
-            comments::restore_element_comments(arr, &ic);
+            arr.restore_inline_comments(&ic);
             apply_last_suffix(arr, saved_suffix);
             apply_first_prefix(arr, saved_prefix);
             Ok((!at_end).then_some(Affected::Range {
@@ -605,11 +606,11 @@ pub(crate) fn item_remove_at(target: ArrayLikeMut<'_>, index: usize) -> PyResult
                 return Err(PyIndexError::new_err("array index out of range"));
             }
             let affected = Affected::for_removal(index, arr.len());
-            let mut ic = comments::save_element_comments(arr);
+            let mut ic = arr.save_inline_comments();
             let decor = save_removal_decor(arr, index == 0, index == arr.len() - 1);
             let removed = arr.remove(index);
             ic.remove(index);
-            comments::restore_element_comments(arr, &ic);
+            arr.restore_inline_comments(&ic);
             apply_removal_decor(arr, &decor);
             Ok((Item(ItemRs::Value(removed)), affected))
         }
@@ -631,14 +632,14 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
             let converted: Vec<ValueRs> =
                 items.into_iter().map(into_value).collect::<PyResult<_>>()?;
             let saved_suffix = strip_last_suffix(arr);
-            let mut ic = comments::save_element_comments(arr);
+            let mut ic = arr.save_inline_comments();
             for mut v in converted {
                 let inline = comments::take_value_inline_comment(&mut v);
                 apply_multiline_decor(arr, &mut v);
                 arr.push(v);
                 ic.push(inline);
             }
-            comments::restore_element_comments(arr, &ic);
+            arr.restore_inline_comments(&ic);
             apply_last_suffix(arr, saved_suffix);
             Ok(())
         }

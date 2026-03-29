@@ -115,10 +115,9 @@ impl ItemProxy {
             }
             Some(Key::Str(key)) if self.path.len() >= 2 => {
                 let parent = self.navigate_parent(&doc.inner)?;
-                parent.as_inline_table().and_then(|it| {
-                    let idx = comments::inline_table_key_position(it, key)?;
-                    comments::get_element_inline_comment(it, idx)
-                })
+                parent
+                    .as_inline_table()
+                    .and_then(|it| comments::get_inline_table_inline_comment(it, key))
             }
             _ => None,
         };
@@ -516,9 +515,7 @@ impl ItemProxy {
         {
             let parent = self.navigate_parent(&doc.inner)?;
             if let Some(it) = parent.as_inline_table() {
-                let comment = comments::inline_table_key_position(it, key)
-                    .and_then(|idx| comments::get_element_inline_comment(it, idx));
-                return Ok(comment);
+                return Ok(comments::get_inline_table_inline_comment(it, key));
             }
         }
         let item = self.navigate(&doc.inner)?;
@@ -544,7 +541,7 @@ impl ItemProxy {
                 .as_value_mut()
                 .and_then(|v| v.as_array_mut())
                 .ok_or_else(|| PyTypeError::new_err("parent is not an array"))?;
-            comments::set_element_inline_comment(array, *idx, &raw);
+            comments::set_array_inline_comment(array, *idx, &raw);
             return Ok(());
         }
         if let Some(Key::Str(key)) = self.path.last()
@@ -552,9 +549,7 @@ impl ItemProxy {
         {
             let parent = self.navigate_parent_mut(&mut doc.inner)?;
             if let Some(it) = parent.as_value_mut().and_then(|v| v.as_inline_table_mut()) {
-                if let Some(idx) = comments::inline_table_key_position(it, key) {
-                    comments::set_element_inline_comment(it, idx, &raw);
-                }
+                comments::set_inline_table_inline_comment(it, key, &raw);
                 return Ok(());
             }
         }

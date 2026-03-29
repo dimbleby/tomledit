@@ -206,9 +206,9 @@ pub(crate) fn set_block_comment(
 //   - `block`  is zero or more `{indent}# text\n` lines
 //   - `indent` is the whitespace before the value
 //
-// Both arrays and inline tables use this same indirection.  The `ElementAccess`
-// trait abstracts over the difference so that comment operations are written
-// once.
+// Both arrays and inline tables use this same indirection.  The
+// `CommentPreservation` trait abstracts over the difference so that
+// save/restore operations are written once.
 
 /// Decomposed parts of an element's slot string: `{inline}\n{block}{indent}`.
 struct PrefixParts {
@@ -260,142 +260,164 @@ impl PrefixParts {
     }
 }
 
-// -- ElementAccess trait and implementations --
+// -- CommentPreservation trait and implementations --
 
-/// Abstraction over containers whose elements use the slot system for
-/// inline comments.
-pub(crate) trait ElementAccess {
-    fn slot_count(&self) -> usize;
-    fn read_slot(&self, idx: usize) -> &str;
-    fn write_slot(&mut self, idx: usize, raw: &str);
-}
-
-impl ElementAccess for toml_edit::Array {
-    fn slot_count(&self) -> usize {
-        self.len()
-    }
-
-    fn read_slot(&self, idx: usize) -> &str {
-        if idx + 1 < self.len() {
-            self.get(idx + 1)
-                .and_then(|v| v.decor().prefix().and_then(|r| r.as_str()))
-                .unwrap_or_default()
-        } else {
-            self.trailing().as_str().unwrap_or_default()
-        }
-    }
-
-    fn write_slot(&mut self, idx: usize, raw: &str) {
-        if idx + 1 < self.len() {
-            self.get_mut(idx + 1).unwrap().decor_mut().set_prefix(raw);
-        } else {
-            self.set_trailing(raw);
-        }
-    }
-}
-
-impl ElementAccess for toml_edit::InlineTable {
-    fn slot_count(&self) -> usize {
-        self.len()
-    }
-
-    fn read_slot(&self, idx: usize) -> &str {
-        let next_key = self.iter().nth(idx + 1).map(|(k, _)| k);
-        match next_key {
-            Some(next) => self
-                .key(next)
-                .and_then(|k| k.leaf_decor().prefix().and_then(|r| r.as_str()))
-                .unwrap_or_default(),
-            None => self.trailing().as_str().unwrap_or_default(),
-        }
-    }
-
-    fn write_slot(&mut self, idx: usize, raw: &str) {
-        let next_key: Option<String> = self.iter().nth(idx + 1).map(|(k, _)| k.to_owned());
-        match next_key {
-            Some(next) => {
-                self.key_mut(&next)
-                    .unwrap()
-                    .leaf_decor_mut()
-                    .set_prefix(raw);
-            }
-            None => self.set_trailing(raw),
-        }
-    }
-}
-
-// -- generic element comment operations --
-
-/// Get the inline comment for element at `idx` in any container.
-pub(crate) fn get_element_inline_comment(
-    container: &impl ElementAccess,
-    idx: usize,
-) -> Option<String> {
-    if idx >= container.slot_count() {
-        return None;
-    }
-    extract_inline_comment(&PrefixParts::split(container.read_slot(idx)).inline)
-}
-
-/// Set the inline comment for element at `idx`.  `inline` is a
-/// pre-validated raw suffix (e.g. `" # note"`) or empty to clear.
-pub(crate) fn set_element_inline_comment(
-    container: &mut impl ElementAccess,
-    idx: usize,
-    inline: &str,
-) {
-    let raw = container.read_slot(idx).to_owned();
-    let current = PrefixParts::split(&raw).inline;
-    if current == inline {
-        return;
-    }
-    container.write_slot(idx, &PrefixParts::with_inline(&raw, inline));
-}
-
-/// Snapshot all inline comments, indexed by element position.
-pub(crate) fn save_element_comments(container: &impl ElementAccess) -> Vec<String> {
-    (0..container.slot_count())
-        .map(|i| PrefixParts::split(container.read_slot(i)).inline)
-        .collect()
-}
-
-/// Restore inline comments after a mutation.
+/// Batch save/restore of element inline comments across mutations.
 ///
-/// `comments` must have the same length as the container.  Callers mirror
-/// their mutation on the `Vec` (e.g. `vec.insert`, `vec.remove`) before
-/// calling this so the mapping is trivial.
-pub(crate) fn restore_element_comments(container: &mut impl ElementAccess, comments: &[String]) {
-    debug_assert_eq!(comments.len(), container.slot_count());
-    let updates: Vec<Option<String>> = comments
-        .iter()
-        .enumerate()
-        .map(|(i, inline)| {
-            let raw = container.read_slot(i);
+/// Arrays and inline tables store inline comments in the slot system
+/// (see the section comment above).  This trait lets mutation code
+/// snapshot and restore those comments without knowing the container type.
+pub(crate) trait CommentPreservation {
+    fn save_inline_comments(&self) -> Vec<String>;
+    fn restore_inline_comments(&mut self, comments: &[String]);
+}
+
+// -- Array helpers --
+
+/// Read the slot for array element `idx`: the next element's prefix,
+/// or the trailing string for the last element.
+fn array_read_slot(arr: &toml_edit::Array, idx: usize) -> &str {
+    if idx + 1 < arr.len() {
+        arr.get(idx + 1)
+            .and_then(|v| v.decor().prefix().and_then(|r| r.as_str()))
+            .unwrap_or_default()
+    } else {
+        arr.trailing().as_str().unwrap_or_default()
+    }
+}
+
+/// Write the slot for array element `idx`.
+fn array_write_slot(arr: &mut toml_edit::Array, idx: usize, raw: &str) {
+    if idx + 1 < arr.len() {
+        arr.get_mut(idx + 1).unwrap().decor_mut().set_prefix(raw);
+    } else {
+        arr.set_trailing(raw);
+    }
+}
+
+impl CommentPreservation for toml_edit::Array {
+    fn save_inline_comments(&self) -> Vec<String> {
+        (0..self.len())
+            .map(|i| PrefixParts::split(array_read_slot(self, i)).inline)
+            .collect()
+    }
+
+    fn restore_inline_comments(&mut self, comments: &[String]) {
+        debug_assert_eq!(comments.len(), self.len());
+        for (i, inline) in comments.iter().enumerate() {
+            let raw = array_read_slot(self, i);
             if PrefixParts::split(raw).inline != *inline {
-                Some(PrefixParts::with_inline(raw, inline))
-            } else {
-                None
+                let new_raw = PrefixParts::with_inline(raw, inline);
+                array_write_slot(self, i, &new_raw);
             }
-        })
-        .collect();
-    for (i, update) in updates.into_iter().enumerate() {
-        if let Some(raw) = update {
-            container.write_slot(i, &raw);
         }
     }
 }
 
-// -- convenience functions and element-related utilities --
+// -- InlineTable helpers --
 
-/// Find the 0-based position of `key` in an inline table's iteration order.
-pub(crate) fn inline_table_key_position(it: &toml_edit::InlineTable, key: &str) -> Option<usize> {
-    it.iter().position(|(k, _)| k == key)
+/// Read the slot for an inline-table element, given the next key name
+/// (or `None` for the last element).
+fn it_read_slot<'a>(it: &'a toml_edit::InlineTable, next_key: Option<&str>) -> &'a str {
+    match next_key {
+        Some(k) => it
+            .key(k)
+            .and_then(|k| k.leaf_decor().prefix().and_then(|r| r.as_str()))
+            .unwrap_or_default(),
+        None => it.trailing().as_str().unwrap_or_default(),
+    }
 }
+
+/// Write the slot for an inline-table element, given the next key name.
+fn it_write_slot(it: &mut toml_edit::InlineTable, next_key: Option<&str>, raw: &str) {
+    match next_key {
+        Some(k) => it.key_mut(k).unwrap().leaf_decor_mut().set_prefix(raw),
+        None => it.set_trailing(raw),
+    }
+}
+
+impl CommentPreservation for toml_edit::InlineTable {
+    fn save_inline_comments(&self) -> Vec<String> {
+        let keys: Vec<&str> = self.iter().map(|(k, _)| k).collect();
+        (0..keys.len())
+            .map(|i| PrefixParts::split(it_read_slot(self, keys.get(i + 1).copied())).inline)
+            .collect()
+    }
+
+    fn restore_inline_comments(&mut self, comments: &[String]) {
+        debug_assert_eq!(comments.len(), self.len());
+        let keys: Vec<String> = self.iter().map(|(k, _)| k.to_owned()).collect();
+        for (i, inline) in comments.iter().enumerate() {
+            let next_key = keys.get(i + 1).map(|s| s.as_str());
+            let raw = it_read_slot(self, next_key);
+            if PrefixParts::split(raw).inline != *inline {
+                let new_raw = PrefixParts::with_inline(raw, inline);
+                it_write_slot(self, next_key, &new_raw);
+            }
+        }
+    }
+}
+
+// -- Single-element comment access --
 
 /// Get the inline comment for array element `idx` from a parent `ItemRs`.
 pub(crate) fn get_array_inline_comment(parent: &ItemRs, idx: usize) -> Option<String> {
     let array = parent.as_value()?.as_array()?;
-    get_element_inline_comment(array, idx)
+    extract_inline_comment(&PrefixParts::split(array_read_slot(array, idx)).inline)
+}
+
+/// Set the inline comment for array element `idx`.  `inline` is a
+/// pre-validated raw suffix (e.g. `" # note"`) or empty to clear.
+pub(crate) fn set_array_inline_comment(array: &mut toml_edit::Array, idx: usize, inline: &str) {
+    let raw = array_read_slot(array, idx).to_owned();
+    let current = PrefixParts::split(&raw).inline;
+    if current == inline {
+        return;
+    }
+    array_write_slot(array, idx, &PrefixParts::with_inline(&raw, inline));
+}
+
+/// Get the inline comment for an inline-table entry by key name.
+pub(crate) fn get_inline_table_inline_comment(
+    it: &toml_edit::InlineTable,
+    key: &str,
+) -> Option<String> {
+    let mut iter = it.iter().skip_while(|(k, _)| *k != key);
+    // If the key doesn't exist, skip_while exhausts the iterator.
+    iter.next()?;
+    let next_key = iter.next().map(|(k, _)| k);
+    extract_inline_comment(&PrefixParts::split(it_read_slot(it, next_key)).inline)
+}
+
+/// Set the inline comment for an inline-table entry by key name.
+/// `inline` is a pre-validated raw suffix (e.g. `" # note"`) or empty to clear.
+pub(crate) fn set_inline_table_inline_comment(
+    it: &mut toml_edit::InlineTable,
+    key: &str,
+    inline: &str,
+) {
+    let next_key: Option<String> = {
+        let mut iter = it.iter().skip_while(|(k, _)| *k != key);
+        if iter.next().is_none() {
+            return;
+        }
+        iter.next().map(|(k, _)| k.to_owned())
+    };
+    let raw = it_read_slot(it, next_key.as_deref()).to_owned();
+    let current = PrefixParts::split(&raw).inline;
+    if current == inline {
+        return;
+    }
+    it_write_slot(
+        it,
+        next_key.as_deref(),
+        &PrefixParts::with_inline(&raw, inline),
+    );
+}
+
+/// Find the 0-based position of `key` in an inline table's iteration order.
+pub(crate) fn inline_table_key_position(it: &toml_edit::InlineTable, key: &str) -> Option<usize> {
+    it.iter().position(|(k, _)| k == key)
 }
 
 /// Extract (and clear) an inline comment from a value's decor suffix.
@@ -405,7 +427,7 @@ pub(crate) fn get_array_inline_comment(parent: &ItemRs, idx: usize) -> Option<St
 /// functions call this to retrieve that comment before pushing/replacing
 /// the value, then feed it into the target array's slot system.
 /// Returns the raw suffix (e.g. `" # note"`) or empty string if none,
-/// matching the format used by [`save_element_comments`].
+/// matching the format used by [`CommentPreservation::save_inline_comments`].
 pub(crate) fn take_value_inline_comment(value: &mut ValueRs) -> String {
     let raw = value
         .decor()

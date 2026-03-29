@@ -161,7 +161,7 @@ fn apply_first_prefix(arr: &mut toml_edit::Array, prefix: Option<String>) {
 /// When inserting at position 0 the new element needs no prefix (it is now
 /// first), but the *old* first element — now at position 1 — was re-pushed
 /// with its original prefix and must be fixed instead.
-fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
+pub(crate) fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
     // Inserting at the front: the element that needs fixing is the old first
     // element, now sitting at position 1.
     let target = if pos == 0 { 1 } else { pos };
@@ -217,7 +217,7 @@ fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
     }
 }
 
-fn require_table(item: Item) -> PyResult<toml_edit::Table> {
+pub(crate) fn require_table(item: Item) -> PyResult<toml_edit::Table> {
     match item.0 {
         ItemRs::Table(t) => Ok(t),
         ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.into_table()),

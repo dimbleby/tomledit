@@ -443,13 +443,10 @@ pub(crate) fn item_setitem_int(item: &mut ItemRs, idx_raw: i64, value: Item) -> 
         }
         ItemRs::ArrayOfTables(aot) => {
             let idx = list_ops::resolve_index(idx_raw, aot.len())?;
-            if !value.0.is_table() && !value.0.is_inline_table() {
-                return Err(PyTypeError::new_err(format!(
-                    "cannot assign {} to array of tables (expected a table/dict)",
-                    value.0.type_name()
-                )));
-            }
-            item[idx] = value.0;
+            let table = list_ops::require_table(value)?;
+            aot.remove(idx);
+            aot.insert(idx, table);
+            list_ops::fix_inserted_aot_spacing(aot, idx);
             Ok(Key::Int(idx))
         }
         _ => Err(subscript_type_error(item)),

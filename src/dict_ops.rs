@@ -4,6 +4,7 @@ use pyo3::types::PyDict;
 use toml_edit::{Decor, Item as ItemRs, TableLike, Value as ValueRs};
 
 use crate::comments;
+use crate::comments::CommentPreservation;
 use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key, unsupported_op};
@@ -87,7 +88,7 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         let saved_ic = item
             .as_inline_table()
             .filter(|it| !it.contains_key(key))
-            .map(comments::save_element_comments);
+            .map(|it| it.save_inline_comments());
 
         let old_decor = item
             .get(key)
@@ -111,7 +112,7 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         if let Some(mut ic) = saved_ic {
             ic.push(String::new());
             if let Some(it) = item.as_inline_table_mut() {
-                comments::restore_element_comments(it, &ic);
+                it.restore_inline_comments(&ic);
             }
         }
     }

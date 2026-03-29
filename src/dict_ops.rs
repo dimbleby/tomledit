@@ -16,7 +16,10 @@ use crate::item_proxy::ItemProxy;
 
 /// Remove a key from an inline table, preserving sibling inline comments.
 /// Returns the removed value, or `None` if the key was not found.
-pub(crate) fn it_remove(it: &mut toml_edit::InlineTable, key: &str) -> Option<toml_edit::Value> {
+pub(crate) fn inline_table_remove(
+    it: &mut toml_edit::InlineTable,
+    key: &str,
+) -> Option<toml_edit::Value> {
     let mut ic = it.save_inline_comments();
     let pos = it.iter().position(|(k, _)| k == key);
     let removed = it.remove(key)?;
@@ -192,7 +195,7 @@ pub(crate) fn item_popitem(item: &mut ItemRs) -> PyResult<(String, ItemRs)> {
         ItemRs::Value(ValueRs::InlineTable(it)) => {
             let k = it.iter().last().map(|(k, _)| k.to_owned());
             let k = k.ok_or_else(|| PyKeyError::new_err("popitem(): table is empty"))?;
-            let v = ItemRs::Value(it_remove(it, &k).expect("key just found"));
+            let v = ItemRs::Value(inline_table_remove(it, &k).expect("key just found"));
             Ok((k, v))
         }
         _ => Err(unsupported_op(item, "popitem()")),
@@ -203,6 +206,17 @@ pub(crate) fn item_popitem(item: &mut ItemRs) -> PyResult<(String, ItemRs)> {
 // Update helpers
 // ---------------------------------------------------------------------------
 
+/// Extract key-value pairs from a `PyDict`.
+fn dict_to_pairs(dict: &Bound<'_, PyDict>) -> PyResult<Vec<(String, Item)>> {
+    let mut pairs = Vec::with_capacity(dict.len());
+    for (k, v) in dict.iter() {
+        let key: String = k.extract()?;
+        let val: Item = v.extract()?;
+        pairs.push((key, val));
+    }
+    Ok(pairs)
+}
+
 /// Extract key-value pairs from a Python object for dict-like update.
 ///
 /// Supports:
@@ -211,13 +225,7 @@ pub(crate) fn item_popitem(item: &mut ItemRs) -> PyResult<(String, ItemRs)> {
 /// - Iterables of `(key, value)` pairs
 pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Item)>> {
     if let Ok(dict) = other.cast::<PyDict>() {
-        let mut pairs = Vec::with_capacity(dict.len());
-        for (k, v) in dict.iter() {
-            let key: String = k.extract()?;
-            let val: Item = v.extract()?;
-            pairs.push((key, val));
-        }
-        return Ok(pairs);
+        return dict_to_pairs(dict);
     }
 
     // Mapping — iterate .items() for (key, value) pairs directly.
@@ -243,16 +251,10 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
 
 /// Extract key-value pairs from `**kwargs`.
 pub(crate) fn extract_kwargs(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Vec<(String, Item)>> {
-    let Some(kw) = kwargs else {
-        return Ok(Vec::new());
-    };
-    let mut pairs = Vec::with_capacity(kw.len());
-    for (k, v) in kw.iter() {
-        let key: String = k.extract()?;
-        let val: Item = v.extract()?;
-        pairs.push((key, val));
+    match kwargs {
+        Some(kw) => dict_to_pairs(kw),
+        None => Ok(Vec::new()),
     }
-    Ok(pairs)
 }
 
 /// Apply pre-extracted update pairs to an item.
@@ -262,13 +264,14 @@ pub(crate) fn apply_update_pairs(
     item: &mut ItemRs,
     pairs: Vec<(String, Item)>,
 ) -> PyResult<Vec<String>> {
+    // Callers guarantee `item` is table-like; `item.get()` returns `None`
+    // for non-table items, so the replaced-key check is safe regardless.
     let mut replaced_keys = Vec::new();
     for (key, val) in pairs {
-        let existed = as_dict_like(item, "update()")?.contains_key(&key);
-        set_with_decor_preservation(item, &key, val);
-        if existed {
-            replaced_keys.push(key);
+        if item.get(&key).is_some() {
+            replaced_keys.push(key.clone());
         }
+        set_with_decor_preservation(item, &key, val);
     }
     Ok(replaced_keys)
 }
@@ -474,7 +477,7 @@ pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
             Some(v) => Ok((Item(v), Key::Str(key.into()))),
             None => Err(PyKeyError::new_err(key.to_owned())),
         },
-        ItemRs::Value(ValueRs::InlineTable(it)) => match it_remove(it, key) {
+        ItemRs::Value(ValueRs::InlineTable(it)) => match inline_table_remove(it, key) {
             Some(v) => Ok((Item(ItemRs::Value(v)), Key::Str(key.into()))),
             None => Err(PyKeyError::new_err(key.to_owned())),
         },

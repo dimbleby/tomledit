@@ -1560,3 +1560,13 @@ class TestUpdatePreservesComments:
             # new key comment
             b = 2
         """)
+
+
+class TestCommentIdempotency:
+    """Setting a comment to its current value should be a no-op."""
+
+    def test_set_array_inline_comment_idempotent(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3] # note\n")
+        original = doc.as_toml()
+        doc["arr"][0].inline_comment = doc["arr"][0].inline_comment
+        assert doc.as_toml() == original

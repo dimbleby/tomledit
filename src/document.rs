@@ -237,11 +237,8 @@ impl Document {
             return Ok(py.NotImplemented());
         }
         let mut new_inner = slf.borrow().inner.clone();
-        let replaced = dict_ops::merge_other_into(new_inner.as_item_mut(), other, py)?;
-        let mut doc = Self::from_inner(new_inner);
-        for key in replaced {
-            doc.bump_at(&[Key::Str(key)]);
-        }
+        dict_ops::merge_other_into(new_inner.as_item_mut(), other, py)?;
+        let doc = Self::from_inner(new_inner);
         Ok(Py::new(py, doc)?.into_any())
     }
 

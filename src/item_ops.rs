@@ -19,13 +19,13 @@ use crate::list_ops;
 /// Remove a key from an inline table, preserving sibling inline comments.
 /// Returns the removed value, or `None` if the key was not found.
 pub(crate) fn it_remove(it: &mut toml_edit::InlineTable, key: &str) -> Option<toml_edit::Value> {
-    let mut ic = comments::save_it_inline_comments(it);
-    let pos = comments::it_key_position(it, key);
+    let mut ic = comments::save_element_comments(it);
+    let pos = comments::inline_table_key_position(it, key);
     let removed = it.remove(key)?;
     if let Some(pos) = pos {
         ic.remove(pos);
     }
-    comments::restore_it_inline_comments(it, &ic);
+    comments::restore_element_comments(it, &ic);
     Some(removed)
 }
 
@@ -371,10 +371,10 @@ pub(crate) fn item_setitem_int(item: &mut ItemRs, idx_raw: i64, value: Item) -> 
         ItemRs::Value(ValueRs::Array(array)) => {
             let idx = list_ops::resolve_index(idx_raw, array.len())?;
             let mut v = into_value(value)?;
-            let inline = comments::take_inline_comment(&mut v);
+            let inline = comments::take_value_inline_comment(&mut v);
             array.replace(idx, v);
             if !inline.is_empty() {
-                comments::set_array_item_comment(array, idx, &inline);
+                comments::set_element_inline_comment(array, idx, &inline);
             }
             Ok(Key::Int(idx))
         }

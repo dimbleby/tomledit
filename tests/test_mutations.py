@@ -195,6 +195,26 @@ class TestArrayOfTablesMutation:
         doc["items"][-1] = {"name": "last"}
         assert doc["items"][1]["name"] == "last"
 
+    def test_setitem_inline_table_proxy(self) -> None:
+        """Assigning an inline-table proxy to an AoT index should produce valid TOML."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
+        source = Document.parse('entry = {name = "replaced"}\n')
+        doc["items"][0] = source["entry"]
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "replaced"
+
+            [[items]]
+            name = "b"
+        """)
+
 
 # ---------------------------------------------------------------------------
 # Chained mutation on inline tables (dicts)

@@ -13,6 +13,150 @@ use crate::item_proxy::ItemProxy;
 use crate::list_ops;
 
 // ---------------------------------------------------------------------------
+// Core types
+// ---------------------------------------------------------------------------
+
+/// A path component: string key for tables, integer index for arrays.
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub(crate) enum Key {
+    Str(String),
+    Int(usize),
+}
+
+/// Describes how a mutation affects existing proxies, for invalidation.
+pub(crate) enum Affected {
+    /// Only a single child key was changed (replaced in place, or
+    /// removed at the end of an array without shifting).
+    Child(Key),
+    /// Array indices from `from` up to (not including) `to` were
+    /// shifted or removed.
+    Range { from: usize, to: usize },
+}
+
+impl Affected {
+    /// Compute invalidation for removing an element at `index` in an
+    /// array of length `len` (measured *before* removal).
+    pub(crate) fn for_removal(index: usize, len: usize) -> Self {
+        if index + 1 == len {
+            Self::Child(Key::Int(index))
+        } else {
+            Self::Range {
+                from: index,
+                to: len,
+            }
+        }
+    }
+}
+
+/// Navigate a key path to an item within a document.
+pub(crate) fn navigate_path<'a>(doc: &'a DocumentRs, path: &[Key]) -> PyResult<&'a ItemRs> {
+    let mut current: &ItemRs = doc.as_item();
+    for key in path {
+        let next = match key {
+            Key::Str(s) => current.get(s.as_str()),
+            Key::Int(i) => current.get(*i),
+        };
+        current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
+    }
+    Ok(current)
+}
+
+/// Navigate a key path to a mutable item within a document.
+pub(crate) fn navigate_path_mut<'a>(
+    doc: &'a mut DocumentRs,
+    path: &[Key],
+) -> PyResult<&'a mut ItemRs> {
+    let mut current: &mut ItemRs = doc.as_item_mut();
+    for key in path {
+        let next = match key {
+            Key::Str(s) => current.get_mut(s.as_str()),
+            Key::Int(i) => current.get_mut(*i),
+        };
+        current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
+    }
+    Ok(current)
+}
+
+// ---------------------------------------------------------------------------
+// Subscript key resolution
+// ---------------------------------------------------------------------------
+
+/// A subscript key resolved from Python *before* borrowing the document.
+///
+/// Proxy values are resolved to their plain Python equivalents so that
+/// `extract()` works without re-borrowing the document.
+pub(crate) enum SubscriptKey<'py> {
+    Str(String),
+    Int(i64),
+    Slice(Bound<'py, PySlice>),
+    /// Key type that is neither string, integer, nor slice.
+    /// The callsite decides the error (e.g. `KeyError` for dicts, `TypeError`
+    /// for arrays) because the correct exception depends on the item type.
+    Other(Bound<'py, PyAny>),
+}
+
+/// Resolve a `__getitem__`/`__setitem__`/`__delitem__` key to a typed enum.
+///
+/// This must be called *before* borrowing the document, because resolving a
+/// proxy key borrows it internally.
+pub(crate) fn resolve_subscript_key<'py>(
+    py: Python<'py>,
+    key: &Bound<'py, PyAny>,
+) -> PyResult<SubscriptKey<'py>> {
+    if let Ok(slice) = key.cast::<PySlice>() {
+        return Ok(SubscriptKey::Slice(slice.clone()));
+    }
+    // Resolve proxy to plain Python value before extracting.
+    let resolved = crate::item_proxy::resolve_proxy(py, key)?;
+    let key = resolved.as_ref().map_or(key, |v| v.bind(py));
+    if let Ok(s) = key.extract::<String>() {
+        Ok(SubscriptKey::Str(s))
+    } else if let Ok(i) = key.extract::<i64>() {
+        Ok(SubscriptKey::Int(i))
+    } else {
+        Ok(SubscriptKey::Other(key.clone()))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Error helpers
+// ---------------------------------------------------------------------------
+
+/// Error for a subscript key that is not a string, integer, or slice.
+pub(crate) fn invalid_subscript_type(key: &Bound<'_, PyAny>) -> PyErr {
+    let type_name = key
+        .get_type()
+        .name()
+        .map(|n| n.to_string())
+        .unwrap_or_else(|_| "?".to_owned());
+    PyTypeError::new_err(format!(
+        "indices must be integers or strings, not {type_name}"
+    ))
+}
+
+/// Error for using the wrong key type on a subscriptable item.
+/// Tables expect strings; arrays expect integers; scalars aren't subscriptable.
+fn subscript_type_error(item: &ItemRs) -> PyErr {
+    match item {
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
+            PyTypeError::new_err("TOML table keys must be strings, not integers")
+        }
+        ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => {
+            PyTypeError::new_err("TOML array indices must be integers, not strings")
+        }
+        _ => PyTypeError::new_err(format!("'{}' is not subscriptable", item.type_name())),
+    }
+}
+
+/// Error for an operation not supported by this item type.
+pub(crate) fn unsupported_op(item: &ItemRs, op: &str) -> PyErr {
+    PyTypeError::new_err(format!(
+        "TOML {} item does not support {op}",
+        item.type_name()
+    ))
+}
+
+// ---------------------------------------------------------------------------
 // Read operations
 // ---------------------------------------------------------------------------
 
@@ -37,6 +181,7 @@ pub(crate) fn extract_key_str(value: &Bound<'_, PyAny>) -> Option<String> {
     }
 }
 
+/// Get the length of a container item, or `None` for scalars.
 pub(crate) fn item_len(item: &ItemRs) -> Option<usize> {
     match item {
         ItemRs::Table(t) => Some(t.len()),
@@ -47,6 +192,7 @@ pub(crate) fn item_len(item: &ItemRs) -> Option<usize> {
     }
 }
 
+/// Test whether `value` is contained in `item` (tables check keys, arrays check elements).
 pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
     if let Some(tbl) = item.as_table_like() {
         let Some(key) = extract_key_str(value) else {
@@ -82,6 +228,7 @@ pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult
     }
 }
 
+/// Python truthiness for a TOML item.
 pub(crate) fn item_bool(item: &ItemRs) -> bool {
     match item {
         ItemRs::Table(t) => !t.is_empty(),
@@ -100,6 +247,7 @@ pub(crate) fn item_bool(item: &ItemRs) -> bool {
     }
 }
 
+/// `repr()` for a TOML item: `Item(type, content)`.
 pub(crate) fn item_repr(item: &ItemRs) -> String {
     let type_name = item.type_name();
     let content = item.to_string();
@@ -107,6 +255,7 @@ pub(crate) fn item_repr(item: &ItemRs) -> String {
     format!("Item({type_name}, {trimmed})")
 }
 
+/// `str()` for a TOML item: fast path for scalars, falls back to Python for complex types.
 pub(crate) fn item_str(item: &ItemRs, py: Python<'_>) -> PyResult<String> {
     // Fast path for scalars: avoid Python object allocation + __str__ call.
     if let ItemRs::Value(v) = item {
@@ -121,6 +270,20 @@ pub(crate) fn item_str(item: &ItemRs, py: Python<'_>) -> PyResult<String> {
     // Complex types (datetime, table, array, AoT): fall through to Python.
     let obj = item_to_py(item, py)?;
     obj.call_method0(py, "__str__")?.extract::<String>(py)
+}
+
+// ---------------------------------------------------------------------------
+// Conversion
+// ---------------------------------------------------------------------------
+
+/// Convert an `Item` wrapper to a `toml_edit::Value`, or raise `TypeError`.
+pub(crate) fn into_value(item: Item) -> PyResult<ValueRs> {
+    item.0.into_value().map_err(|item| {
+        PyTypeError::new_err(format!(
+            "cannot convert {} to a TOML value",
+            item.type_name()
+        ))
+    })
 }
 
 /// Convert a toml_edit table's entries to a Python dict.
@@ -229,6 +392,7 @@ pub(crate) enum IterKind<'a> {
     ArrayLen(usize),
 }
 
+/// Determine the iteration shape of a TOML item.
 pub(crate) fn item_iter_kind<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
     if let Some(tbl) = item.as_table_like() {
         return Ok(IterKind::TableKeys(tbl.iter().map(|(k, _)| k).collect()));
@@ -241,88 +405,6 @@ pub(crate) fn item_iter_kind<'a>(item: &'a ItemRs) -> PyResult<IterKind<'a>> {
             item.type_name()
         ))),
     }
-}
-
-// ---------------------------------------------------------------------------
-// Misc helpers
-// ---------------------------------------------------------------------------
-
-pub(crate) fn bad_key_type(key: &Bound<'_, PyAny>) -> PyErr {
-    let type_name = key
-        .get_type()
-        .name()
-        .map(|n| n.to_string())
-        .unwrap_or_else(|_| "?".to_owned());
-    PyTypeError::new_err(format!(
-        "indices must be integers or strings, not {type_name}"
-    ))
-}
-
-/// Error for using the wrong key type on a subscriptable item.
-/// Tables expect strings; arrays expect integers; scalars aren't subscriptable.
-fn subscript_type_error(item: &ItemRs) -> PyErr {
-    match item {
-        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
-            PyTypeError::new_err("TOML table keys must be strings, not integers")
-        }
-        ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => {
-            PyTypeError::new_err("TOML array indices must be integers, not strings")
-        }
-        _ => PyTypeError::new_err(format!("'{}' is not subscriptable", item.type_name())),
-    }
-}
-
-/// A subscript key resolved from Python *before* borrowing the document.
-///
-/// Proxy values are resolved to their plain Python equivalents so that
-/// `extract()` works without re-borrowing the document.
-pub(crate) enum SubscriptKey<'py> {
-    Str(String),
-    Int(i64),
-    Slice(Bound<'py, PySlice>),
-    /// Key type that is neither string, integer, nor slice.
-    /// The callsite decides the error (e.g. `KeyError` for dicts, `TypeError`
-    /// for arrays) because the correct exception depends on the item type.
-    Other(Bound<'py, PyAny>),
-}
-
-/// Resolve a `__getitem__`/`__setitem__`/`__delitem__` key to a typed enum.
-///
-/// This must be called *before* borrowing the document, because resolving a
-/// proxy key borrows it internally.
-pub(crate) fn resolve_subscript_key<'py>(
-    py: Python<'py>,
-    key: &Bound<'py, PyAny>,
-) -> PyResult<SubscriptKey<'py>> {
-    if let Ok(slice) = key.cast::<PySlice>() {
-        return Ok(SubscriptKey::Slice(slice.clone()));
-    }
-    // Resolve proxy to plain Python value before extracting.
-    let resolved = crate::item_proxy::resolve_proxy(py, key)?;
-    let key = resolved.as_ref().map_or(key, |v| v.bind(py));
-    if let Ok(s) = key.extract::<String>() {
-        Ok(SubscriptKey::Str(s))
-    } else if let Ok(i) = key.extract::<i64>() {
-        Ok(SubscriptKey::Int(i))
-    } else {
-        Ok(SubscriptKey::Other(key.clone()))
-    }
-}
-
-pub(crate) fn unsupported_op(item: &ItemRs, op: &str) -> PyErr {
-    PyTypeError::new_err(format!(
-        "TOML {} item does not support {op}",
-        item.type_name()
-    ))
-}
-
-pub(crate) fn into_value(item: Item) -> PyResult<ValueRs> {
-    item.0.into_value().map_err(|item| {
-        PyTypeError::new_err(format!(
-            "cannot convert {} to a TOML value",
-            item.type_name()
-        ))
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -407,26 +489,20 @@ pub(crate) fn item_delitem_int(item: &mut ItemRs, idx_raw: i64) -> PyResult<Affe
 }
 
 // ---------------------------------------------------------------------------
-// Mutation: dict-like
+// Mutation
 // ---------------------------------------------------------------------------
 
-/// Remove a key from a table-like item, returning the removed item and key.
+/// Clear all entries from a container item.
 pub(crate) fn item_clear(item: &mut ItemRs) -> PyResult<()> {
     if let Some(tbl) = item.as_table_like_mut() {
         tbl.clear();
         return Ok(());
     }
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => {
-            arr.clear();
-            Ok(())
-        }
-        ItemRs::ArrayOfTables(aot) => {
-            aot.clear();
-            Ok(())
-        }
-        _ => Err(unsupported_op(item, "clear()")),
+    match list_ops::as_array_like_mut(item, "clear()")? {
+        list_ops::ArrayLikeMut::Array(arr) => arr.clear(),
+        list_ops::ArrayLikeMut::Aot(aot) => aot.clear(),
     }
+    Ok(())
 }
 
 /// Normalize formatting of a single item (shallow).
@@ -436,66 +512,4 @@ pub(crate) fn item_fmt(item: &mut ItemRs) {
     } else if let ItemRs::Value(ValueRs::Array(arr)) = item {
         arr.fmt();
     }
-}
-
-// ---------------------------------------------------------------------------
-// Key type
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-pub(crate) enum Key {
-    Str(String),
-    Int(usize),
-}
-
-/// Describes how a mutation affects existing proxies, for invalidation.
-pub(crate) enum Affected {
-    /// Only a single child key was changed (replaced in place, or
-    /// removed at the end of an array without shifting).
-    Child(Key),
-    /// Array indices from `from` up to (not including) `to` were
-    /// shifted or removed.
-    Range { from: usize, to: usize },
-}
-
-impl Affected {
-    /// Compute invalidation for removing an element at `index` in an
-    /// array of length `len` (measured *before* removal).
-    pub(crate) fn for_removal(index: usize, len: usize) -> Self {
-        if index + 1 == len {
-            Self::Child(Key::Int(index))
-        } else {
-            Self::Range {
-                from: index,
-                to: len,
-            }
-        }
-    }
-}
-
-pub(crate) fn navigate_path<'a>(doc: &'a DocumentRs, path: &[Key]) -> PyResult<&'a ItemRs> {
-    let mut current: &ItemRs = doc.as_item();
-    for key in path {
-        let next = match key {
-            Key::Str(s) => current.get(s.as_str()),
-            Key::Int(i) => current.get(*i),
-        };
-        current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
-    }
-    Ok(current)
-}
-
-pub(crate) fn navigate_path_mut<'a>(
-    doc: &'a mut DocumentRs,
-    path: &[Key],
-) -> PyResult<&'a mut ItemRs> {
-    let mut current: &mut ItemRs = doc.as_item_mut();
-    for key in path {
-        let next = match key {
-            Key::Str(s) => current.get_mut(s.as_str()),
-            Key::Int(i) => current.get_mut(*i),
-        };
-        current = next.ok_or_else(|| PyKeyError::new_err("path no longer valid"))?;
-    }
-    Ok(current)
 }

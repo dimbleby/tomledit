@@ -107,7 +107,7 @@ pub(crate) fn resolve_subscript_key<'py>(
         return Ok(SubscriptKey::Slice(slice.clone()));
     }
     // Resolve proxy to plain Python value before extracting.
-    let resolved = crate::item_proxy::resolve_proxy(py, key)?;
+    let resolved = crate::item_proxy::resolve_proxy(key)?;
     let key = resolved.as_ref().map_or(key, |v| v.bind(py));
     if let Ok(s) = key.extract::<String>() {
         Ok(SubscriptKey::Str(s))
@@ -202,7 +202,7 @@ pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult
     }
     // For array containment, resolve proxies to plain Python values so that
     // value_eq / table_eq can compare without re-borrowing through dunders.
-    let resolved = crate::item_proxy::resolve_proxy(value.py(), value)?;
+    let resolved = crate::item_proxy::resolve_proxy(value)?;
     let value = resolved.as_ref().map_or(value, |v| v.bind(value.py()));
     match item {
         ItemRs::Value(ValueRs::Array(arr)) => {

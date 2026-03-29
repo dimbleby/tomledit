@@ -20,10 +20,7 @@ use crate::scalar_proxy::ScalarProxy;
 /// it to its underlying Python value so that subsequent operations can compare
 /// plain Python objects without re-borrowing the document through dunder
 /// methods. Returns `None` when `value` is not a proxy.
-pub(crate) fn resolve_proxy(
-    _py: Python<'_>,
-    value: &Bound<'_, PyAny>,
-) -> PyResult<Option<Py<PyAny>>> {
+pub(crate) fn resolve_proxy(value: &Bound<'_, PyAny>) -> PyResult<Option<Py<PyAny>>> {
     if let Ok(proxy) = value.cast::<ItemProxy>() {
         Ok(Some(proxy.borrow().value(value.py())?))
     } else {

@@ -82,7 +82,7 @@ impl ScalarProxy {
     fn __contains__(self_: PyRef<'_, Self>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = self_.py();
         let resolved = Self::resolve(&self_)?;
-        let resolved_value = resolve_proxy(py, value)?;
+        let resolved_value = resolve_proxy(value)?;
         let value = resolved_value.as_ref().map_or(value, |v| v.bind(py));
         py_binop(py, "contains", resolved.bind(py), value)?.extract::<bool>(py)
     }
@@ -224,7 +224,7 @@ impl ScalarProxy {
         let pow_fn = py.import("builtins")?.getattr("pow")?;
         match modulo {
             Some(m) => {
-                let resolved_m = resolve_proxy(py, m)?;
+                let resolved_m = resolve_proxy(m)?;
                 let m = resolved_m.as_ref().map_or(m, |v| v.bind(py));
                 pow_fn.call1((val.bind(py), exp, m))
             }
@@ -243,7 +243,7 @@ impl ScalarProxy {
         let pow_fn = py.import("builtins")?.getattr("pow")?;
         match modulo {
             Some(m) => {
-                let resolved_m = resolve_proxy(py, m)?;
+                let resolved_m = resolve_proxy(m)?;
                 let m = resolved_m.as_ref().map_or(m, |v| v.bind(py));
                 pow_fn.call1((base, val.bind(py), m))
             }

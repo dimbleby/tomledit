@@ -100,28 +100,29 @@ impl ItemProxy {
 
     /// Clone the toml_edit item at this proxy's path.
     ///
-    /// For array elements and inline-table values the inline comment is stored
-    /// externally (slot system).  It is embedded into the cloned value's decor
-    /// suffix so that it travels with the value when inserted elsewhere.
+    /// For array elements and inline-table entries the inline comment is stored
+    /// externally (in the next element's prefix).  It is embedded into the
+    /// cloned value's decor suffix so that it travels with the value.
     pub(crate) fn clone_item(&self, py: Python<'_>) -> PyResult<ItemRs> {
         let doc = self.document.borrow(py);
         self.check_fresh(&doc)?;
         let item = self.navigate(&doc.inner)?;
         let mut cloned = item.clone();
-        let slot_comment = match self.path.last() {
+        let element_comment = match self.path.last() {
             Some(Key::Int(idx)) if self.path.len() >= 2 => {
                 let parent = self.navigate_parent(&doc.inner)?;
-                comments::get_array_item_comment(parent, *idx)
+                comments::get_array_inline_comment(parent, *idx)
             }
             Some(Key::Str(key)) if self.path.len() >= 2 => {
                 let parent = self.navigate_parent(&doc.inner)?;
-                parent
-                    .as_inline_table()
-                    .and_then(|it| comments::get_it_item_comment(it, key))
+                parent.as_inline_table().and_then(|it| {
+                    let idx = comments::inline_table_key_position(it, key)?;
+                    comments::get_element_inline_comment(it, idx)
+                })
             }
             _ => None,
         };
-        if let Some(comment) = slot_comment
+        if let Some(comment) = element_comment
             && let Some(v) = cloned.as_value_mut()
         {
             v.decor_mut().set_suffix(format!(" {comment}"));
@@ -466,11 +467,11 @@ impl ItemProxy {
         match last_key {
             Key::Str(key_str) => {
                 let parent = self.navigate_parent(&doc.inner)?;
-                Ok(comments::get_key_prefix_comment(parent, key_str))
+                Ok(comments::get_block_comment(parent, key_str))
             }
             Key::Int(_) => {
                 let item = self.navigate(&doc.inner)?;
-                Ok(comments::get_value_prefix_comment(item))
+                Ok(comments::get_element_block_comment(item))
             }
         }
     }
@@ -490,11 +491,11 @@ impl ItemProxy {
         match last_key {
             Key::Str(key_str) => {
                 let parent = self.navigate_parent_mut(&mut doc.inner)?;
-                comments::set_key_prefix_comment(parent, key_str, value)?;
+                comments::set_block_comment(parent, key_str, value)?;
             }
             Key::Int(_) => {
                 let item = self.navigate_mut(&mut doc.inner)?;
-                comments::set_value_prefix_comment(item, value)?;
+                comments::set_element_block_comment(item, value)?;
             }
         }
         Ok(())
@@ -507,7 +508,7 @@ impl ItemProxy {
         self.check_fresh(&doc)?;
         if let Some(Key::Int(idx)) = self.path.last() {
             let parent = self.navigate_parent(&doc.inner)?;
-            return Ok(comments::get_array_item_comment(parent, *idx));
+            return Ok(comments::get_array_inline_comment(parent, *idx));
         }
         // Inline-table values: comment lives in next key's prefix / trailing.
         if let Some(Key::Str(key)) = self.path.last()
@@ -515,11 +516,13 @@ impl ItemProxy {
         {
             let parent = self.navigate_parent(&doc.inner)?;
             if let Some(it) = parent.as_inline_table() {
-                return Ok(comments::get_it_item_comment(it, key));
+                let comment = comments::inline_table_key_position(it, key)
+                    .and_then(|idx| comments::get_element_inline_comment(it, idx));
+                return Ok(comment);
             }
         }
         let item = self.navigate(&doc.inner)?;
-        Ok(comments::get_suffix_comment(item))
+        Ok(comments::get_inline_comment(item))
     }
 
     /// Set or clear the inline comment on this entry.
@@ -530,7 +533,7 @@ impl ItemProxy {
     pub fn set_inline_comment(&self, py: Python<'_>, value: Option<&str>) -> PyResult<()> {
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_fresh(&doc)?;
-        // Slot-based paths (arrays, inline tables) need pre-validated raw format.
+        // Element-based paths (arrays, inline tables) need pre-validated raw format.
         let raw = match value {
             Some(text) => comments::validate_inline_comment(text)?,
             None => String::new(),
@@ -541,7 +544,7 @@ impl ItemProxy {
                 .as_value_mut()
                 .and_then(|v| v.as_array_mut())
                 .ok_or_else(|| PyTypeError::new_err("parent is not an array"))?;
-            comments::set_array_item_comment(array, *idx, &raw);
+            comments::set_element_inline_comment(array, *idx, &raw);
             return Ok(());
         }
         if let Some(Key::Str(key)) = self.path.last()
@@ -549,12 +552,14 @@ impl ItemProxy {
         {
             let parent = self.navigate_parent_mut(&mut doc.inner)?;
             if let Some(it) = parent.as_value_mut().and_then(|v| v.as_inline_table_mut()) {
-                comments::set_it_item_comment(it, key, &raw);
+                if let Some(idx) = comments::inline_table_key_position(it, key) {
+                    comments::set_element_inline_comment(it, idx, &raw);
+                }
                 return Ok(());
             }
         }
         let item = self.navigate_mut(&mut doc.inner)?;
-        comments::set_suffix_comment(item, value)?;
+        comments::set_inline_comment(item, value)?;
         Ok(())
     }
 

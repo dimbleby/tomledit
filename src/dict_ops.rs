@@ -40,7 +40,7 @@ pub(crate) fn as_dict_like<'a>(item: &'a ItemRs, op: &str) -> PyResult<&'a dyn T
 pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: Item) {
     // Save the old block comment so we can restore it after replacement,
     // regardless of whether the comment storage location changes.
-    let old_comment = comments::get_key_prefix_comment(item, key);
+    let old_comment = comments::get_block_comment(item, key);
 
     // Tables and ArrayOfTables must stay as-is; into_value() would convert
     // a standard Table ([foo]) into an InlineTable (foo = {}).
@@ -87,7 +87,7 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         let saved_ic = item
             .as_inline_table()
             .filter(|it| !it.contains_key(key))
-            .map(comments::save_it_inline_comments);
+            .map(comments::save_element_comments);
 
         let old_decor = item
             .get(key)
@@ -111,17 +111,17 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         if let Some(mut ic) = saved_ic {
             ic.push(String::new());
             if let Some(it) = item.as_inline_table_mut() {
-                comments::restore_it_inline_comments(it, &ic);
+                comments::restore_element_comments(it, &ic);
             }
         }
     }
 
     // Restore the target's block comment only if the new item doesn't
     // carry one of its own (e.g. copied from another document).
-    if comments::get_key_prefix_comment(item, key).is_none()
+    if comments::get_block_comment(item, key).is_none()
         && let Some(ref c) = old_comment
     {
-        let _ = comments::set_key_prefix_comment(item, key, Some(c));
+        let _ = comments::set_block_comment(item, key, Some(c));
     }
 }
 

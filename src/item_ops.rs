@@ -221,10 +221,8 @@ pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult
             }
             Ok(false)
         }
-        // ScalarProxy overrides __contains__, so this is not expected from Python.
-        _ => Err(PyTypeError::new_err(
-            "TOML scalar item does not support 'in' (use .value to get the Python object)",
-        )),
+        // ScalarProxy overrides __contains__, so this is not reachable from Python.
+        _ => Err(unsupported_op(item, "'in'")),
     }
 }
 

@@ -264,12 +264,10 @@ impl ValuesView {
     fn __contains__(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let doc = self.document.bind(py).borrow();
         doc.check_fresh(&self.path, self.revision)?;
-        let keys = get_keys(&doc.inner, &self.path)?;
         let parent = item_ops::navigate_path(&doc.inner, &self.path)?;
-        for key in &keys {
-            if let Some(item) = parent.get(key.as_str())
-                && equality::item_eq(item, value)?
-            {
+        let tbl = dict_ops::as_dict_like(parent, "__contains__")?;
+        for (_, item) in tbl.iter() {
+            if equality::item_eq(item, value)? {
                 return Ok(true);
             }
         }

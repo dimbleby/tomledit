@@ -6,29 +6,11 @@ use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
 use crate::comments;
-use crate::comments::CommentPreservation;
 use crate::dict_ops;
 use crate::equality;
 use crate::item::Item;
 use crate::item_proxy::ItemProxy;
 use crate::list_ops;
-
-// ---------------------------------------------------------------------------
-// Inline-table comment-preserving helpers
-// ---------------------------------------------------------------------------
-
-/// Remove a key from an inline table, preserving sibling inline comments.
-/// Returns the removed value, or `None` if the key was not found.
-pub(crate) fn it_remove(it: &mut toml_edit::InlineTable, key: &str) -> Option<toml_edit::Value> {
-    let mut ic = it.save_inline_comments();
-    let pos = comments::inline_table_key_position(it, key);
-    let removed = it.remove(key)?;
-    if let Some(pos) = pos {
-        ic.remove(pos);
-    }
-    it.restore_inline_comments(&ic);
-    Some(removed)
-}
 
 // ---------------------------------------------------------------------------
 // Read operations

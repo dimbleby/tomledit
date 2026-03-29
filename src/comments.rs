@@ -192,7 +192,7 @@ pub(crate) fn set_block_comment(
 }
 
 // ---------------------------------------------------------------------------
-// Element comment system — shared abstraction for array and inline-table comments
+// Element comment system — arrays and inline tables
 // ---------------------------------------------------------------------------
 //
 // A "slot" is where toml_edit physically stores an element's inline comment.
@@ -413,11 +413,6 @@ pub(crate) fn set_inline_table_inline_comment(
         next_key.as_deref(),
         &PrefixParts::with_inline(&raw, inline),
     );
-}
-
-/// Find the 0-based position of `key` in an inline table's iteration order.
-pub(crate) fn inline_table_key_position(it: &toml_edit::InlineTable, key: &str) -> Option<usize> {
-    it.iter().position(|(k, _)| k == key)
 }
 
 /// Extract (and clear) an inline comment from a value's decor suffix.

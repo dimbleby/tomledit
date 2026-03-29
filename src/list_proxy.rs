@@ -1,4 +1,3 @@
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::item::Item;
@@ -17,15 +16,7 @@ pub(crate) struct ListProxy;
 impl ListProxy {
     #[staticmethod]
     fn parse(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
-        let result = ItemProxy::parse(py, text)?;
-        if result.bind(py).is_instance_of::<ListProxy>() {
-            Ok(result)
-        } else {
-            Err(PyValueError::new_err(format!(
-                "ListItem.parse() requires an array value, got {}",
-                result.bind(py).get_type().qualname()?,
-            )))
-        }
+        crate::item_proxy::parse_as::<ListProxy>(py, text, "ListItem", "array")
     }
 
     pub fn __iadd__(self_: PyRefMut<'_, Self>, values: &Bound<'_, PyAny>) -> PyResult<()> {

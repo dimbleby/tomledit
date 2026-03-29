@@ -599,3 +599,21 @@ impl ItemProxy {
         Self::into_typed(py, base)
     }
 }
+
+/// Parse a TOML value fragment and verify it produces the expected subclass.
+pub(crate) fn parse_as<T: pyo3::type_object::PyTypeInfo>(
+    py: Python<'_>,
+    text: &str,
+    class_name: &str,
+    expected: &str,
+) -> PyResult<Py<PyAny>> {
+    let result = ItemProxy::parse(py, text)?;
+    if result.bind(py).is_instance_of::<T>() {
+        Ok(result)
+    } else {
+        Err(PyValueError::new_err(format!(
+            "{class_name}.parse() requires a {expected} value, got {}",
+            result.bind(py).get_type().qualname()?,
+        )))
+    }
+}

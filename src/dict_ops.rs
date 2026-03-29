@@ -11,6 +11,23 @@ use crate::item_ops::{self, Key, unsupported_op};
 use crate::item_proxy::ItemProxy;
 
 // ---------------------------------------------------------------------------
+// Inline-table comment-preserving helpers
+// ---------------------------------------------------------------------------
+
+/// Remove a key from an inline table, preserving sibling inline comments.
+/// Returns the removed value, or `None` if the key was not found.
+pub(crate) fn it_remove(it: &mut toml_edit::InlineTable, key: &str) -> Option<toml_edit::Value> {
+    let mut ic = it.save_inline_comments();
+    let pos = it.iter().position(|(k, _)| k == key);
+    let removed = it.remove(key)?;
+    if let Some(pos) = pos {
+        ic.remove(pos);
+    }
+    it.restore_inline_comments(&ic);
+    Some(removed)
+}
+
+// ---------------------------------------------------------------------------
 // Decor helpers
 // ---------------------------------------------------------------------------
 
@@ -175,7 +192,7 @@ pub(crate) fn item_popitem(item: &mut ItemRs) -> PyResult<(String, ItemRs)> {
         ItemRs::Value(ValueRs::InlineTable(it)) => {
             let k = it.iter().last().map(|(k, _)| k.to_owned());
             let k = k.ok_or_else(|| PyKeyError::new_err("popitem(): table is empty"))?;
-            let v = ItemRs::Value(item_ops::it_remove(it, &k).expect("key just found"));
+            let v = ItemRs::Value(it_remove(it, &k).expect("key just found"));
             Ok((k, v))
         }
         _ => Err(unsupported_op(item, "popitem()")),
@@ -457,7 +474,7 @@ pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
             Some(v) => Ok((Item(v), Key::Str(key.into()))),
             None => Err(PyKeyError::new_err(key.to_owned())),
         },
-        ItemRs::Value(ValueRs::InlineTable(it)) => match item_ops::it_remove(it, key) {
+        ItemRs::Value(ValueRs::InlineTable(it)) => match it_remove(it, key) {
             Some(v) => Ok((Item(ItemRs::Value(v)), Key::Str(key.into()))),
             None => Err(PyKeyError::new_err(key.to_owned())),
         },

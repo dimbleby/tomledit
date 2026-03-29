@@ -13,6 +13,7 @@ pub(crate) struct MutationTrie {
     root: TrieNode,
 }
 
+#[derive(Default)]
 struct TrieNode {
     /// Set to the revision at the time this node was last mutated. 0 = never.
     revised_at: u64,
@@ -22,7 +23,7 @@ struct TrieNode {
 impl MutationTrie {
     pub(crate) fn new() -> Self {
         Self {
-            root: TrieNode::new(),
+            root: TrieNode::default(),
         }
     }
 
@@ -61,31 +62,18 @@ impl MutationTrie {
     /// base path into a temporary Vec.
     pub(crate) fn stamp_child(&mut self, path: &[Key], child: &Key, revision: u64) {
         let parent = self.root.walk(path);
-        let child_node = parent
-            .children
-            .entry(child.clone())
-            .or_insert_with(TrieNode::new);
+        let child_node = parent.children.entry(child.clone()).or_default();
         child_node.revised_at = revision;
         child_node.children.clear();
     }
 }
 
 impl TrieNode {
-    fn new() -> Self {
-        Self {
-            revised_at: 0,
-            children: HashMap::new(),
-        }
-    }
-
     /// Walk to the node at `path`, creating intermediates as needed.
     fn walk(&mut self, path: &[Key]) -> &mut Self {
         let mut node = self;
         for key in path {
-            node = node
-                .children
-                .entry(key.clone())
-                .or_insert_with(TrieNode::new);
+            node = node.children.entry(key.clone()).or_default();
         }
         node
     }

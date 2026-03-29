@@ -268,7 +268,7 @@ impl ItemProxy {
                     ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
                         Err(PyKeyError::new_err(bad_key.repr()?.to_string()))
                     }
-                    _ => Err(item_ops::bad_key_type(&bad_key)),
+                    _ => Err(item_ops::invalid_subscript_type(&bad_key)),
                 }
             }
         }
@@ -329,7 +329,7 @@ impl ItemProxy {
                 self.bump_child(&mut doc, replaced_key);
                 Ok(())
             }
-            SubscriptKey::Other(bad_key) => Err(item_ops::bad_key_type(&bad_key)),
+            SubscriptKey::Other(bad_key) => Err(item_ops::invalid_subscript_type(&bad_key)),
         }
     }
 
@@ -363,7 +363,7 @@ impl ItemProxy {
                 self.bump_affected(&mut doc, deleted);
                 Ok(())
             }
-            SubscriptKey::Other(bad_key) => Err(item_ops::bad_key_type(&bad_key)),
+            SubscriptKey::Other(bad_key) => Err(item_ops::invalid_subscript_type(&bad_key)),
         }
     }
 

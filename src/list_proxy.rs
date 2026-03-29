@@ -40,7 +40,7 @@ impl ListProxy {
     ) -> PyResult<Py<PyAny>> {
         // Resolve proxy index before the mutable borrow — extract() on a
         // ScalarItem triggers __index__ which re-borrows the document.
-        let resolved_index = index.map(|i| resolve_proxy(py, i)).transpose()?.flatten();
+        let resolved_index = index.map(|i| resolve_proxy(i)).transpose()?.flatten();
         let index = match (&resolved_index, index) {
             (Some(resolved), _) => Some(resolved.bind(py) as &Bound<'_, PyAny>),
             (None, orig) => orig,

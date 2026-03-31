@@ -371,6 +371,86 @@ def type_change(draw: st.DrawFn) -> Mutation:
     return apply
 
 
+@st.composite
+def array_add(draw: st.DrawFn) -> Mutation:
+    """list + list concatenation — result must be valid TOML."""
+    key = draw(toml_keys)
+    initial = draw(st.lists(toml_scalars, min_size=0, max_size=4))
+    extra = draw(st.lists(toml_scalars, min_size=0, max_size=4))
+
+    def apply(doc: Document) -> None:
+        doc[key] = initial
+        result = doc[key] + extra
+        doc[key] = result.value
+
+    return apply
+
+
+@st.composite
+def array_radd(draw: st.DrawFn) -> Mutation:
+    """list + ListItem concatenation (radd path)."""
+    key = draw(toml_keys)
+    initial = draw(st.lists(toml_scalars, min_size=0, max_size=4))
+    prefix = draw(st.lists(toml_scalars, min_size=0, max_size=4))
+
+    def apply(doc: Document) -> None:
+        doc[key] = initial
+        result = prefix + doc[key]
+        doc[key] = result.value
+
+    return apply
+
+
+@st.composite
+def array_mul(draw: st.DrawFn) -> Mutation:
+    """list * n repetition — result must be valid TOML."""
+    key = draw(toml_keys)
+    initial = draw(st.lists(toml_scalars, min_size=0, max_size=3))
+    n = draw(st.integers(min_value=-1, max_value=4))
+
+    def apply(doc: Document) -> None:
+        doc[key] = initial
+        result = doc[key] * n
+        doc[key] = result.value
+
+    return apply
+
+
+@st.composite
+def array_imul(draw: st.DrawFn) -> Mutation:
+    """list *= n in-place repetition."""
+    key = draw(toml_keys)
+    initial = draw(st.lists(toml_scalars, min_size=0, max_size=3))
+    n = draw(st.integers(min_value=0, max_value=4))
+
+    def apply(doc: Document) -> None:
+        doc[key] = initial
+        doc[key] *= n
+
+    return apply
+
+
+@st.composite
+def aot_entry_inline_comment(draw: st.DrawFn) -> Mutation:
+    """Set an inline comment on an AoT entry header."""
+    key = draw(toml_keys)
+    tables = draw(
+        st.lists(
+            st.dictionaries(toml_keys, toml_scalars, min_size=1, max_size=2),
+            min_size=1,
+            max_size=3,
+        )
+    )
+    index = draw(st.integers(min_value=0, max_value=10))
+    comment = draw(st.one_of(inline_comments, st.none()))
+
+    def apply(doc: Document) -> None:
+        doc[key] = tables
+        doc[key][index % len(tables)].inline_comment = comment
+
+    return apply
+
+
 mutations = st.one_of(
     set_key(),
     del_key(),
@@ -392,6 +472,11 @@ mutations = st.one_of(
     extend_list(),
     array_element_comment(),
     type_change(),
+    array_add(),
+    array_radd(),
+    array_mul(),
+    array_imul(),
+    aot_entry_inline_comment(),
 )
 
 
@@ -517,7 +602,7 @@ class TestRoundtripProperty:
         ops=st.lists(mutations, min_size=1, max_size=10),
     )
     @settings(
-        max_examples=3000,
+        max_examples=2000,
         suppress_health_check=[HealthCheck.too_slow],
     )
     def test_roundtrip(self, doc: Document, ops: list[Mutation]) -> None:

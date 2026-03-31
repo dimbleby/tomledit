@@ -179,10 +179,17 @@ impl ItemProxy {
         };
         let parent = self.navigate_parent(doc)?;
         match last {
-            Key::Int(idx) => Ok(comments::get_array_inline_comment(parent, *idx)),
+            // Plain array elements store their inline comment in the
+            // element's decor prefix.  AoT entries are tables whose own
+            // decor suffix holds the comment — fall through to the
+            // item-level handler for those.
+            Key::Int(idx) if parent.is_value() => {
+                Ok(comments::get_array_inline_comment(parent, *idx))
+            }
             Key::Str(key) => Ok(parent
                 .as_inline_table()
                 .and_then(|it| comments::get_inline_table_inline_comment(it, key))),
+            _ => Ok(None),
         }
     }
 
@@ -556,12 +563,11 @@ impl ItemProxy {
         };
         if let Some(Key::Int(idx)) = self.path.last() {
             let parent = self.navigate_parent_mut(&mut doc.inner)?;
-            let array = parent
-                .as_value_mut()
-                .and_then(|v| v.as_array_mut())
-                .ok_or_else(|| PyTypeError::new_err("parent is not an array"))?;
-            comments::set_array_inline_comment(array, *idx, &raw);
-            return Ok(());
+            if let Some(array) = parent.as_value_mut().and_then(|v| v.as_array_mut()) {
+                comments::set_array_inline_comment(array, *idx, &raw);
+                return Ok(());
+            }
+            // AoT entries are tables — fall through to item-level handler.
         }
         if let Some(Key::Str(key)) = self.path.last()
             && self.path.len() >= 2

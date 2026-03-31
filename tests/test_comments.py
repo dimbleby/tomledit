@@ -1527,8 +1527,8 @@ class TestAotEntryComments:
         assert doc["items"][0].comment is None
         assert doc["items"][1].comment is None
 
-    def test_aot_entry_inline_comment_is_none(self) -> None:
-        """AoT entries have no decor suffix — inline_comment returns None."""
+    def test_aot_entry_inline_comment_roundtrip(self) -> None:
+        """AoT entries support inline comments on the ``[[header]]``."""
         doc = Document.parse(
             toml_literal("""
             [[items]]
@@ -1539,6 +1539,23 @@ class TestAotEntryComments:
         )
         assert doc["items"][0].inline_comment is None
         assert doc["items"][1].inline_comment is None
+        doc["items"][0].inline_comment = "# first"
+        doc["items"][1].inline_comment = "# second"
+        assert doc["items"][0].inline_comment == "# first"
+        assert doc["items"][1].inline_comment == "# second"
+        assert doc.as_toml() == toml_literal("""
+            [[items]] # first
+            name = "a"
+            [[items]] # second
+            name = "b"
+        """)
+
+    def test_aot_entry_clear_inline_comment(self) -> None:
+        doc = Document.parse("[[t]] # note\nk = 1\n")
+        assert doc["t"][0].inline_comment == "# note"
+        doc["t"][0].inline_comment = None
+        assert doc["t"][0].inline_comment is None
+        assert doc.as_toml() == "[[t]]\nk = 1\n"
 
     # ---- AoT entry comments survive mutations ----
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import toml_literal
-from tomledit import Document
+from tomledit import Document, ListItem
 
 # ---------------------------------------------------------------------------
 # Item: list-like methods (append, insert, pop, remove, extend, clear)
@@ -504,6 +504,239 @@ class TestIadd:
         assert len(doc["items"]) == 3
         assert doc["items"][1] == {"name": "b"}
         assert doc["items"][2] == {"name": "c"}
+
+
+class TestAdd:
+    """list + list returns a new ListItem (non-mutating, format-preserving)."""
+
+    def test_add_two_arrays(self) -> None:
+        doc = Document({"a": [1, 2], "b": [3, 4]})
+        result = doc["a"] + doc["b"]
+        assert result == [1, 2, 3, 4]
+        assert isinstance(result, ListItem)
+
+    def test_add_array_and_plain_list(self) -> None:
+        doc = Document({"a": [1, 2]})
+        result = doc["a"] + [3, 4]
+        assert result == [1, 2, 3, 4]
+        assert isinstance(result, ListItem)
+
+    def test_add_does_not_mutate_document(self) -> None:
+        doc = Document({"a": [1, 2]})
+        _ = doc["a"] + [3]
+        assert doc["a"] == [1, 2]
+
+    def test_radd_plain_list_plus_array(self) -> None:
+        doc = Document({"a": [3, 4]})
+        result = [1, 2] + doc["a"]
+        assert result == [1, 2, 3, 4]
+        assert isinstance(result, ListItem)
+
+    def test_add_empty(self) -> None:
+        doc = Document({"a": [1, 2]})
+        assert doc["a"] + [] == [1, 2]
+        assert [] + doc["a"] == [1, 2]
+
+    def test_add_non_iterable_returns_not_implemented(self) -> None:
+        doc = Document({"a": [1, 2]})
+        with pytest.raises(TypeError):
+            _ = doc["a"] + 42
+
+    def test_radd_non_iterable_returns_not_implemented(self) -> None:
+        doc = Document({"a": [1, 2]})
+        with pytest.raises(TypeError):
+            _ = 42 + doc["a"]
+
+    def test_add_preserves_formatting(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            arr = [
+                # first
+                1,
+                # second
+                2,
+            ]
+        """)
+        )
+        result = doc["arr"] + [3]
+        assert result.as_toml() + "\n" == toml_literal("""
+            [
+                # first
+                1,
+                # second
+                2,
+                3,
+            ]
+        """)
+
+    def test_add_two_listitem_preserves_comments(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            a = [
+                # x
+                1,
+            ]
+            b = [
+                # y
+                2,
+            ]
+        """)
+        )
+        result = doc["a"] + doc["b"]
+        assert result.as_toml() + "\n" == toml_literal("""
+            [
+                # x
+                1,
+                # y
+                2,
+            ]
+        """)
+
+    def test_radd_two_listitems(self) -> None:
+        doc = Document({"a": [1, 2], "b": [3, 4]})
+        result = doc["b"] + doc["a"]
+        assert result == [3, 4, 1, 2]
+        assert isinstance(result, ListItem)
+
+    def test_add_aot(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
+        result = doc["items"] + [{"name": "b"}]
+        assert len(result) == 2
+        assert result[1] == {"name": "b"}
+
+    def test_add_array_plus_aot(self) -> None:
+        """Cross-kind: plain array + AoT works (falls back to value extraction)."""
+        doc = Document.parse(
+            toml_literal("""
+            arr = [1, 2]
+
+            [[tbl]]
+            name = "a"
+        """)
+        )
+        result = doc["arr"] + doc["tbl"]
+        assert result.as_toml() == '[1, 2, { name = "a" }]'
+        assert isinstance(result, ListItem)
+
+    def test_add_aot_plus_array(self) -> None:
+        """Cross-kind: AoT + plain array raises TypeError (AoT only holds tables)."""
+        doc = Document.parse(
+            toml_literal("""
+            arr = [1, 2]
+
+            [[tbl]]
+            name = "a"
+        """)
+        )
+        with pytest.raises(TypeError):
+            _ = doc["tbl"] + doc["arr"]
+
+    def test_mul_aot(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
+        result = doc["items"] * 2
+        assert len(result) == 2
+        assert result[0] == {"name": "a"}
+        assert result[1] == {"name": "a"}
+
+
+class TestMul:
+    """list * n returns a new repeated ListItem (non-mutating, format-preserving)."""
+
+    def test_mul_repeat(self) -> None:
+        doc = Document({"a": [1, 2]})
+        result = doc["a"] * 3
+        assert result == [1, 2, 1, 2, 1, 2]
+        assert isinstance(result, ListItem)
+
+    def test_rmul(self) -> None:
+        doc = Document({"a": [1, 2]})
+        result = 3 * doc["a"]
+        assert result == [1, 2, 1, 2, 1, 2]
+        assert isinstance(result, ListItem)
+
+    def test_mul_zero(self) -> None:
+        doc = Document({"a": [1, 2]})
+        assert doc["a"] * 0 == []
+
+    def test_mul_does_not_mutate_document(self) -> None:
+        doc = Document({"a": [1, 2]})
+        _ = doc["a"] * 3
+        assert doc["a"] == [1, 2]
+
+    def test_imul(self) -> None:
+        doc = Document({"a": [1, 2]})
+        doc["a"] *= 3
+        assert doc["a"] == [1, 2, 1, 2, 1, 2]
+
+    def test_imul_zero(self) -> None:
+        doc = Document({"a": [1, 2]})
+        doc["a"] *= 0
+        assert doc["a"] == []
+
+    def test_imul_one_is_noop(self) -> None:
+        doc = Document({"a": [1, 2]})
+        doc["a"] *= 1
+        assert doc["a"] == [1, 2]
+
+    def test_imul_preserves_formatting(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            arr = [
+                # first
+                1,
+                # second
+                2,
+            ]
+        """)
+        )
+        doc["arr"] *= 2
+        assert doc.as_toml() == toml_literal("""
+            arr = [
+                # first
+                1,
+                # second
+                2,
+                # first
+                1,
+                # second
+                2,
+            ]
+        """)
+
+    def test_mul_preserves_formatting(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            arr = [
+                # first
+                1,
+                # second
+                2,
+            ]
+        """)
+        )
+        result = doc["arr"] * 2
+        assert result.as_toml() + "\n" == toml_literal("""
+            [
+                # first
+                1,
+                # second
+                2,
+                # first
+                1,
+                # second
+                2,
+            ]
+        """)
 
 
 # ---------------------------------------------------------------------------

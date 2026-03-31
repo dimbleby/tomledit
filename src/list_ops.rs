@@ -67,6 +67,14 @@ pub(crate) fn as_array_like<'a>(item: &'a ItemRs, op: &str) -> PyResult<ArrayLik
     }
 }
 
+/// Check if `obj` is a plain `list` or a `ListItem` proxy.
+pub(crate) fn is_list_like(obj: &Bound<'_, PyAny>, py: Python<'_>) -> bool {
+    obj.is_instance_of::<pyo3::types::PyList>()
+        || obj
+            .is_instance(&py.get_type::<crate::list_proxy::ListProxy>())
+            .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------

@@ -442,12 +442,8 @@ pub(crate) fn take_value_inline_comment(value: &mut ValueRs) -> String {
 // Array element block comments
 // ---------------------------------------------------------------------------
 
-/// Get the block comment before an array element from its value's decor prefix.
-pub(crate) fn get_element_block_comment(item: &ItemRs) -> Option<String> {
-    let decor = match item {
-        ItemRs::Value(v) => v.decor(),
-        _ => return None,
-    };
+/// Get the block comment from an element's decor prefix.
+pub(crate) fn get_element_block_comment(decor: &toml_edit::Decor) -> Option<String> {
     let raw = decor.prefix()?.as_str()?;
     let parts = PrefixParts::split(raw);
     if parts.block.is_empty() {
@@ -456,18 +452,12 @@ pub(crate) fn get_element_block_comment(item: &ItemRs) -> Option<String> {
     extract_block_comment(&parts.block)
 }
 
-/// Set the block comment before an array element, preserving any inline comment
-/// on the previous element and the indentation.
-pub(crate) fn set_element_block_comment(item: &mut ItemRs, comment: Option<&str>) -> PyResult<()> {
-    let decor = match item {
-        ItemRs::Value(v) => v.decor_mut(),
-        _ => {
-            return Err(PyTypeError::new_err(format!(
-                "'{}' does not support comment_before",
-                item.type_name()
-            )));
-        }
-    };
+/// Set the block comment in an element's decor prefix, preserving any inline
+/// comment on the previous element and the indentation.
+pub(crate) fn set_element_block_comment(
+    decor: &mut toml_edit::Decor,
+    comment: Option<&str>,
+) -> PyResult<()> {
     let raw = decor.prefix().and_then(|r| r.as_str()).unwrap_or_default();
     let mut parts = PrefixParts::split(raw);
     parts.block = build_block_or_default(comment, &parts.indent, "")?;

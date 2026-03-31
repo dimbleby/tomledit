@@ -789,18 +789,6 @@ class TestComment:
         with pytest.raises(TypeError, match="does not support"):
             doc["s"].inline_comment = "# nope"
 
-    def test_comment_on_aot_element_rejected(self) -> None:
-        doc = Document.parse(
-            toml_literal("""
-            [[s]]
-            name = 'a'
-            [[s]]
-            name = 'b'
-        """)
-        )
-        with pytest.raises(TypeError, match="does not support"):
-            doc["s"][0].comment = "# nope"
-
     # ---- table section block comments ----
 
     def test_read_table_comment(self) -> None:
@@ -1390,32 +1378,6 @@ class TestComment:
         doc["items"].comment = None
         assert doc["items"].comment is None
 
-    def test_aot_element_block_comment_is_none(self) -> None:
-        """AoT element is a Table, not a Value — no block comment via decor."""
-        doc = Document.parse(
-            toml_literal("""
-            [[items]]
-            name = "a"
-            [[items]]
-            name = "b"
-        """)
-        )
-        assert doc["items"][0].comment is None
-        assert doc["items"][1].comment is None
-
-    def test_aot_element_inline_comment_is_none(self) -> None:
-        """AoT parent is not an array Value — inline_comment returns None."""
-        doc = Document.parse(
-            toml_literal("""
-            [[items]]
-            name = "a"
-            [[items]]
-            name = "b"
-        """)
-        )
-        assert doc["items"][0].inline_comment is None
-        assert doc["items"][1].inline_comment is None
-
     # ---- comments survive mutations ----
 
     def test_comments_preserved_on_scalar_to_table(self) -> None:
@@ -1482,6 +1444,359 @@ class TestComment:
             [owner]
             name = "Bob"  # the owner name
             age = 30
+        """)
+
+
+class TestAotEntryComments:
+    """Comments on individual AoT entries (``[[section]]`` headers).
+
+    Regular ``[table]`` comments are readable and settable via ``.comment``.
+    The same should work for each ``[[array-of-tables]]`` entry.
+    """
+
+    def test_read_comment_on_aot_entry(self) -> None:
+        """A comment above an AoT entry header should be readable."""
+        doc = Document.parse(
+            toml_literal("""
+            # first entry
+            [[items]]
+            name = "a"
+
+            # second entry
+            [[items]]
+            name = "b"
+        """)
+        )
+        assert doc["items"][0].comment == "# first entry"
+        assert doc["items"][1].comment == "# second entry"
+
+    def test_set_comment_on_aot_entry(self) -> None:
+        """Setting a comment on an AoT entry should round-trip."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
+        doc["items"][0].comment = "# about first"
+        assert doc["items"][0].comment == "# about first"
+        assert doc.as_toml() == toml_literal("""
+            # about first
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+
+    def test_clear_comment_on_aot_entry(self) -> None:
+        """Setting comment to None should remove it."""
+        doc = Document.parse(
+            toml_literal("""
+            # will be removed
+            [[items]]
+            name = "a"
+        """)
+        )
+        doc["items"][0].comment = None
+        assert doc["items"][0].comment is None
+
+    def test_aot_entry_comment_survives_reparse(self) -> None:
+        """Comments set on AoT entries survive a round-trip through TOML."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
+        doc["items"][0].comment = "# annotated"
+        reparsed = Document.parse(doc.as_toml())
+        assert reparsed["items"][0].comment == "# annotated"
+
+    def test_aot_entry_block_comment_is_none_when_absent(self) -> None:
+        """AoT entries with no preceding comment return None."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
+        assert doc["items"][0].comment is None
+        assert doc["items"][1].comment is None
+
+    def test_aot_entry_inline_comment_is_none(self) -> None:
+        """AoT entries have no decor suffix — inline_comment returns None."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
+        assert doc["items"][0].inline_comment is None
+        assert doc["items"][1].inline_comment is None
+
+    # ---- AoT entry comments survive mutations ----
+
+    def test_replace_entry_0_preserves_comment(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            # first
+            [[items]]
+            name = "a"
+
+            # second
+            [[items]]
+            name = "b"
+        """)
+        )
+        doc["items"][0] = {"name": "replaced"}
+        assert doc["items"][0].comment == "# first"
+        assert doc["items"][1].comment == "# second"
+        assert doc.as_toml() == toml_literal("""
+            # first
+            [[items]]
+            name = "replaced"
+
+            # second
+            [[items]]
+            name = "b"
+        """)
+
+    def test_replace_entry_0_preserves_compact_spacing(self) -> None:
+        """Replacing entry 0 in a compact AoT should not inject a blank line."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
+        doc["items"][0] = {"name": "replaced"}
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "replaced"
+            [[items]]
+            name = "b"
+        """)
+
+    def test_replace_middle_entry_preserves_comment(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            # first
+            [[items]]
+            name = "a"
+
+            # second
+            [[items]]
+            name = "b"
+
+            # third
+            [[items]]
+            name = "c"
+        """)
+        )
+        doc["items"][1] = {"name": "replaced"}
+        assert doc["items"][0].comment == "# first"
+        assert doc["items"][1].comment == "# second"
+        assert doc["items"][2].comment == "# third"
+
+    def test_replace_last_entry_preserves_comment(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            # first
+            [[items]]
+            name = "a"
+
+            # last
+            [[items]]
+            name = "b"
+        """)
+        )
+        doc["items"][1] = {"name": "replaced"}
+        assert doc["items"][1].comment == "# last"
+
+    def test_remove_entry_0_cleans_new_first_prefix(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            # first
+            [[items]]
+            name = "a"
+
+            # second
+            [[items]]
+            name = "b"
+
+            # third
+            [[items]]
+            name = "c"
+        """)
+        )
+        del doc["items"][0]
+        assert doc["items"][0].comment == "# second"
+        assert doc["items"][1].comment == "# third"
+
+    def test_remove_entry_0_no_comments(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
+        del doc["items"][0]
+        assert doc["items"][0].comment is None
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "b"
+        """)
+
+    def test_contiguous_slice_replace_preserves_first_comment(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            # first
+            [[items]]
+            name = "a"
+
+            # second
+            [[items]]
+            name = "b"
+
+            # third
+            [[items]]
+            name = "c"
+        """)
+        )
+        doc["items"][0:2] = [{"name": "x"}]
+        assert doc["items"][0].comment == "# first"
+        assert doc["items"][1].comment == "# third"
+
+    def test_slice_del_entry_0_cleans_prefix(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            # first
+            [[items]]
+            name = "a"
+
+            # second
+            [[items]]
+            name = "b"
+
+            # third
+            [[items]]
+            name = "c"
+        """)
+        )
+        del doc["items"][0:2]
+        assert doc["items"][0].comment == "# third"
+
+    def test_extended_slice_replace_preserves_first_comment(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            # first
+            [[items]]
+            name = "a"
+
+            # second
+            [[items]]
+            name = "b"
+
+            # third
+            [[items]]
+            name = "c"
+        """)
+        )
+        doc["items"][::2] = [{"name": "x"}, {"name": "z"}]
+        assert doc["items"][0].comment == "# first"
+        assert doc["items"][1].comment == "# second"
+
+    def test_set_comment_on_non_first_aot_entry(self) -> None:
+        """Setting a comment on entry 1+ uses element decor, not key decor."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
+        doc["items"][1].comment = "# second"
+        assert doc["items"][1].comment == "# second"
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+
+            # second
+            [[items]]
+            name = "b"
+        """)
+
+    def test_contiguous_slice_on_commentless_aot(self) -> None:
+        """Contiguous slice starting at 0 on AoT with no comments."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+            [[items]]
+            name = "c"
+        """)
+        )
+        doc["items"][0:2] = [{"name": "x"}]
+        assert doc["items"][0].comment is None
+        assert doc["items"][1].comment is None
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "x"
+            [[items]]
+            name = "c"
+        """)
+
+    def test_contiguous_slice_replace_multiple(self) -> None:
+        """Replace [0:2] with two entries — exercises the spacing loop."""
+        doc = Document.parse(
+            toml_literal("""
+            # first
+            [[items]]
+            name = "a"
+
+            # second
+            [[items]]
+            name = "b"
+
+            # third
+            [[items]]
+            name = "c"
+        """)
+        )
+        doc["items"][0:2] = [{"name": "x"}, {"name": "y"}]
+        assert doc["items"][0].comment == "# first"
+        assert doc["items"][2].comment == "# third"
+
+    def test_replace_commentless_entry(self) -> None:
+        """Replacing an entry that had no comment preserves the no-comment state."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "b"
+        """)
+        )
+        doc["items"][1] = {"name": "replaced"}
+        assert doc["items"][1].comment is None
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+            [[items]]
+            name = "replaced"
         """)
 
 

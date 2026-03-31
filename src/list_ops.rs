@@ -151,6 +151,38 @@ fn apply_first_prefix(arr: &mut toml_edit::Array, prefix: Option<String>) {
     }
 }
 
+/// Save the decor prefix of an AoT entry at `index`.
+///
+/// Block comments and spacing separators live in each table's decor prefix.
+/// Mutations that replace an entry must save this first, then stamp the
+/// saved prefix onto the new table before inserting/replacing it.
+pub(crate) fn save_aot_entry_prefix(aot: &toml_edit::ArrayOfTables, index: usize) -> String {
+    aot.iter()
+        .nth(index)
+        .and_then(|t| t.decor().prefix()?.as_str())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Clean up the first AoT entry's decor prefix after a removal.
+///
+/// When entry 0 is removed, the new first entry may have a leading `\n`
+/// separator (left over from being a non-first entry).  Strip it.
+pub(crate) fn fix_first_aot_prefix(aot: &mut toml_edit::ArrayOfTables) {
+    let Some(first) = aot.iter_mut().next() else {
+        return;
+    };
+    if let Some(stripped) = first
+        .decor()
+        .prefix()
+        .and_then(|r| r.as_str())
+        .and_then(|s| s.strip_prefix('\n'))
+    {
+        let stripped = stripped.to_owned();
+        first.decor_mut().set_prefix(stripped);
+    }
+}
+
 /// After inserting a new table at position `pos`, ensure the affected element
 /// has the correct blank-line spacing to match its neighbours.
 ///
@@ -307,8 +339,12 @@ pub(crate) fn item_delitem_slice(target: ArrayLikeMut<'_>, indices: &[usize]) ->
             Ok(())
         }
         ArrayLikeMut::Aot(aot) => {
+            let removing_first = sorted.last() == Some(&0);
             for idx in sorted {
                 aot.remove(idx);
+            }
+            if removing_first {
+                fix_first_aot_prefix(aot);
             }
             Ok(())
         }
@@ -418,7 +454,7 @@ fn aot_setitem_slice(
 ) -> PyResult<()> {
     // Validate all values up front so a bad element never leaves the AoT
     // in a partially-mutated state.
-    let tables: Vec<toml_edit::Table> = values
+    let mut tables: Vec<toml_edit::Table> = values
         .into_iter()
         .map(require_table)
         .collect::<PyResult<_>>()?;
@@ -427,13 +463,28 @@ fn aot_setitem_slice(
         let start_idx = start as usize;
         let stop_idx = stop as usize;
         let tables_count = tables.len();
+        let saved = (start_idx == 0 && stop_idx > 0).then(|| save_aot_entry_prefix(aot, 0));
         for i in (start_idx..stop_idx).rev() {
             aot.remove(i);
+        }
+        if let Some(prefix) = &saved
+            && let Some(first) = tables.first_mut()
+        {
+            first.decor_mut().set_prefix(prefix);
         }
         for (offset, table) in tables.into_iter().enumerate() {
             aot.insert(start_idx + offset, table);
         }
-        for i in start_idx..start_idx + tables_count {
+        // fix_inserted_aot_spacing(aot, 0) targets index 1.  When that is
+        // an old survivor (tables_count <= 1) rather than a newly inserted
+        // entry, skip — its prefix is already correct, and the spacing
+        // detector can't infer the style from index 0 alone.
+        let spacing_start = if start_idx == 0 && tables_count <= 1 {
+            1
+        } else {
+            start_idx
+        };
+        for i in spacing_start..start_idx + tables_count {
             fix_inserted_aot_spacing(aot, i);
         }
     } else {
@@ -445,9 +496,17 @@ fn aot_setitem_slice(
                 indices.len()
             )));
         }
+        // Save all affected entries' prefixes, then stamp them onto the new
+        // tables before replacing so the decor travels with the table.
+        let saved: Vec<String> = indices
+            .iter()
+            .map(|&idx| save_aot_entry_prefix(aot, idx))
+            .collect();
+        for (table, prefix) in tables.iter_mut().zip(&saved) {
+            table.decor_mut().set_prefix(prefix);
+        }
         for (idx, table) in indices.into_iter().zip(tables) {
             aot.replace(idx, table);
-            fix_inserted_aot_spacing(aot, idx);
         }
     }
     Ok(())
@@ -619,6 +678,9 @@ pub(crate) fn item_remove_at(target: ArrayLikeMut<'_>, index: usize) -> PyResult
             }
             let affected = Affected::for_removal(index, aot.len());
             let removed = aot.remove(index);
+            if index == 0 {
+                fix_first_aot_prefix(aot);
+            }
             Ok((Item(ItemRs::Table(removed)), affected))
         }
     }

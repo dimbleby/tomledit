@@ -185,6 +185,30 @@ impl ItemProxy {
                 .and_then(|it| comments::get_inline_table_inline_comment(it, key))),
         }
     }
+
+    /// Resolve the block-comment location for this proxy.
+    ///
+    /// For string-keyed paths and first-AoT-entry paths, the comment lives
+    /// on a key's decor in an ancestor item — returns `Some((ancestor_path,
+    /// key))`.  For plain array elements the comment lives in the element's
+    /// own decor — returns `None`.
+    fn block_comment_target<'a>(
+        &'a self,
+        doc: &DocumentRs,
+    ) -> PyResult<Option<(&'a [Key], &'a str)>> {
+        match self.path.last() {
+            Some(Key::Str(key)) => Ok(Some((&self.path[..self.path.len() - 1], key))),
+            Some(Key::Int(0)) if self.path.len() >= 2 => {
+                if self.navigate_parent(doc)?.is_array_of_tables()
+                    && let Some(Key::Str(aot_key)) = self.path.get(self.path.len() - 2)
+                {
+                    return Ok(Some((&self.path[..self.path.len() - 2], aot_key)));
+                }
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -462,20 +486,21 @@ impl ItemProxy {
     /// The comment lines before this entry, or None.
     #[getter]
     pub fn comment(&self, py: Python<'_>) -> PyResult<Option<String>> {
-        let Some(last_key) = self.path.last() else {
+        if self.path.is_empty() {
             return Ok(None);
-        };
+        }
         let doc = self.document.bind(py).borrow();
         self.check_fresh(&doc)?;
-        match last_key {
-            Key::Str(key_str) => {
-                let parent = self.navigate_parent(&doc.inner)?;
-                Ok(comments::get_block_comment(parent, key_str))
-            }
-            Key::Int(_) => {
-                let item = self.navigate(&doc.inner)?;
-                Ok(comments::get_element_block_comment(item))
-            }
+        if let Some((ancestor_path, key)) = self.block_comment_target(&doc.inner)? {
+            let ancestor = item_ops::navigate_path(&doc.inner, ancestor_path)?;
+            Ok(comments::get_block_comment(ancestor, key))
+        } else {
+            let item = self.navigate(&doc.inner)?;
+            let decor = item
+                .as_value()
+                .map(|v| v.decor())
+                .or(item.as_table().map(|t| t.decor()));
+            Ok(decor.and_then(comments::get_element_block_comment))
         }
     }
 
@@ -486,20 +511,23 @@ impl ItemProxy {
     /// the entry.
     #[setter]
     pub fn set_comment(&self, py: Python<'_>, value: Option<&str>) -> PyResult<()> {
-        let Some(last_key) = self.path.last() else {
+        if self.path.is_empty() {
             return Err(PyTypeError::new_err("cannot set comment on root"));
-        };
+        }
         let mut doc = self.document.bind(py).borrow_mut();
         self.check_fresh(&doc)?;
-        match last_key {
-            Key::Str(key_str) => {
-                let parent = self.navigate_parent_mut(&mut doc.inner)?;
-                comments::set_block_comment(parent, key_str, value)?;
-            }
-            Key::Int(_) => {
-                let item = self.navigate_mut(&mut doc.inner)?;
-                comments::set_element_block_comment(item, value)?;
-            }
+        if let Some((ancestor_path, key)) = self.block_comment_target(&doc.inner)? {
+            let key = key.to_owned();
+            let ancestor = item_ops::navigate_path_mut(&mut doc.inner, ancestor_path)?;
+            comments::set_block_comment(ancestor, &key, value)?;
+        } else {
+            let item = self.navigate_mut(&mut doc.inner)?;
+            let decor = match item {
+                ItemRs::Value(v) => v.decor_mut(),
+                ItemRs::Table(t) => t.decor_mut(),
+                _ => return Ok(()),
+            };
+            comments::set_element_block_comment(decor, value)?;
         }
         Ok(())
     }

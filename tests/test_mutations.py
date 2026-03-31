@@ -210,7 +210,6 @@ class TestArrayOfTablesMutation:
         assert doc.as_toml() == toml_literal("""
             [[items]]
             name = "replaced"
-
             [[items]]
             name = "b"
         """)

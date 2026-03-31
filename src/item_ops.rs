@@ -443,9 +443,10 @@ pub(crate) fn item_setitem_int(item: &mut ItemRs, idx_raw: i64, value: Item) -> 
         }
         ItemRs::ArrayOfTables(aot) => {
             let idx = list_ops::resolve_index(idx_raw, aot.len())?;
-            let table = list_ops::require_table(value)?;
+            let mut table = list_ops::require_table(value)?;
+            let saved = list_ops::save_aot_entry_prefix(aot, idx);
+            table.decor_mut().set_prefix(&saved);
             aot.replace(idx, table);
-            list_ops::fix_inserted_aot_spacing(aot, idx);
             Ok(Key::Int(idx))
         }
         _ => Err(subscript_type_error(item)),

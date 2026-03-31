@@ -14,7 +14,7 @@ from collections.abc import (
 from collections.abc import (
     ValuesView as _ValuesView,
 )
-from typing import Any, TypeVar, overload
+from typing import Any, SupportsIndex, TypeVar, overload
 
 from typing_extensions import Self, override
 
@@ -196,6 +196,17 @@ class ListItem(Item, MutableSequence[Any]):
     @property
     @override
     def value(self) -> list[Any]: ...
+    @override
+    def __add__(self, other: list[Any] | ListItem, /) -> ListItem: ...  # ty: ignore[invalid-method-override]
+    @override
+    def __radd__(self, other: list[Any] | ListItem, /) -> ListItem: ...  # ty: ignore[invalid-method-override]
+    @override
+    def __iadd__(self, other: Iterable[Any], /) -> Self: ...  # ty: ignore[invalid-method-override]
+    @override
+    def __mul__(self, n: SupportsIndex, /) -> ListItem: ...  # ty: ignore[invalid-method-override]
+    @override
+    def __rmul__(self, n: SupportsIndex, /) -> ListItem: ...  # ty: ignore[invalid-method-override]
+    def __imul__(self, n: SupportsIndex, /) -> Self: ...
 
 class ScalarItem(Item):
     @staticmethod

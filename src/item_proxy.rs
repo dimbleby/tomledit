@@ -313,10 +313,7 @@ impl ItemProxy {
 
         match resolved {
             SubscriptKey::Slice(slice) => {
-                let values: Vec<Item> = value
-                    .try_iter()?
-                    .map(|r| r.and_then(|v| v.extract::<Item>()))
-                    .collect::<PyResult<_>>()?;
+                let values = crate::list_proxy::collect_items(value)?;
                 let mut doc = self.document.bind(py).borrow_mut();
                 self.check_fresh(&doc)?;
                 let item = self.navigate_mut(&mut doc.inner)?;

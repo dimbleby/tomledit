@@ -1,7 +1,9 @@
 use pyo3::prelude::*;
+use toml_edit::DocumentMut as DocumentRs;
 
+use crate::document::Document;
 use crate::item::Item;
-use crate::item_ops;
+use crate::item_ops::{self, Key};
 use crate::item_proxy::{ItemProxy, resolve_proxy};
 use crate::list_ops;
 
@@ -12,6 +14,71 @@ use crate::list_ops;
 #[pyclass(name = "ListItem", module = "tomledit", extends = ItemProxy)]
 pub(crate) struct ListProxy;
 
+impl ListProxy {
+    fn wrap_in_doc(py: Python<'_>, new_doc: DocumentRs) -> PyResult<Py<PyAny>> {
+        let doc_py = Py::new(py, Document::from_inner(new_doc))?;
+        let proxy = ItemProxy::new(doc_py, vec![Key::Str("_".to_owned())], 0);
+        ItemProxy::into_typed(py, proxy)
+    }
+}
+
+/// Shared-borrow a proxy's document and clone the underlying `toml_edit::Item`.
+fn clone_self_item(base: &ItemProxy, py: Python<'_>) -> PyResult<toml_edit::Item> {
+    let doc = base.document.bind(py).borrow();
+    base.check_fresh(&doc)?;
+    Ok(base.navigate(&doc.inner)?.clone())
+}
+
+/// Clone elements from `source` into `dest`, preserving formatting and comments.
+///
+/// Both items must be the same array kind (both plain arrays, or both AoT).
+/// Returns `true` if the types matched and elements were cloned, `false` if
+/// the types are incompatible (e.g. array + AoT) — the caller should fall
+/// back to value extraction in that case.
+fn clone_elements_into(dest: &mut toml_edit::Item, source: &toml_edit::Item, n: usize) -> bool {
+    match (dest, source) {
+        (
+            toml_edit::Item::Value(toml_edit::Value::Array(dest_arr)),
+            toml_edit::Item::Value(toml_edit::Value::Array(src_arr)),
+        ) => {
+            for _ in 0..n {
+                for v in src_arr.iter() {
+                    dest_arr.push_formatted(v.clone());
+                }
+            }
+            true
+        }
+        (toml_edit::Item::ArrayOfTables(dest_aot), toml_edit::Item::ArrayOfTables(src_aot)) => {
+            for _ in 0..n {
+                for t in src_aot.iter() {
+                    dest_aot.push(t.clone());
+                }
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Create an empty array-like item matching the kind (array vs AoT) of `source`.
+fn empty_array_like(source: list_ops::ArrayLikeRef<'_>) -> toml_edit::Item {
+    match source {
+        list_ops::ArrayLikeRef::Array(_) => {
+            toml_edit::Item::Value(toml_edit::Value::Array(toml_edit::Array::new()))
+        }
+        list_ops::ArrayLikeRef::Aot(_) => {
+            toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new())
+        }
+    }
+}
+
+/// Extract Python values from an iterable into a `Vec<Item>`.
+pub(crate) fn collect_items(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Item>> {
+    obj.try_iter()?
+        .map(|r| r.and_then(|v| v.extract::<Item>()))
+        .collect()
+}
+
 #[pymethods]
 impl ListProxy {
     #[staticmethod]
@@ -21,6 +88,85 @@ impl ListProxy {
 
     pub fn __iadd__(self_: PyRefMut<'_, Self>, values: &Bound<'_, PyAny>) -> PyResult<()> {
         Self::extend(self_, values.py(), values)
+    }
+
+    pub fn __add__(
+        self_: PyRef<'_, Self>,
+        py: Python<'_>,
+        other: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        if !list_ops::is_list_like(other, py) {
+            return Ok(py.NotImplemented());
+        }
+        let mut new_doc = DocumentRs::new();
+        new_doc["_"] = clone_self_item(self_.as_super(), py)?;
+        // Fast path for same-kind proxies: clone directly to preserve
+        // formatting and comments.  Falls back to value extraction for
+        // plain lists and cross-kind proxies (array + AoT).
+        let fast = if let Ok(proxy) = other.cast::<ItemProxy>() {
+            let other_item = clone_self_item(&proxy.borrow(), py)?;
+            clone_elements_into(&mut new_doc["_"], &other_item, 1)
+        } else {
+            false
+        };
+        if !fast {
+            let items = collect_items(other)?;
+            let target = list_ops::as_array_like_mut(&mut new_doc["_"], "__add__()")?;
+            list_ops::item_extend(target, items)?;
+        }
+        Self::wrap_in_doc(py, new_doc)
+    }
+
+    pub fn __radd__(
+        self_: PyRef<'_, Self>,
+        py: Python<'_>,
+        other: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        if !list_ops::is_list_like(other, py) {
+            return Ok(py.NotImplemented());
+        }
+        let items = collect_items(other)?;
+        let self_item = clone_self_item(self_.as_super(), py)?;
+        let mut new_doc = DocumentRs::new();
+        new_doc["_"] = empty_array_like(list_ops::as_array_like(&self_item, "__radd__()")?);
+        let target = list_ops::as_array_like_mut(&mut new_doc["_"], "__radd__()")?;
+        list_ops::item_extend(target, items)?;
+        clone_elements_into(&mut new_doc["_"], &self_item, 1);
+        Self::wrap_in_doc(py, new_doc)
+    }
+
+    pub fn __mul__(self_: PyRef<'_, Self>, py: Python<'_>, n: isize) -> PyResult<Py<PyAny>> {
+        let mut new_doc = DocumentRs::new();
+        new_doc["_"] = clone_self_item(self_.as_super(), py)?;
+        if n <= 0 {
+            item_ops::item_clear(&mut new_doc["_"])?;
+        } else if n > 1 {
+            let source = new_doc["_"].clone();
+            clone_elements_into(&mut new_doc["_"], &source, n as usize - 1);
+        }
+        Self::wrap_in_doc(py, new_doc)
+    }
+
+    pub fn __rmul__(self_: PyRef<'_, Self>, py: Python<'_>, n: isize) -> PyResult<Py<PyAny>> {
+        Self::__mul__(self_, py, n)
+    }
+
+    pub fn __imul__(mut self_: PyRefMut<'_, Self>, py: Python<'_>, n: isize) -> PyResult<()> {
+        if n > 1 {
+            let source = clone_self_item(self_.as_super(), py)?;
+            let base = self_.into_super();
+            let mut doc = base.document.bind(py).borrow_mut();
+            base.check_fresh(&doc)?;
+            let item = base.navigate_mut(&mut doc.inner)?;
+            clone_elements_into(item, &source, n as usize - 1);
+        } else if n <= 0 {
+            let base = self_.into_super();
+            let mut doc = base.document.bind(py).borrow_mut();
+            base.check_fresh(&doc)?;
+            let item = base.navigate_mut(&mut doc.inner)?;
+            item_ops::item_clear(item)?;
+        }
+        Ok(())
     }
 
     #[pyo3(signature = (index=None, /))]
@@ -111,11 +257,7 @@ impl ListProxy {
         py: Python<'_>,
         values: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        let items: Vec<Item> = values
-            .try_iter()?
-            .map(|r| r.and_then(|v| v.extract::<Item>()))
-            .collect::<PyResult<_>>()?;
-
+        let items = collect_items(values)?;
         let base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;

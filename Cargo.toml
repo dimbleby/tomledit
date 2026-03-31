@@ -9,7 +9,7 @@ name = "tomledit"
 crate-type = ["cdylib"]
 
 [dependencies]
-toml_edit = "0.25"
+toml_edit = "0.25.9"
 
 [dependencies.pyo3]
 version = "0.28"

@@ -446,8 +446,7 @@ fn aot_setitem_slice(
             )));
         }
         for (idx, table) in indices.into_iter().zip(tables) {
-            aot.remove(idx);
-            aot.insert(idx, table);
+            aot.replace(idx, table);
             fix_inserted_aot_spacing(aot, idx);
         }
     }

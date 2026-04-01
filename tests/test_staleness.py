@@ -888,6 +888,20 @@ class TestViewStaleness:
         with pytest.raises(RuntimeError, match="stale"):
             list(reversed(view))
 
+    def test_values_view_stale_reversed(self) -> None:
+        doc = Document.parse("[foo]\na = 1\nb = 2")
+        view = doc["foo"].values()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            list(reversed(view))
+
+    def test_items_view_stale_reversed(self) -> None:
+        doc = Document.parse("[foo]\na = 1\nb = 2")
+        view = doc["foo"].items()
+        doc["foo"] = "bar"
+        with pytest.raises(RuntimeError, match="stale"):
+            list(reversed(view))
+
     def test_keys_view_stale_eq(self) -> None:
         doc = Document.parse("[foo]\na = 1")
         view = doc["foo"].keys()

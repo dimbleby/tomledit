@@ -603,6 +603,38 @@ class TestViews:
         )
         assert list(reversed(doc.keys())) == ["c", "b", "a"]
 
+    def test_values_view_reversed(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+            c = 3
+        """)
+        )
+        vals = [v.value for v in reversed(doc.values())]
+        assert vals == [3, 2, 1]
+
+    def test_items_view_reversed(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            a = 1
+            b = 2
+            c = 3
+        """)
+        )
+        pairs = [(k, v.value) for k, v in reversed(doc.items())]
+        assert pairs == [("c", 3), ("b", 2), ("a", 1)]
+
+    def test_proxy_values_view_reversed(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        vals = [v.value for v in reversed(doc["t"].values())]
+        assert vals == [2, 1]
+
+    def test_proxy_items_view_reversed(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        pairs = [(k, v.value) for k, v in reversed(doc["t"].items())]
+        assert pairs == [("b", 2), ("a", 1)]
+
     # -- ValuesView --
 
     def test_values_view_is_live(self) -> None:

@@ -86,6 +86,28 @@ fn contains_key(doc: &DocumentRs, path: &[Key], key: &str) -> PyResult<bool> {
     dict_ops::item_has_key(item, key)
 }
 
+/// Invoke `f(key, child_proxy)` for every entry in the table at `path`.
+///
+/// Shared by `ValuesView` and `ItemsView` for both `__iter__` and
+/// `__reversed__`.
+fn with_child_proxies(
+    document: &Py<Document>,
+    path: &[Key],
+    view_revision: u64,
+    py: Python<'_>,
+    mut f: impl FnMut(&str, Py<PyAny>) -> PyResult<()>,
+) -> PyResult<()> {
+    let doc = document.bind(py).borrow();
+    doc.check_fresh(path, view_revision)?;
+    let revision = doc.revision;
+    let item = item_ops::navigate_path(&doc.inner, path)?;
+    dict_ops::for_each_key(item, |k| {
+        let proxy =
+            ItemProxy::make_child_typed(document, path, revision, py, Key::Str(k.to_owned()))?;
+        f(k, proxy)
+    })
+}
+
 // ---------------------------------------------------------------------------
 // KeysView
 // ---------------------------------------------------------------------------
@@ -243,19 +265,8 @@ impl ValuesView {
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let doc = self.document.bind(py).borrow();
-        doc.check_fresh(&self.path, self.revision)?;
-        let revision = doc.revision;
         let list = PyList::empty(py);
-        let item = item_ops::navigate_path(&doc.inner, &self.path)?;
-        dict_ops::for_each_key(item, |k| {
-            let proxy = ItemProxy::make_child_typed(
-                &self.document,
-                &self.path,
-                revision,
-                py,
-                Key::Str(k.to_owned()),
-            )?;
+        with_child_proxies(&self.document, &self.path, self.revision, py, |_, proxy| {
             list.append(proxy)
         })?;
         Ok(list.try_iter()?.unbind())
@@ -282,20 +293,14 @@ impl ValuesView {
     }
 
     fn __reversed__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let doc = self.document.bind(py).borrow();
-        doc.check_fresh(&self.path, self.revision)?;
-        let revision = doc.revision;
-        let item = item_ops::navigate_path(&doc.inner, &self.path)?;
-        let mut keys = Vec::new();
-        dict_ops::for_each_key(item, |k| {
-            keys.push(k.to_owned());
+        let mut proxies = Vec::new();
+        with_child_proxies(&self.document, &self.path, self.revision, py, |_, proxy| {
+            proxies.push(proxy);
             Ok(())
         })?;
-        keys.reverse();
+        proxies.reverse();
         let list = PyList::empty(py);
-        for k in keys {
-            let proxy =
-                ItemProxy::make_child_typed(&self.document, &self.path, revision, py, Key::Str(k))?;
+        for proxy in proxies {
             list.append(proxy)?;
         }
         Ok(list.try_iter()?.unbind())
@@ -337,21 +342,9 @@ impl ItemsView {
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let doc = self.document.bind(py).borrow();
-        doc.check_fresh(&self.path, self.revision)?;
-        let revision = doc.revision;
         let list = PyList::empty(py);
-        let item = item_ops::navigate_path(&doc.inner, &self.path)?;
-        dict_ops::for_each_key(item, |k| {
-            let obj = ItemProxy::make_child_typed(
-                &self.document,
-                &self.path,
-                revision,
-                py,
-                Key::Str(k.to_owned()),
-            )?;
-            let pair = (k, obj.into_bound(py));
-            list.append(pair.into_pyobject(py)?)
+        with_child_proxies(&self.document, &self.path, self.revision, py, |k, proxy| {
+            list.append((k, proxy.into_bound(py)).into_pyobject(py)?)
         })?;
         Ok(list.try_iter()?.unbind())
     }
@@ -389,27 +382,15 @@ impl ItemsView {
     }
 
     fn __reversed__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let doc = self.document.bind(py).borrow();
-        doc.check_fresh(&self.path, self.revision)?;
-        let revision = doc.revision;
-        let item = item_ops::navigate_path(&doc.inner, &self.path)?;
-        let mut keys = Vec::new();
-        dict_ops::for_each_key(item, |k| {
-            keys.push(k.to_owned());
+        let mut pairs = Vec::new();
+        with_child_proxies(&self.document, &self.path, self.revision, py, |k, proxy| {
+            pairs.push((k.to_owned(), proxy));
             Ok(())
         })?;
-        keys.reverse();
+        pairs.reverse();
         let list = PyList::empty(py);
-        for k in &keys {
-            let obj = ItemProxy::make_child_typed(
-                &self.document,
-                &self.path,
-                revision,
-                py,
-                Key::Str(k.to_owned()),
-            )?;
-            let pair = (k.as_str(), obj.into_bound(py));
-            list.append(pair.into_pyobject(py)?)?;
+        for (k, proxy) in pairs {
+            list.append((k, proxy.into_bound(py)).into_pyobject(py)?)?;
         }
         Ok(list.try_iter()?.unbind())
     }

@@ -207,13 +207,13 @@ pub(crate) fn item_popitem(item: &mut ItemRs) -> PyResult<(String, ItemRs)> {
     match item {
         ItemRs::Table(table) => {
             let k = table.iter().last().map(|(k, _)| k.to_owned());
-            let k = k.ok_or_else(|| PyKeyError::new_err("popitem(): table is empty"))?;
+            let k = k.ok_or_else(|| PyKeyError::new_err("popitem(): dictionary is empty"))?;
             let v = table.remove(&k).expect("key just found");
             Ok((k, v))
         }
         ItemRs::Value(ValueRs::InlineTable(it)) => {
             let k = it.iter().last().map(|(k, _)| k.to_owned());
-            let k = k.ok_or_else(|| PyKeyError::new_err("popitem(): table is empty"))?;
+            let k = k.ok_or_else(|| PyKeyError::new_err("popitem(): dictionary is empty"))?;
             let v = ItemRs::Value(inline_table_remove(it, &k).expect("key just found"));
             Ok((k, v))
         }

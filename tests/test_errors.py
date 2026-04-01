@@ -149,6 +149,23 @@ class TestWrongTypeErrors:
         with pytest.raises(TypeError, match="indices must be integers or strings"):
             del doc["arr"][1.5]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
+    def test_delitem_float_key_on_table_raises_key_error(self) -> None:
+        """del table[1.5] should raise KeyError, matching Python dict."""
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
+        with pytest.raises(KeyError):
+            del doc["t"][1.5]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+    def test_delitem_float_key_on_inline_table_raises_key_error(self) -> None:
+        """del inline_table[1.5] should raise KeyError, matching Python dict."""
+        doc = Document.parse("t = {a = 1}\n")
+        with pytest.raises(KeyError):
+            del doc["t"][1.5]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
     def test_getitem_float_key_on_scalar_raises(self) -> None:
         doc = Document.parse("val = 42\n")
         with pytest.raises(TypeError, match="indices must be integers or strings"):

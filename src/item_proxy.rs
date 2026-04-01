@@ -296,16 +296,7 @@ impl ItemProxy {
                 let idx = list_ops::require_array_index(item, i)?;
                 self.child_proxy_typed(py, Key::Int(idx))
             }
-            SubscriptKey::Other(bad_key) => {
-                // Match Python dict: unknown key types raise KeyError for
-                // tables, TypeError for arrays.
-                match item {
-                    ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
-                        Err(PyKeyError::new_err(bad_key.repr()?.to_string()))
-                    }
-                    _ => Err(item_ops::invalid_subscript_type(&bad_key)),
-                }
-            }
+            SubscriptKey::Other(bad_key) => Err(item_ops::invalid_subscript(&bad_key, item)),
         }
     }
 
@@ -403,7 +394,7 @@ impl ItemProxy {
                 self.bump_affected(&mut doc, deleted);
                 Ok(())
             }
-            SubscriptKey::Other(bad_key) => Err(item_ops::invalid_subscript_type(&bad_key)),
+            SubscriptKey::Other(bad_key) => Err(item_ops::invalid_subscript(&bad_key, item)),
         }
     }
 

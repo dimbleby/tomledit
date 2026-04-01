@@ -160,11 +160,12 @@ impl ListProxy {
             let item = base.navigate_mut(&mut doc.inner)?;
             clone_elements_into(item, &source, n as usize - 1);
         } else if n <= 0 {
-            let base = self_.into_super();
+            let mut base = self_.into_super();
             let mut doc = base.document.bind(py).borrow_mut();
             base.check_fresh(&doc)?;
             let item = base.navigate_mut(&mut doc.inner)?;
             item_ops::item_clear(item)?;
+            base.bump_self(&mut doc);
         }
         Ok(())
     }

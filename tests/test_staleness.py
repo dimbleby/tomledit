@@ -139,6 +139,29 @@ class TestStaleProxyViaProxy:
         with pytest.raises(RuntimeError, match="stale"):
             _ = a.value
 
+    def test_stale_after_imul_zero(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        arr = doc["arr"]
+        elem = arr[0]
+        arr *= 0
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = elem.value
+
+    def test_stale_after_imul_negative(self) -> None:
+        doc = Document.parse("arr = [1, 2]\n")
+        arr = doc["arr"]
+        elem = arr[1]
+        arr *= -5
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = elem.value
+
+    def test_imul_positive_preserves_existing_proxies(self) -> None:
+        doc = Document.parse("arr = [1, 2]\n")
+        arr = doc["arr"]
+        elem = arr[0]
+        arr *= 3
+        assert elem.value == 1  # index 0 is untouched
+
     def test_stale_after_proxy_pop(self) -> None:
         doc = Document.parse(
             toml_literal("""

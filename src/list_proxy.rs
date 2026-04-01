@@ -86,8 +86,8 @@ impl ListProxy {
         crate::item_proxy::parse_as::<ListProxy>(py, text, "ListItem", "array")
     }
 
-    pub fn __iadd__(self_: PyRefMut<'_, Self>, values: &Bound<'_, PyAny>) -> PyResult<()> {
-        Self::extend(self_, values.py(), values)
+    pub fn __iadd__(slf: &Bound<'_, Self>, values: &Bound<'_, PyAny>) -> PyResult<()> {
+        Self::extend(slf, values.py(), values)
     }
 
     pub fn __add__(
@@ -254,12 +254,15 @@ impl ListProxy {
 
     #[pyo3(signature = (values, /))]
     pub fn extend(
-        self_: PyRefMut<'_, Self>,
+        slf: &Bound<'_, Self>,
         py: Python<'_>,
         values: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
+        // Collect items BEFORE borrowing the cell — values may be
+        // the same proxy, and collect_items invokes __iter__.
         let items = collect_items(values)?;
-        let base = self_.into_super();
+        let self_mut = slf.borrow_mut();
+        let base = self_mut.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;

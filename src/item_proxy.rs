@@ -310,7 +310,7 @@ impl ItemProxy {
     }
 
     pub fn __setitem__(
-        &mut self,
+        self_: &Bound<'_, Self>,
         key: &Bound<'_, PyAny>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
@@ -320,10 +320,13 @@ impl ItemProxy {
 
         match resolved {
             SubscriptKey::Slice(slice) => {
+                // Collect items BEFORE borrowing the cell — value may be
+                // the same proxy, and collect_items invokes __iter__.
                 let values = crate::list_proxy::collect_items(value)?;
-                let mut doc = self.document.bind(py).borrow_mut();
-                self.check_fresh(&doc)?;
-                let item = self.navigate_mut(&mut doc.inner)?;
+                let mut self_mut = self_.borrow_mut();
+                let mut doc = self_mut.document.bind(py).borrow_mut();
+                self_mut.check_fresh(&doc)?;
+                let item = self_mut.navigate_mut(&mut doc.inner)?;
                 let target = list_ops::as_array_like_mut(item, "slice assignment")?;
                 let si = slice.indices(target.len() as isize)?;
                 let old_len = target.len();
@@ -333,32 +336,37 @@ impl ItemProxy {
                 if new_count == indices.len() {
                     // Same-length: stamp only the replaced indices.
                     for &i in &indices {
-                        self.bump_child(&mut doc, Key::Int(i));
+                        self_mut.bump_child(&mut doc, Key::Int(i));
                     }
                 } else {
                     // Different length: everything from first affected onward may have shifted.
                     let from = indices.iter().min().copied().unwrap_or(si.start as usize);
-                    self.bump_range(&mut doc, from, old_len);
+                    self_mut.bump_range(&mut doc, from, old_len);
                 }
                 Ok(())
             }
             SubscriptKey::Str(k) => {
+                // Extract before borrowing — value may be a proxy from the
+                // same cell, and Item::extract borrows proxy cells.
                 let value: Item = value.extract()?;
-                let mut doc = self.document.bind(py).borrow_mut();
-                self.check_fresh(&doc)?;
-                let item = self.navigate_mut(&mut doc.inner)?;
+                let self_mut = self_.borrow_mut();
+                let mut doc = self_mut.document.bind(py).borrow_mut();
+                self_mut.check_fresh(&doc)?;
+                let item = self_mut.navigate_mut(&mut doc.inner)?;
                 if let Some(replaced_key) = item_ops::item_setitem_str(item, k, value)? {
-                    self.bump_child(&mut doc, replaced_key);
+                    self_mut.bump_child(&mut doc, replaced_key);
                 }
                 Ok(())
             }
             SubscriptKey::Int(i) => {
+                // Extract before borrowing — same reason as Str branch.
                 let value: Item = value.extract()?;
-                let mut doc = self.document.bind(py).borrow_mut();
-                self.check_fresh(&doc)?;
-                let item = self.navigate_mut(&mut doc.inner)?;
+                let self_mut = self_.borrow_mut();
+                let mut doc = self_mut.document.bind(py).borrow_mut();
+                self_mut.check_fresh(&doc)?;
+                let item = self_mut.navigate_mut(&mut doc.inner)?;
                 let replaced_key = item_ops::item_setitem_int(item, i, value)?;
-                self.bump_child(&mut doc, replaced_key);
+                self_mut.bump_child(&mut doc, replaced_key);
                 Ok(())
             }
             SubscriptKey::Other(bad_key) => Err(item_ops::invalid_subscript_type(&bad_key)),

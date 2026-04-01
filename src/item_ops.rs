@@ -134,6 +134,18 @@ pub(crate) fn invalid_subscript_type(key: &Bound<'_, PyAny>) -> PyErr {
     ))
 }
 
+/// Error for a non-string/int subscript key, matching Python dict semantics:
+/// KeyError for tables (like dict), TypeError for arrays.
+pub(crate) fn invalid_subscript(key: &Bound<'_, PyAny>, item: &ItemRs) -> PyErr {
+    match item {
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => key.repr().map_or_else(
+            |_| PyKeyError::new_err("?"),
+            |r| PyKeyError::new_err(r.to_string()),
+        ),
+        _ => invalid_subscript_type(key),
+    }
+}
+
 /// Error for using the wrong key type on a subscriptable item.
 /// Tables expect strings; arrays expect integers; scalars aren't subscriptable.
 fn subscript_type_error(item: &ItemRs) -> PyErr {

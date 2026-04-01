@@ -155,11 +155,9 @@ impl DictProxy {
             return Ok(py.NotImplemented());
         }
         // LHS is a plain mapping → result should be a plain dict.
-        let pairs = dict_ops::extract_update_pairs(other)?;
-        let dict = PyDict::new(py);
-        for (k, v) in &pairs {
-            dict.set_item(k, item_ops::item_to_py(&v.0, py)?)?;
-        }
+        // Pass LHS values through verbatim (no TOML round-trip) so that
+        // non-TOML-compatible values like None are preserved.
+        let dict = dict_ops::copy_mapping_to_pydict(other, py)?;
         let base = self_.into_super();
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;

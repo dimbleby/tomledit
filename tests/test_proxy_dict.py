@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import ItemsView, KeysView, MutableMapping, ValuesView
+from collections.abc import (
+    ItemsView,
+    KeysView,
+    MutableMapping,
+    ValuesView,
+)
 from datetime import datetime
 from types import MappingProxyType
 
@@ -11,6 +16,44 @@ import pytest
 import tomledit
 from tests.conftest import toml_literal
 from tomledit import Document
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+class _PlainMapping:
+    """A minimal Mapping that is NOT a dict subclass.
+
+    Has no ``__or__``, so ``_PlainMapping(...) | doc`` falls through to
+    ``doc.__ror__``, exercising the non-PyDict branch of
+    ``copy_mapping_to_pydict``.
+    """
+
+    def __init__(self, d: dict[str, object]) -> None:
+        self._d = d
+
+    def keys(self) -> object:
+        return self._d.keys()
+
+    def items(self) -> object:
+        return self._d.items()
+
+    def __getitem__(self, k: str) -> object:
+        return self._d[k]
+
+    def __len__(self) -> int:
+        return len(self._d)
+
+    def __iter__(self) -> object:
+        return iter(self._d)
+
+
+# Register as a Mapping so is_mapping_like() recognises it.
+from collections.abc import Mapping as _MappingABC  # noqa: E402
+
+_MappingABC.register(_PlainMapping)  # ty: ignore[unresolved-attribute]
+
 
 # ---------------------------------------------------------------------------
 # Proxy dict-like methods (keys, values, items, get, pop, update, etc.)
@@ -1098,6 +1141,52 @@ class TestMergeOperators:
         result = {"b": 2} | doc["t"]
         assert isinstance(result, dict)
         assert result == {"a": 1, "b": 2}
+
+    def test_ror_preserves_non_toml_values_document(self) -> None:
+        """LHS values that are not TOML-compatible (e.g. None) pass through."""
+        doc = Document({"b": 1})
+        result = {"a": None, "c": (1, 2)} | doc
+        assert isinstance(result, dict)
+        assert result["a"] is None
+        assert result["c"] == (1, 2)
+        assert result["b"] == 1
+
+    def test_ror_non_dict_mapping_document(self) -> None:
+        """LHS is a non-dict Mapping (copy_mapping_to_pydict fallback)."""
+        # _PlainMapping is not a dict subclass, so PyDict::cast fails and
+        # the items()-based fallback is exercised.
+        doc = Document({"b": 2})
+        result = _PlainMapping({"a": None, "b": 1}) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+        assert isinstance(result, dict)
+        assert result["a"] is None
+        assert result["b"] == 2
+
+    def test_ror_non_dict_mapping_dict_item(self) -> None:
+        """LHS is a non-dict Mapping against a DictItem."""
+        doc = Document.parse("[t]\nb = 2\n")
+        result = _PlainMapping({"a": None, "b": 1}) | doc["t"]
+        assert isinstance(result, dict)
+        assert result["a"] is None
+        assert result["b"] == 2
+
+    def test_ror_preserves_non_toml_values_dict_item(self) -> None:
+        """LHS values that are not TOML-compatible (e.g. None) pass through."""
+        doc = Document.parse("[t]\nb = 1\n")
+        result = {"a": None} | doc["t"]
+        assert isinstance(result, dict)
+        assert result["a"] is None
+        assert result["b"] == 1
+
+    def test_or_non_mapping_returns_not_implemented(self) -> None:
+        """| with a non-mapping type falls through to TypeError."""
+        doc = Document({"a": 1})
+        with pytest.raises(TypeError, match="unsupported operand"):
+            doc | [1, 2]  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+
+    def test_dict_item_or_non_mapping_returns_not_implemented(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(TypeError, match="unsupported operand"):
+            doc["t"] | [1, 2]
 
     # -- DictItem |= other --
 

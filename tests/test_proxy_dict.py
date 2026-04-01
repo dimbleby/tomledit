@@ -219,6 +219,18 @@ class TestProxyDictMethods:
         assert doc["owner"]["name"] == "Bob"
         assert doc["owner"]["email"] == "bob@example.com"
 
+    def test_update_self(self, doc: Document) -> None:
+        """DictItem.update(self) must not panic (self-referencing)."""
+        owner = doc["owner"]
+        owner.update(owner)
+        assert doc["owner"]["name"] == "Alice"
+
+    def test_ior_self(self, doc: Document) -> None:
+        """DictItem |= self must not panic (self-referencing)."""
+        owner = doc["owner"]
+        owner |= owner
+        assert doc["owner"]["name"] == "Alice"
+
     # -- setdefault --
 
     def test_setdefault_missing(self, doc: Document) -> None:

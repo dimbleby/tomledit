@@ -172,27 +172,34 @@ impl DictProxy {
     }
 
     pub fn __ior__(
-        self_: PyRefMut<'_, Self>,
+        slf: &Bound<'_, Self>,
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        Self::update(self_, py, Some(other), None)
+        Self::update(slf, py, Some(other), None)
     }
 
     #[pyo3(signature = (other=None, /, **kwargs))]
     pub fn update(
-        mut self_: PyRefMut<'_, Self>,
+        slf: &Bound<'_, Self>,
         py: Python<'_>,
         other: Option<&Bound<'_, PyAny>>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let self_doc_py = self_.as_super().document.clone_ref(py);
+        // Extract the document reference, then drop the shared borrow
+        // before resolve_update — this avoids a cell-level double-borrow
+        // panic when `other` is the same proxy as `slf`.
+        let self_doc_py = {
+            let r = slf.borrow();
+            r.as_super().document.clone_ref(py)
+        };
         let self_doc = self_doc_py.bind(py);
         let update = other
             .map(|obj| dict_ops::resolve_update(obj, self_doc))
             .transpose()?;
         let kwarg_pairs = dict_ops::extract_kwargs(kwargs)?;
-        let base = self_.into_super();
+        let self_mut = slf.borrow_mut();
+        let base = self_mut.into_super();
         let mut doc = self_doc.borrow_mut();
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;

@@ -1014,7 +1014,7 @@ class TestPopitem:
 
     def test_document_popitem_empty_raises(self) -> None:
         doc = Document()
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="dictionary is empty"):
             doc.popitem()
 
     def test_dict_item_popitem(self) -> None:
@@ -1026,7 +1026,7 @@ class TestPopitem:
 
     def test_dict_item_popitem_empty_raises(self) -> None:
         doc = Document.parse("[t]\n")
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="dictionary is empty"):
             doc["t"].popitem()
 
     def test_inline_table_popitem(self) -> None:

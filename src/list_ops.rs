@@ -165,8 +165,7 @@ fn apply_first_prefix(arr: &mut toml_edit::Array, prefix: Option<String>) {
 /// Mutations that replace an entry must save this first, then stamp the
 /// saved prefix onto the new table before inserting/replacing it.
 pub(crate) fn save_aot_entry_prefix(aot: &toml_edit::ArrayOfTables, index: usize) -> String {
-    aot.iter()
-        .nth(index)
+    aot.get(index)
         .and_then(|t| t.decor().prefix()?.as_str())
         .unwrap_or_default()
         .to_owned()
@@ -177,7 +176,7 @@ pub(crate) fn save_aot_entry_prefix(aot: &toml_edit::ArrayOfTables, index: usize
 /// When entry 0 is removed, the new first entry may have a leading `\n`
 /// separator (left over from being a non-first entry).  Strip it.
 pub(crate) fn fix_first_aot_prefix(aot: &mut toml_edit::ArrayOfTables) {
-    let Some(first) = aot.iter_mut().next() else {
+    let Some(first) = aot.get_mut(0) else {
         return;
     };
     if let Some(stripped) = first
@@ -202,12 +201,6 @@ pub(crate) fn fix_first_aot_prefix(aot: &mut toml_edit::ArrayOfTables) {
 /// first), but the *old* first element — now at position 1 — was re-pushed
 /// with its original prefix and must be fixed instead.
 pub(crate) fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
-    // Inserting at the front: the element that needs fixing is the old first
-    // element, now sitting at position 1.
-    let target = if pos == 0 { 1 } else { pos };
-    if target >= aot.len() {
-        return;
-    }
     // Detect whether the nearest non-first neighbour uses blank-line spacing.
     // Prefer the element *before* — elements after may also be newly pushed
     // and not yet corrected.
@@ -215,45 +208,45 @@ pub(crate) fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: 
     // A `None` prefix means "unset" — toml_edit will insert a default blank
     // line for non-first AoT entries, so we treat it as spaced.  Only an
     // explicitly set prefix that does NOT start with '\n' counts as compact.
+    //
+    // Inserting at the front: the element that needs fixing is the old first
+    // element, now sitting at position 1.
+    let target = if pos == 0 { 1 } else { pos };
     let spaced = [target - 1, target + 1]
         .into_iter()
         .filter(|&i| i > 0 && i < aot.len())
         .find_map(|i| {
-            aot.iter().nth(i).map(|t| {
+            aot.get(i).map(|t| {
                 let as_str = t.decor().prefix().and_then(|r| r.as_str());
                 // None → default blank line (spaced)
                 // Some(s) starting with '\n' → explicitly spaced
                 // Some(s) not starting with '\n' → compact
                 as_str.is_none() || as_str.is_some_and(|s| s.starts_with('\n'))
             })
-        });
-    let spaced = spaced.unwrap_or(true);
+        })
+        .unwrap_or(true);
 
     // Read the target's current prefix.  Distinguish between `None` (unset —
     // toml_edit will insert a default blank line) and `Some("")` (explicitly
     // empty — no blank line).
-    let raw_prefix = aot
-        .iter()
-        .nth(target)
-        .and_then(|t| t.decor().prefix()?.as_str().map(str::to_owned));
+    let Some(entry) = aot.get_mut(target) else {
+        return;
+    };
+    let raw_prefix = entry
+        .decor()
+        .prefix()
+        .and_then(|r| r.as_str())
+        .map(str::to_owned);
     let current = raw_prefix.as_deref().unwrap_or("");
     let has_blank = current.starts_with('\n');
 
     if spaced && !has_blank {
         // Prepend a blank line, preserving any existing content (comments).
-        aot.iter_mut()
-            .nth(target)
-            .expect("target in bounds")
-            .decor_mut()
-            .set_prefix(format!("\n{current}"));
+        entry.decor_mut().set_prefix(format!("\n{current}"));
     } else if !spaced && (raw_prefix.is_none() || current == "\n") {
         // Prefix is either unset (toml_edit would insert a default blank
         // line) or is a bare "\n".  Explicitly set to "" to suppress it.
-        aot.iter_mut()
-            .nth(target)
-            .expect("target in bounds")
-            .decor_mut()
-            .set_prefix("");
+        entry.decor_mut().set_prefix("");
     }
 }
 

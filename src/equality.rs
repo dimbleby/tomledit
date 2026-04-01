@@ -71,6 +71,38 @@ fn tables_structural_eq(a: &toml_edit::Table, b: &toml_edit::Table) -> bool {
             .all(|(k, v)| b.get(k).is_some_and(|bv| items_structural_eq(v, bv)))
 }
 
+/// Compare a Table with an InlineTable by walking their entries directly.
+fn table_inline_eq(table: &toml_edit::Table, it: &toml_edit::InlineTable) -> bool {
+    table.len() == it.len()
+        && table
+            .iter()
+            .all(|(k, item)| it.get(k).is_some_and(|v| item_value_eq(item, v)))
+}
+
+/// Compare an Item with a Value across the Table/InlineTable and AoT/Array
+/// boundaries without cloning.
+fn item_value_eq(item: &ItemRs, value: &toml_edit::Value) -> bool {
+    match item {
+        ItemRs::Value(v) => values_structural_eq(v, value),
+        ItemRs::Table(t) => {
+            matches!(value, toml_edit::Value::InlineTable(it) if table_inline_eq(t, it))
+        }
+        ItemRs::ArrayOfTables(aot) => {
+            matches!(value, toml_edit::Value::Array(arr) if aot_array_eq(aot, arr))
+        }
+        _ => false,
+    }
+}
+
+/// Compare an AoT with an Array of inline tables directly.
+fn aot_array_eq(aot: &toml_edit::ArrayOfTables, arr: &toml_edit::Array) -> bool {
+    aot.len() == arr.len()
+        && aot
+            .iter()
+            .zip(arr.iter())
+            .all(|(t, v)| matches!(v, toml_edit::Value::InlineTable(it) if table_inline_eq(t, it)))
+}
+
 pub(crate) fn items_structural_eq(a: &ItemRs, b: &ItemRs) -> bool {
     match (a, b) {
         (ItemRs::Value(va), ItemRs::Value(vb)) => values_structural_eq(va, vb),
@@ -81,6 +113,16 @@ pub(crate) fn items_structural_eq(a: &ItemRs, b: &ItemRs) -> bool {
                     .iter()
                     .zip(ab.iter())
                     .all(|(ta, tb)| tables_structural_eq(ta, tb))
+        }
+        // Cross-type: Table ↔ InlineTable
+        (ItemRs::Table(t), ItemRs::Value(toml_edit::Value::InlineTable(it)))
+        | (ItemRs::Value(toml_edit::Value::InlineTable(it)), ItemRs::Table(t)) => {
+            table_inline_eq(t, it)
+        }
+        // Cross-type: AoT ↔ Array
+        (ItemRs::ArrayOfTables(aot), ItemRs::Value(toml_edit::Value::Array(arr)))
+        | (ItemRs::Value(toml_edit::Value::Array(arr)), ItemRs::ArrayOfTables(aot)) => {
+            aot_array_eq(aot, arr)
         }
         _ => false,
     }
@@ -99,7 +141,8 @@ pub(crate) fn value_eq(value: &toml_edit::Value, other: &Bound<'_, PyAny>) -> Py
         let other_item = proxy.navigate(&doc.inner)?;
         return Ok(match other_item {
             ItemRs::Value(v) => values_structural_eq(value, v),
-            _ => false,
+            // Cross-type: proxy is a Table or AoT.
+            other => item_value_eq(other, value),
         });
     }
     match value {
@@ -218,6 +261,8 @@ pub(crate) fn table_eq(table: &toml_edit::Table, other: &Bound<'_, PyAny>) -> Py
         let other_item = proxy.navigate(&doc.inner)?;
         return Ok(match other_item {
             ItemRs::Table(t) => tables_structural_eq(table, t),
+            // Cross-type: proxy is an InlineTable value.
+            ItemRs::Value(toml_edit::Value::InlineTable(it)) => table_inline_eq(table, it),
             _ => false,
         });
     }

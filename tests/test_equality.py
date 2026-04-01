@@ -268,6 +268,56 @@ class TestProxyStructuralEquality:
         doc = Document.parse("arr = [1, 2]\n[t]\nx = 1\n")
         assert doc["arr"].count(doc["t"]) == 0
 
+    def test_table_vs_inline_table_proxy(self) -> None:
+        """Table and InlineTable proxies with same content should be equal."""
+        doc = Document.parse(
+            toml_literal("""
+            b = {x = 1}
+            [a]
+            x = 1
+        """)
+        )
+        assert doc["a"] == doc["b"]
+        assert doc["b"] == doc["a"]
+
+    def test_aot_vs_array_of_inline_tables_proxy(self) -> None:
+        """AoT and array-of-inline-tables proxies should be equal."""
+        doc = Document.parse(
+            toml_literal("""
+            b = [{x = 1}, {x = 2}]
+            [[a]]
+            x = 1
+            [[a]]
+            x = 2
+        """)
+        )
+        assert doc["a"] == doc["b"]
+        assert doc["b"] == doc["a"]
+
+    def test_table_vs_inline_table_in_list_count(self) -> None:
+        """table_eq proxy fast path: Table in AoT counted against InlineTable proxy."""
+        aot_doc = Document.parse("[[items]]\nx = 1\n[[items]]\nx = 2\n")
+        inline_doc = Document.parse("t = {x = 1}\n")
+        assert aot_doc["items"].count(inline_doc["t"]) == 1
+
+    def test_inline_table_vs_table_in_list_count(self) -> None:
+        """value_eq proxy fast path: InlineTable counted against Table."""
+        doc = Document.parse("arr = [{x = 1}, {x = 2}]\n[t]\nx = 1\n")
+        assert doc["arr"].count(doc["t"]) == 1
+
+    def test_table_vs_inline_table_nested_aot(self) -> None:
+        """Nested AoT inside Table vs nested array inside InlineTable."""
+        doc = Document.parse(
+            toml_literal("""
+            b = {items = [{x = 1}]}
+            [a]
+            [[a.items]]
+            x = 1
+        """)
+        )
+        assert doc["a"] == doc["b"]
+        assert doc["b"] == doc["a"]
+
 
 # ---------------------------------------------------------------------------
 # Equality edge cases

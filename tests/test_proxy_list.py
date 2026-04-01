@@ -201,6 +201,13 @@ class TestProxyListMethods:
         assert len(doc["arr"]) == 4
         assert doc["arr"][3] == 4
 
+    def test_extend_self(self) -> None:
+        """ListItem.extend(self) must work (self-referencing)."""
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        arr = doc["arr"]
+        arr.extend(arr)
+        assert arr == [1, 2, 3, 1, 2, 3]
+
     def test_append_aot(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -466,6 +473,13 @@ class TestIadd:
         doc = Document.parse("arr = [1, 2]\n")
         doc["arr"] += [3, 4]
         assert doc["arr"] == [1, 2, 3, 4]
+
+    def test_iadd_self(self) -> None:
+        """ListItem += self must work (self-referencing)."""
+        doc = Document.parse("arr = [1, 2]\n")
+        arr = doc["arr"]
+        arr += arr
+        assert arr == [1, 2, 1, 2]
 
     def test_iadd_empty_iterable(self) -> None:
         doc = Document.parse("arr = [1]\n")
@@ -1154,6 +1168,13 @@ class TestSliceIndexing:
         doc = Document.parse("arr = [1, 2, 3]\n")
         doc["arr"][2:] = [10, 20, 30]
         assert doc["arr"] == [1, 2, 10, 20, 30]
+
+    def test_slice_assign_self(self) -> None:
+        """arr[:] = arr must work (self-referencing)."""
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        arr = doc["arr"]
+        arr[:] = arr
+        assert arr == [1, 2, 3]
 
     def test_slice_assignment_on_table_raises(self) -> None:
         doc = Document.parse(

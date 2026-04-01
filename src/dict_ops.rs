@@ -473,9 +473,9 @@ pub(crate) fn merge_other_into(
 }
 
 /// Returns `true` if `other` is a `Mapping` (the `collections.abc` ABC),
-/// or a TOML-aware type (`ItemProxy` or `Document`).
+/// or a TOML-aware mapping type (`Document` or `DictItem`).
 pub(crate) fn is_mapping_like(other: &Bound<'_, PyAny>) -> bool {
-    other.is_instance_of::<ItemProxy>()
+    other.is_instance_of::<crate::dict_proxy::DictProxy>()
         || other.is_instance_of::<Document>()
         || other.is_instance_of::<PyDict>()
         || is_abc_mapping(other)
@@ -487,6 +487,28 @@ fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> bool {
         .and_then(|m| m.getattr("Mapping"))
         .and_then(|cls| obj.is_instance(&cls))
         .unwrap_or(false)
+}
+
+/// Copy entries from a Python mapping into a new `PyDict`, preserving the
+/// original Python values verbatim (no TOML round-trip).
+///
+/// Used by `__ror__` where the LHS is a plain mapping and the result must
+/// be a plain dict — non-TOML values like `None` should pass through.
+pub(crate) fn copy_mapping_to_pydict<'py>(
+    other: &Bound<'py, PyAny>,
+    py: Python<'py>,
+) -> PyResult<Bound<'py, PyDict>> {
+    if let Ok(dict) = other.cast::<PyDict>() {
+        return dict.copy();
+    }
+    let dict = PyDict::new(py);
+    let items = other.call_method0("items")?;
+    for pair in items.try_iter()? {
+        let pair = pair?;
+        let tuple = pair.cast::<PyTuple>()?;
+        dict.set_item(tuple.get_item(0)?, tuple.get_item(1)?)?;
+    }
+    Ok(dict)
 }
 
 /// Remove a key from a table-like item, returning the removed item and key.

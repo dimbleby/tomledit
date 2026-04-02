@@ -8,6 +8,7 @@ mod item_ops;
 mod item_proxy;
 mod list_ops;
 mod list_proxy;
+mod py_pairs;
 mod scalar_proxy;
 mod trie;
 mod value;

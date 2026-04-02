@@ -24,11 +24,14 @@ fn get_key_set(doc: &DocumentRs, path: &[Key]) -> PyResult<HashSet<String>> {
 }
 
 /// Collect elements from `other` that are strings (or string-valued proxies)
-/// into a HashSet.  Non-string elements are silently ignored.
+/// into a HashSet.  Non-string elements are silently ignored, but the input
+/// iterable is first validated with real Python set semantics so unhashable
+/// elements still raise `TypeError`, matching `dict_keys`.
 fn other_to_string_set(other: &Bound<'_, PyAny>) -> PyResult<HashSet<String>> {
+    let other = iterable_to_pyset(other.py(), other)?;
     let mut set = HashSet::new();
-    for item in other.try_iter()? {
-        if let Some(s) = item_ops::extract_key_str(&item?)? {
+    for item in other.iter() {
+        if let Some(s) = item_ops::extract_key_str(&item)? {
             set.insert(s);
         }
     }

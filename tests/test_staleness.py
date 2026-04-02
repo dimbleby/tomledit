@@ -325,6 +325,29 @@ class TestStaleProxyAsMappingKey:
         with pytest.raises(RuntimeError, match="stale"):
             doc["t"].get(key)
 
+    def test_items_view_contains_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document.parse('key = "x"\n[t]\nx = 1\n')
+        key = doc["key"]
+        del doc["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            assert (key, 1) in doc["t"].items()
+
+    def test_keys_view_set_ops_raise_for_stale_string_proxy_key(self) -> None:
+        doc = Document.parse('key = "x"\nx = 1\n')
+        key = doc["key"]
+        del doc["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            doc.keys() & [key]
+        with pytest.raises(RuntimeError, match="stale"):
+            doc.keys() - [key]
+
+    def test_update_iterable_of_pairs_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document.parse('key = "x"\nx = 1\n')
+        key = doc["key"]
+        del doc["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            doc.update([(key, 2)])  # type: ignore[list-item]  # ty: ignore[no-matching-overload]
+
 
 class TestCommentMutationsPreserveProxies:
     """Setting comments is decoration-only, so proxies stay valid."""

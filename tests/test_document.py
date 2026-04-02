@@ -65,6 +65,11 @@ class TestDocumentConstructor:
         doc = Document(ItemsMapping({"a": 1, "b": "hi"}, [["a", 1], ["b", "hi"]]))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         assert doc == {"a": 1, "b": "hi"}
 
+    def test_from_mapping_with_proxy_key(self) -> None:
+        base = Document.parse('key = "a"\n')
+        doc = Document({base["key"]: 1})  # type: ignore[dict-item]  # ty: ignore[invalid-argument-type]
+        assert doc == {"a": 1}
+
     def test_none_is_empty(self) -> None:
         doc = Document(None)
         assert len(doc) == 0

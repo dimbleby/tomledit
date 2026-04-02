@@ -109,6 +109,12 @@ class TestSetNewKeys:
         doc["meta"] = {"key": "value"}
         assert doc["meta"]["key"] == "value"
 
+    def test_add_dict_with_proxy_key(self) -> None:
+        base = Document.parse('key = "name"\n')
+        doc = Document()
+        doc["meta"] = {base["key"]: "value"}
+        assert doc["meta"]["name"] == "value"
+
     def test_add_mapping_with_list_pairs(self) -> None:
         doc = Document()
         doc["meta"] = ItemsMapping({"key": "value"}, [["key", "value"]])
@@ -117,6 +123,12 @@ class TestSetNewKeys:
     def test_add_inline_table_mapping_with_list_pairs(self) -> None:
         doc = Document.parse("dst = { a = 1 }\n")
         doc["dst"]["child"] = ItemsMapping({"b": 2}, [["b", 2]])
+        assert doc.as_toml() == "dst = { a = 1, child = { b = 2 } }\n"
+
+    def test_add_inline_table_dict_with_proxy_key(self) -> None:
+        base = Document.parse('key = "b"\n')
+        doc = Document.parse("dst = { a = 1 }\n")
+        doc["dst"]["child"] = {base["key"]: 2}
         assert doc.as_toml() == "dst = { a = 1, child = { b = 2 } }\n"
 
     @pytest.mark.parametrize(

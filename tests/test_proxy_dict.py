@@ -608,6 +608,11 @@ class TestViews:
         doc = Document.parse('key = "a"\na = 1\n')
         assert doc.keys() & [doc["key"]] == {"a"}
 
+    def test_keys_view_set_intersection_rejects_unhashable_rhs(self) -> None:
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(TypeError, match="unhashable"):
+            doc.keys() & [[]]
+
     def test_keys_view_set_union(self) -> None:
         doc = Document.parse("a = 1\n")
         assert doc.keys() | {"b"} == {"a", "b"}
@@ -624,6 +629,11 @@ class TestViews:
     def test_keys_view_set_difference_with_proxy_key(self) -> None:
         doc = Document.parse('key = "a"\na = 1\n')
         assert doc.keys() - [doc["key"]] == {"key"}
+
+    def test_keys_view_set_difference_rejects_unhashable_rhs(self) -> None:
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(TypeError, match="unhashable"):
+            doc.keys() - [[]]
 
     def test_keys_view_reversed(self) -> None:
         doc = Document.parse(

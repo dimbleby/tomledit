@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyTuple};
+use pyo3::types::{PyDict, PyString, PyTuple};
 use toml_edit::{Decor, Item as ItemRs, TableLike, Value as ValueRs};
 
 use crate::comments;
@@ -494,16 +494,27 @@ pub(crate) fn copy_mapping_to_pydict<'py>(
     py: Python<'py>,
 ) -> PyResult<Bound<'py, PyDict>> {
     if let Ok(dict) = other.cast::<PyDict>() {
-        return dict.copy();
+        let result = PyDict::new(py);
+        for (key, value) in dict.iter() {
+            result.set_item(normalize_plain_dict_key(&key, py)?, value)?;
+        }
+        return Ok(result);
     }
     let dict = PyDict::new(py);
     let items = other.call_method0("items")?;
     for pair in items.try_iter()? {
         let pair = pair?;
         let (key, value) = extract_pair(&pair)?;
-        dict.set_item(key, value)?;
+        dict.set_item(normalize_plain_dict_key(&key, py)?, value)?;
     }
     Ok(dict)
+}
+
+fn normalize_plain_dict_key<'py>(key: &Bound<'py, PyAny>, py: Python<'py>) -> PyResult<Py<PyAny>> {
+    if let Some(key) = item_ops::extract_key_str(key)? {
+        return Ok(PyString::new(py, &key).into_any().unbind());
+    }
+    Ok(key.clone().unbind())
 }
 
 /// Remove a key from a table-like item, returning the removed item and key.

@@ -12,58 +12,10 @@ from datetime import datetime
 from types import MappingProxyType
 
 import pytest
-from typing_extensions import override
 
 import tomledit
-from tests.conftest import toml_literal
+from tests.conftest import ItemsMapping, toml_literal
 from tomledit import Document
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-class _PlainMapping:
-    """A minimal Mapping that is NOT a dict subclass.
-
-    Has no ``__or__``, so ``_PlainMapping(...) | doc`` falls through to
-    ``doc.__ror__``, exercising the non-PyDict branch of
-    ``copy_mapping_to_pydict``.
-    """
-
-    def __init__(self, d: dict[str, object]) -> None:
-        self._d = d
-
-    def keys(self) -> object:
-        return self._d.keys()
-
-    def items(self) -> object:
-        return self._d.items()
-
-    def __getitem__(self, k: str) -> object:
-        return self._d[k]
-
-    def __len__(self) -> int:
-        return len(self._d)
-
-    def __iter__(self) -> object:
-        return iter(self._d)
-
-
-class _ListPairMapping(_PlainMapping):
-    """Mapping whose items() yields list pairs rather than tuples."""
-
-    @override
-    def items(self) -> object:
-        return [[k, v] for k, v in self._d.items()]
-
-
-# Register as a Mapping so is_mapping_like() recognises it.
-from collections.abc import Mapping as _MappingABC  # noqa: E402
-
-_MappingABC.register(_PlainMapping)  # ty: ignore[unresolved-attribute]
-_MappingABC.register(_ListPairMapping)  # ty: ignore[unresolved-attribute]
-
 
 # ---------------------------------------------------------------------------
 # Proxy dict-like methods (keys, values, items, get, pop, update, etc.)
@@ -230,9 +182,8 @@ class TestProxyDictMethods:
         assert doc["owner"]["email"] == "bob@example.com"
 
     def test_update_list_pair_mapping(self, doc: Document) -> None:
-        doc["owner"].update(
-            _ListPairMapping({"name": "Bob", "email": "bob@example.com"})
-        )
+        data: dict[str, object] = {"name": "Bob", "email": "bob@example.com"}
+        doc["owner"].update(ItemsMapping(data, [[k, v] for k, v in data.items()]))
         assert doc["owner"]["name"] == "Bob"
         assert doc["owner"]["email"] == "bob@example.com"
 
@@ -522,7 +473,8 @@ class TestDocumentDictMethods:
 
     def test_update_list_pair_mapping(self) -> None:
         doc = Document.parse("x = 1\n")
-        doc.update(_ListPairMapping({"x": 10, "y": 20}))  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
+        data: dict[str, object] = {"x": 10, "y": 20}
+        doc.update(ItemsMapping(data, [[k, v] for k, v in data.items()]))  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
         assert doc["x"] == 10
         assert doc["y"] == 20
 
@@ -1157,7 +1109,7 @@ class TestMergeOperators:
 
     def test_document_or_list_pair_mapping(self) -> None:
         doc = Document.parse("a = 1\n")
-        result = doc | _ListPairMapping({"b": 2})  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+        result = doc | ItemsMapping({"b": 2}, [["b", 2]])  # type: ignore[operator]  # ty: ignore[unsupported-operator]
         assert isinstance(result, Document)
         assert result.as_toml() == toml_literal("""
             a = 1
@@ -1229,7 +1181,7 @@ class TestMergeOperators:
 
     def test_dict_item_or_list_pair_mapping(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
-        result = doc["t"] | _ListPairMapping({"b": 2})
+        result = doc["t"] | ItemsMapping({"b": 2}, [["b", 2]])
         assert isinstance(result, tomledit.DictItem)
         assert result.value == {"a": 1, "b": 2}
 
@@ -1252,10 +1204,10 @@ class TestMergeOperators:
 
     def test_ror_non_dict_mapping_document(self) -> None:
         """LHS is a non-dict Mapping (copy_mapping_to_pydict fallback)."""
-        # _PlainMapping is not a dict subclass, so PyDict::cast fails and
+        # ItemsMapping is not a dict subclass, so PyDict::cast fails and
         # the items()-based fallback is exercised.
         doc = Document({"b": 2})
-        result = _PlainMapping({"a": None, "b": 1}) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+        result = ItemsMapping({"a": None, "b": 1}) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
         assert isinstance(result, dict)
         assert result["a"] is None
         assert result["b"] == 2
@@ -1263,23 +1215,25 @@ class TestMergeOperators:
     def test_ror_non_dict_mapping_dict_item(self) -> None:
         """LHS is a non-dict Mapping against a DictItem."""
         doc = Document.parse("[t]\nb = 2\n")
-        result = _PlainMapping({"a": None, "b": 1}) | doc["t"]
+        result = ItemsMapping({"a": None, "b": 1}) | doc["t"]
         assert isinstance(result, dict)
         assert result["a"] is None
         assert result["b"] == 2
 
     def test_ror_list_pair_mapping_document(self) -> None:
         """items() may yield pair-like sequences, not only tuples."""
+        data: dict[str, object] = {"a": None, "b": 1}
         doc = Document({"b": 2})
-        result = _ListPairMapping({"a": None, "b": 1}) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+        result = ItemsMapping(data, [[k, v] for k, v in data.items()]) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
         assert isinstance(result, dict)
         assert result["a"] is None
         assert result["b"] == 2
 
     def test_ror_list_pair_mapping_dict_item(self) -> None:
-        """DictItem | should accept mappings whose items() yields lists."""
+        """DictItem __ror__ accepts mappings whose items() yields lists."""
+        data: dict[str, object] = {"a": None, "b": 1}
         doc = Document.parse("[t]\nb = 2\n")
-        result = _ListPairMapping({"a": None, "b": 1}) | doc["t"]
+        result = ItemsMapping(data, [[k, v] for k, v in data.items()]) | doc["t"]
         assert isinstance(result, dict)
         assert result["a"] is None
         assert result["b"] == 2

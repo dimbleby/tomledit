@@ -7,7 +7,7 @@ from datetime import date, datetime, time
 
 import pytest
 
-from tests.conftest import toml_literal
+from tests.conftest import ItemsMapping, toml_literal
 from tomledit import Document, Item
 
 # ---------------------------------------------------------------------------
@@ -108,6 +108,26 @@ class TestSetNewKeys:
         doc = Document()
         doc["meta"] = {"key": "value"}
         assert doc["meta"]["key"] == "value"
+
+    def test_add_mapping_with_list_pairs(self) -> None:
+        doc = Document()
+        doc["meta"] = ItemsMapping({"key": "value"}, [["key", "value"]])
+        assert doc["meta"]["key"] == "value"
+
+    def test_add_inline_table_mapping_with_list_pairs(self) -> None:
+        doc = Document.parse("dst = { a = 1 }\n")
+        doc["dst"]["child"] = ItemsMapping({"b": 2}, [["b", 2]])
+        assert doc.as_toml() == "dst = { a = 1, child = { b = 2 } }\n"
+
+    @pytest.mark.parametrize(
+        "pair",
+        [[], ["x"], ["x", 1, 2]],
+        ids=["empty", "short", "long"],
+    )
+    def test_add_mapping_rejects_non_pair_items(self, pair: list[object]) -> None:
+        doc = Document()
+        with pytest.raises(ValueError, match="expected a length-2 iterable pair"):
+            doc["meta"] = ItemsMapping({"x": 1}, [pair])
 
     def test_add_list_of_dicts(self) -> None:
         doc = Document()

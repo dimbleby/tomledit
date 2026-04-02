@@ -13,6 +13,8 @@ use toml_edit::{
     Value as ValueRs,
 };
 
+use crate::py_pairs::extract_pair;
+
 // ---------------------------------------------------------------------------
 // Datetime
 // ---------------------------------------------------------------------------
@@ -140,9 +142,9 @@ where
     let len = py_mapping.len()?;
     let mut pairs = Vec::with_capacity(len);
     for pair in py_mapping.items()? {
-        let py_tuple = pair.cast::<PyTuple>()?;
-        let key: String = py_tuple.get_item(0)?.extract()?;
-        let value: V = py_tuple.get_item(1)?.extract()?;
+        let (key, value) = extract_pair(&pair)?;
+        let key: String = key.extract()?;
+        let value: V = value.extract()?;
         pairs.push((key, value));
     }
     Ok(pairs)

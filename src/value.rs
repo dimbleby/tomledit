@@ -13,6 +13,7 @@ use toml_edit::{
     Value as ValueRs,
 };
 
+use crate::item_ops;
 use crate::py_pairs::extract_pair;
 
 // ---------------------------------------------------------------------------
@@ -143,7 +144,8 @@ where
     let mut pairs = Vec::with_capacity(len);
     for pair in py_mapping.items()? {
         let (key, value) = extract_pair(&pair)?;
-        let key: String = key.extract()?;
+        let key = item_ops::extract_key_str(&key)?
+            .ok_or_else(|| PyTypeError::new_err("keys must be strings"))?;
         let value: V = value.extract()?;
         pairs.push((key, value));
     }

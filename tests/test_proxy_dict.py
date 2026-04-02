@@ -478,6 +478,16 @@ class TestDocumentDictMethods:
         assert doc["x"] == 10
         assert doc["y"] == 20
 
+    def test_update_mapping_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "x"\nx = 1\n')
+        doc.update({doc["key"]: 2})  # type: ignore[dict-item]  # ty: ignore[no-matching-overload]
+        assert doc["x"] == 2
+
+    def test_update_iterable_of_pairs_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "x"\nx = 1\n')
+        doc.update([(doc["key"], 2)])  # type: ignore[list-item]  # ty: ignore[no-matching-overload]
+        assert doc["x"] == 2
+
     @pytest.mark.parametrize(
         "other",
         [
@@ -584,6 +594,10 @@ class TestViews:
         )
         assert doc.keys() & {"a", "c"} == {"a", "c"}
 
+    def test_keys_view_set_intersection_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "a"\na = 1\n')
+        assert doc.keys() & [doc["key"]] == {"a"}
+
     def test_keys_view_set_union(self) -> None:
         doc = Document.parse("a = 1\n")
         assert doc.keys() | {"b"} == {"a", "b"}
@@ -596,6 +610,10 @@ class TestViews:
         """)
         )
         assert doc.keys() - {"b"} == {"a"}
+
+    def test_keys_view_set_difference_with_proxy_key(self) -> None:
+        doc = Document.parse('key = "a"\na = 1\n')
+        assert doc.keys() - [doc["key"]] == {"key"}
 
     def test_keys_view_reversed(self) -> None:
         doc = Document.parse(
@@ -1448,6 +1466,10 @@ class TestViewContainsProxy:
         doc = Document.parse("[t]\na = 1\n")
         assert ("t", doc["t"]) in doc.items()
 
+    def test_items_contains_string_proxy_key(self) -> None:
+        doc = Document.parse('key = "name"\nname = "Alice"\n')
+        assert (doc["key"], "Alice") in doc.items()  # type: ignore[comparison-overlap]
+
     def test_iter_values_roundtrip(self) -> None:
         """Every value from iter(values()) must be found by __contains__."""
         doc = Document.parse('a = 1\nb = "hi"\nc = true\n')
@@ -1467,6 +1489,10 @@ class TestViewContainsProxy:
     def test_dictitem_items_contains_proxy(self) -> None:
         doc = Document.parse('[t]\nname = "Bob"\n')
         assert ("name", doc["t"]["name"]) in doc["t"].items()
+
+    def test_dictitem_items_contains_string_proxy_key(self) -> None:
+        doc = Document.parse('[t]\nkey = "name"\nname = "Bob"\n')
+        assert (doc["t"]["key"], "Bob") in doc["t"].items()
 
 
 class TestProxyKeyContainment:

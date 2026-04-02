@@ -23,12 +23,12 @@ fn get_key_set(doc: &DocumentRs, path: &[Key]) -> PyResult<HashSet<String>> {
     Ok(get_keys(doc, path)?.into_iter().collect())
 }
 
-/// Collect elements from `other` that are strings into a HashSet.
-/// Non-string elements are silently ignored (they can never match a key).
+/// Collect elements from `other` that are strings (or string-valued proxies)
+/// into a HashSet.  Non-string elements are silently ignored.
 fn other_to_string_set(other: &Bound<'_, PyAny>) -> PyResult<HashSet<String>> {
     let mut set = HashSet::new();
     for item in other.try_iter()? {
-        if let Ok(s) = item?.extract::<String>() {
+        if let Some(s) = item_ops::extract_key_str(&item?)? {
             set.insert(s);
         }
     }
@@ -360,7 +360,7 @@ impl ItemsView {
             return Ok(false);
         }
         let key_obj = tuple.get_item(0)?;
-        let Ok(key) = key_obj.extract::<&str>() else {
+        let Some(key) = item_ops::extract_key_str(&key_obj)? else {
             return Ok(false);
         };
         let value = tuple.get_item(1)?;

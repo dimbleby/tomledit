@@ -240,7 +240,8 @@ pub(crate) fn item_popitem(item: &mut ItemRs) -> PyResult<(String, ItemRs)> {
 fn dict_to_pairs(dict: &Bound<'_, PyDict>) -> PyResult<Vec<(String, Item)>> {
     let mut pairs = Vec::with_capacity(dict.len());
     for (k, v) in dict.iter() {
-        let key: String = k.extract()?;
+        let key = item_ops::extract_key_str(&k)?
+            .ok_or_else(|| PyTypeError::new_err("keys must be strings"))?;
         let val: Item = v.extract()?;
         pairs.push((key, val));
     }
@@ -267,7 +268,9 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
     let mut pairs = Vec::new();
     for item in iter {
         let (key, val) = extract_pair(&item?)?;
-        pairs.push((key.extract::<String>()?, val.extract::<Item>()?));
+        let key = item_ops::extract_key_str(&key)?
+            .ok_or_else(|| PyTypeError::new_err("keys must be strings"))?;
+        pairs.push((key, val.extract::<Item>()?));
     }
     Ok(pairs)
 }

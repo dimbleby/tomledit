@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import textwrap
+from collections.abc import Mapping
 
 import pytest
 
@@ -44,6 +45,38 @@ def toml_literal(text: str) -> str:
         \""")
     """
     return textwrap.dedent(text).strip() + "\n"
+
+
+class ItemsMapping:
+    """Mapping helper with a configurable items() result."""
+
+    def __init__(
+        self,
+        data: dict[str, object],
+        items_override: object | None = None,
+    ) -> None:
+        self._data = data
+        self._items_override = items_override
+
+    def keys(self) -> object:
+        return self._data.keys()
+
+    def items(self) -> object:
+        if self._items_override is not None:
+            return self._items_override
+        return self._data.items()
+
+    def __getitem__(self, key: str) -> object:
+        return self._data[key]
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __iter__(self) -> object:
+        return iter(self._data)
+
+
+Mapping.register(ItemsMapping)  # ty: ignore[unresolved-attribute]
 
 
 @pytest.fixture

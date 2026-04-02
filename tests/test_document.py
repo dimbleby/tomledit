@@ -8,7 +8,7 @@ from types import MappingProxyType
 
 import pytest
 
-from tests.conftest import toml_literal
+from tests.conftest import ItemsMapping, toml_literal
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -60,6 +60,10 @@ class TestDocumentConstructor:
     def test_from_ordered_dict(self) -> None:
         doc = Document(OrderedDict({"x": 10}))
         assert doc == {"x": 10}
+
+    def test_from_mapping_with_list_pairs(self) -> None:
+        doc = Document(ItemsMapping({"a": 1, "b": "hi"}, [["a", 1], ["b", "hi"]]))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        assert doc == {"a": 1, "b": "hi"}
 
     def test_none_is_empty(self) -> None:
         doc = Document(None)

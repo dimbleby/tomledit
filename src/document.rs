@@ -101,11 +101,11 @@ impl Document {
         Ok(Self::from_inner(document_rs))
     }
 
-    pub fn __contains__(&self, key: &Bound<'_, PyAny>) -> bool {
-        let Some(key) = item_ops::extract_key_str(key) else {
-            return false;
+    pub fn __contains__(&self, key: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let Some(key) = item_ops::extract_key_str(key)? else {
+            return Ok(false);
         };
-        self.inner.contains_key(&key)
+        Ok(self.inner.contains_key(&key))
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
@@ -142,7 +142,7 @@ impl Document {
         default: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         let py = slf.py();
-        let Some(key) = item_ops::extract_key_str(key) else {
+        let Some(key) = item_ops::extract_key_str(key)? else {
             return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
         };
         let doc = slf.borrow();
@@ -155,7 +155,7 @@ impl Document {
     }
 
     pub fn __getitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let Some(key) = item_ops::extract_key_str(key) else {
+        let Some(key) = item_ops::extract_key_str(key)? else {
             return Err(PyKeyError::new_err(key.repr()?.to_string()));
         };
         let proxy = {
@@ -170,7 +170,7 @@ impl Document {
     }
 
     pub fn __setitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>, value: Item) -> PyResult<()> {
-        let Some(key) = item_ops::extract_key_str(key) else {
+        let Some(key) = item_ops::extract_key_str(key)? else {
             return Err(PyTypeError::new_err("keys must be strings"));
         };
         let mut doc = slf.borrow_mut();
@@ -183,7 +183,7 @@ impl Document {
     }
 
     pub fn __delitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<()> {
-        let Some(key) = item_ops::extract_key_str(key) else {
+        let Some(key) = item_ops::extract_key_str(key)? else {
             return Err(PyKeyError::new_err(key.repr()?.to_string()));
         };
         let mut doc = slf.borrow_mut();
@@ -203,7 +203,7 @@ impl Document {
     ) -> PyResult<Py<PyAny>> {
         let default = dict_ops::extract_pop_default(default)?;
 
-        let Some(key) = item_ops::extract_key_str(key) else {
+        let Some(key) = item_ops::extract_key_str(key)? else {
             return match default {
                 Some(d) => Ok(d),
                 None => Err(PyKeyError::new_err(key.repr()?.to_string())),
@@ -296,7 +296,7 @@ impl Document {
         default: Option<Item>,
     ) -> PyResult<Py<PyAny>> {
         let py = slf.py();
-        let key = item_ops::extract_key_str(key)
+        let key = item_ops::extract_key_str(key)?
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         {
             let doc = slf.borrow();

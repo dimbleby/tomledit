@@ -146,7 +146,7 @@ impl KeysView {
     }
 
     fn __contains__(&self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let Some(key) = crate::item_ops::extract_key_str(key) else {
+        let Some(key) = crate::item_ops::extract_key_str(key)? else {
             return Ok(false);
         };
         let doc = self.document.bind(py).borrow();

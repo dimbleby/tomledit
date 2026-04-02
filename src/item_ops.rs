@@ -177,20 +177,23 @@ pub(crate) fn unsupported_op(item: &ItemRs, op: &str) -> PyErr {
 /// Fast path: `value` is a plain Python string.
 /// Proxy path: `value` is an `ItemProxy` wrapping a TOML string value —
 /// navigates the proxy in Rust to get the string without converting to Python.
-/// Returns `None` when the value is not (or does not wrap) a string.
-pub(crate) fn extract_key_str(value: &Bound<'_, PyAny>) -> Option<String> {
+/// Returns `Ok(None)` when the value is not (or does not wrap) a string.
+/// Errors from stale or otherwise invalid proxies are preserved.
+pub(crate) fn extract_key_str(value: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
     if let Ok(s) = value.extract::<String>() {
-        return Some(s);
+        return Ok(Some(s));
     }
-    let proxy = value.cast::<ItemProxy>().ok()?;
+    let Ok(proxy) = value.cast::<ItemProxy>() else {
+        return Ok(None);
+    };
     let proxy = proxy.borrow();
     let doc = proxy.document.bind(value.py()).borrow();
-    proxy.check_fresh(&doc).ok()?;
-    let item = proxy.navigate(&doc.inner).ok()?;
-    match item {
+    proxy.check_fresh(&doc)?;
+    let item = proxy.navigate(&doc.inner)?;
+    Ok(match item {
         ItemRs::Value(ValueRs::String(s)) => Some(s.value().to_owned()),
         _ => None,
-    }
+    })
 }
 
 /// Get the length of a container item, or `None` for scalars.
@@ -207,7 +210,7 @@ pub(crate) fn item_len(item: &ItemRs) -> Option<usize> {
 /// Test whether `value` is contained in `item` (tables check keys, arrays check elements).
 pub(crate) fn item_contains(item: &ItemRs, value: &Bound<'_, PyAny>) -> PyResult<bool> {
     if let Some(tbl) = item.as_table_like() {
-        let Some(key) = extract_key_str(value) else {
+        let Some(key) = extract_key_str(value)? else {
             return Ok(false);
         };
         return Ok(tbl.contains_key(&key));

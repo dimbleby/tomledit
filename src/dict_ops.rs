@@ -124,10 +124,15 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
     } else {
         // For new keys in inline tables, preserve sibling inline comments
         // (existing keys don't change key order, so no save/restore needed).
-        let saved_ic = item
+        let inline_insertion = item
             .as_inline_table()
             .filter(|it| !it.contains_key(key))
-            .map(|it| it.save_inline_comments());
+            .map(|it| {
+                (
+                    it.save_inline_comments(),
+                    it.iter().last().map(|(k, _)| k.to_owned()),
+                )
+            });
 
         let old_decor = item
             .get(key)
@@ -148,9 +153,14 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         }
         item[key] = ItemRs::Value(new_value);
 
-        if let Some(mut ic) = saved_ic {
+        if let Some((mut ic, last_key)) = inline_insertion {
             ic.push(String::new());
             if let Some(it) = item.as_inline_table_mut() {
+                if let Some(last_key) = last_key
+                    && let Some(last) = it.get_mut(&last_key)
+                {
+                    last.decor_mut().set_suffix("");
+                }
                 it.restore_inline_comments(&ic);
             }
         }
@@ -330,23 +340,11 @@ pub(crate) fn merge_table_entries(target: &mut ItemRs, source: &ItemRs) -> PyRes
         let src_val = src.get(&key).unwrap().clone();
         set_with_decor_preservation(target, &key, Item(src_val));
 
-        // For NEW keys in non-inline tables, copy the source key's decor
-        // (block comments).  Inline tables handle their own separator
-        // formatting, so copying decor would break spacing.
-        if !existed
-            && !target.is_value()
-            && let Some((src_key, _)) = src.get_key_value(&key)
-        {
-            let decor = src_key.leaf_decor().clone();
-            let tgt = target.as_table_like_mut().expect("target checked above");
-            if let Some(mut km) = tgt.key_mut(&key) {
-                if let Some(p) = decor.prefix() {
-                    km.leaf_decor_mut().set_prefix(p.clone());
-                }
-                if let Some(s) = decor.suffix() {
-                    km.leaf_decor_mut().set_suffix(s.clone());
-                }
-            }
+        // For NEW keys, copy the source block comment via the comment API
+        // rather than raw key decor.  That preserves the comment payload
+        // without disturbing inline-table separator spacing.
+        if !existed && let Some(comment) = comments::get_block_comment(source, &key) {
+            comments::set_block_comment(target, &key, Some(&comment))?;
         }
     }
 

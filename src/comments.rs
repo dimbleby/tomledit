@@ -497,15 +497,22 @@ fn get_inline_table_block_comment(it: &toml_edit::InlineTable, key: &str) -> Opt
 
 /// Derive the canonical indent for an inline table.
 ///
-/// Uses the second key's prefix as the reference indent, since the first
-/// key's prefix may be empty in compact tables.  Falls back to the first
-/// key's own prefix if there's only one key.
-fn canonical_inline_table_indent(it: &toml_edit::InlineTable, first_key: &str) -> String {
-    let ref_key = it.iter().nth(1).map_or(first_key, |(k, _)| k);
-    it.key(ref_key)
-        .and_then(|k| k.leaf_decor().prefix()?.as_str())
-        .unwrap_or_default()
-        .to_owned()
+/// Scans existing key prefixes and returns the first non-empty indent it can
+/// recover. Compact inline tables often store this as a single leading space.
+/// Falls back to `" "` when no key carries explicit indentation yet.
+fn canonical_inline_table_indent(it: &toml_edit::InlineTable) -> String {
+    for (key, _) in it.iter() {
+        let indent = it
+            .key(key)
+            .and_then(|k| k.leaf_decor().prefix()?.as_str())
+            .map(PrefixParts::split)
+            .map(|parts| parts.indent)
+            .unwrap_or_default();
+        if !indent.is_empty() {
+            return indent;
+        }
+    }
+    " ".to_owned()
 }
 
 /// Set the block comment on an inline table key's prefix.
@@ -515,7 +522,7 @@ fn set_inline_table_block_comment(
     comment: Option<&str>,
 ) -> PyResult<()> {
     let is_first = is_first_inline_table_key(it, key);
-    let canonical = is_first.then(|| canonical_inline_table_indent(it, key));
+    let canonical = comment.map(|_| canonical_inline_table_indent(it));
     let mut km = it
         .key_mut(key)
         .ok_or_else(|| PyKeyError::new_err(key.to_owned()))?;
@@ -528,8 +535,9 @@ fn set_inline_table_block_comment(
         .to_owned();
     let mut parts = PrefixParts::split(&raw);
 
-    // First key: use canonical indent; non-first: keep existing indent.
-    if let Some(ci) = canonical.filter(|_| comment.is_some()) {
+    // First key always uses the canonical indent. Newly inserted non-first keys
+    // may have an empty prefix, so seed them from the table style as well.
+    if let Some(ci) = canonical.filter(|_| is_first || parts.indent.is_empty()) {
         parts.indent = ci;
     }
     parts.block = build_block_or_default(comment, &parts.indent, "")?;

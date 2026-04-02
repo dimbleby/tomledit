@@ -171,7 +171,7 @@ impl Document {
 
     pub fn __setitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>, value: Item) -> PyResult<()> {
         let Some(key) = item_ops::extract_key_str(key) else {
-            return Err(PyTypeError::new_err("table keys must be strings"));
+            return Err(PyTypeError::new_err("keys must be strings"));
         };
         let mut doc = slf.borrow_mut();
         let replaced = doc.inner.contains_key(&key);

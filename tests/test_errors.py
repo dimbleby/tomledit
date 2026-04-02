@@ -445,5 +445,5 @@ class TestNonStringKeyErrors:
 
     def test_document_setitem_int_raises_type_error(self) -> None:
         doc = Document({"a": 1})
-        with pytest.raises(TypeError, match="table keys must be strings"):
+        with pytest.raises(TypeError, match="keys must be strings"):
             doc[42] = "x"  # type: ignore[index]  # ty: ignore[invalid-assignment]

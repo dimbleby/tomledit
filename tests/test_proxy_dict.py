@@ -820,9 +820,9 @@ class TestViews:
         v = doc.values()
         assert v == v  # identity
         assert doc.values() != doc.values()  # distinct objects
-        assert doc.values() != list(doc.values())
-        assert doc.values() != [1, 99]
-        assert doc.values() != 42  # non-iterable
+        assert doc.values() != list(doc.values())  # type: ignore[comparison-overlap]
+        assert doc.values() != [1, 99]  # type: ignore[comparison-overlap]
+        assert doc.values() != 42  # type: ignore[comparison-overlap]  # non-iterable
 
     # -- ItemsView: repr and eq --
 

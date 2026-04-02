@@ -720,27 +720,28 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
     }
 }
 
-pub(crate) fn item_count(target: ArrayLikeRef<'_>, value: &Bound<'_, PyAny>) -> PyResult<usize> {
+/// Test whether element at `index` in `target` equals `value`.
+fn element_eq(target: &ArrayLikeRef<'_>, index: usize, value: &Bound<'_, PyAny>) -> PyResult<bool> {
     match target {
-        ArrayLikeRef::Array(arr) => {
-            let mut count = 0;
-            for v in arr.iter() {
-                if equality::value_eq(v, value)? {
-                    count += 1;
-                }
-            }
-            Ok(count)
-        }
-        ArrayLikeRef::Aot(aot) => {
-            let mut count = 0;
-            for table in aot.iter() {
-                if equality::table_eq(table, value)? {
-                    count += 1;
-                }
-            }
-            Ok(count)
+        ArrayLikeRef::Array(arr) => match arr.get(index) {
+            Some(v) => equality::value_eq(v, value),
+            None => Ok(false),
+        },
+        ArrayLikeRef::Aot(aot) => match aot.get(index) {
+            Some(table) => equality::table_eq(table, value),
+            None => Ok(false),
+        },
+    }
+}
+
+pub(crate) fn item_count(target: ArrayLikeRef<'_>, value: &Bound<'_, PyAny>) -> PyResult<usize> {
+    let mut count = 0;
+    for i in 0..target.len() {
+        if element_eq(&target, i, value)? {
+            count += 1;
         }
     }
+    Ok(count)
 }
 
 pub(crate) fn item_index(
@@ -749,34 +750,15 @@ pub(crate) fn item_index(
     start: Option<i64>,
     stop: Option<i64>,
 ) -> PyResult<usize> {
-    match target {
-        ArrayLikeRef::Array(arr) => {
-            let len = arr.len();
-            let start = clamp_index(start.unwrap_or(0), len);
-            let stop = clamp_index(stop.unwrap_or(len as i64), len);
-            for i in start..stop {
-                if let Some(v) = arr.get(i)
-                    && equality::value_eq(v, value)?
-                {
-                    return Ok(i);
-                }
-            }
-            Err(PyValueError::new_err("value not in array"))
-        }
-        ArrayLikeRef::Aot(aot) => {
-            let len = aot.len();
-            let start = clamp_index(start.unwrap_or(0), len);
-            let stop = clamp_index(stop.unwrap_or(len as i64), len);
-            for i in start..stop {
-                if let Some(table) = aot.get(i)
-                    && equality::table_eq(table, value)?
-                {
-                    return Ok(i);
-                }
-            }
-            Err(PyValueError::new_err("value not in array"))
+    let len = target.len();
+    let start = clamp_index(start.unwrap_or(0), len);
+    let stop = clamp_index(stop.unwrap_or(len as i64), len);
+    for i in start..stop {
+        if element_eq(&target, i, value)? {
+            return Ok(i);
         }
     }
+    Err(PyValueError::new_err("value not in array"))
 }
 
 /// Format an array as multiline, with each element on its own line.

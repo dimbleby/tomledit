@@ -348,6 +348,13 @@ class TestStaleProxyAsMappingKey:
         with pytest.raises(RuntimeError, match="stale"):
             doc.update([(key, 2)])  # type: ignore[list-item]  # ty: ignore[no-matching-overload]
 
+    def test_update_raises_for_stale_proxy_source(self) -> None:
+        doc = Document.parse("[dst]\na = 1\n[src]\nb = 2\n")
+        source = doc["src"]
+        del doc["src"]
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["dst"].update(source)
+
 
 class TestCommentMutationsPreserveProxies:
     """Setting comments is decoration-only, so proxies stay valid."""

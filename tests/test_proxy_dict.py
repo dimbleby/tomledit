@@ -488,6 +488,16 @@ class TestDocumentDictMethods:
         doc.update([(doc["key"], 2)])  # type: ignore[list-item]  # ty: ignore[no-matching-overload]
         assert doc["x"] == 2
 
+    def test_update_rejects_non_string_dict_key(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError, match="keys must be strings"):
+            doc.update({1: 2})  # type: ignore[dict-item]  # ty: ignore[no-matching-overload]
+
+    def test_update_rejects_non_string_pair_key(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError, match="keys must be strings"):
+            doc.update(ItemsMapping({"unused": 0}, [[1, 2]]))  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
+
     @pytest.mark.parametrize(
         "other",
         [
@@ -1237,6 +1247,82 @@ class TestMergeOperators:
         assert isinstance(result, dict)
         assert result["a"] is None
         assert result["b"] == 2
+
+    def test_ror_dict_with_proxy_key_document(self) -> None:
+        base = Document.parse('key = "name"\n')
+        doc = Document({"x": 1})
+        result = {base["key"]: 2} | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+        assert [type(key) for key in result] == [str, str]
+        assert list(result.keys()) == ["name", "x"]
+        assert result["name"] == 2
+        assert result["x"] == 1
+
+    def test_ror_dict_with_proxy_key_dict_item(self) -> None:
+        base = Document.parse('key = "name"\n')
+        doc = Document.parse("[t]\nx = 1\n")
+        result = {base["key"]: 2} | doc["t"]
+        assert [type(key) for key in result] == [str, str]
+        assert list(result.keys()) == ["name", "x"]
+        assert result["name"] == 2
+        assert result["x"] == 1
+
+    def test_ror_non_dict_mapping_with_proxy_key_document(self) -> None:
+        base = Document.parse('key = "name"\n')
+        doc = Document({"x": 1})
+        result = ItemsMapping({"unused": 0}, [[base["key"], 2]]) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+        assert [type(key) for key in result] == [str, str]
+        assert list(result.keys()) == ["name", "x"]
+        assert result["name"] == 2
+        assert result["x"] == 1
+
+    def test_ror_non_dict_mapping_with_proxy_key_dict_item(self) -> None:
+        base = Document.parse('key = "name"\n')
+        doc = Document.parse("[t]\nx = 1\n")
+        result = ItemsMapping({"unused": 0}, [[base["key"], 2]]) | doc["t"]
+        assert [type(key) for key in result] == [str, str]
+        assert list(result.keys()) == ["name", "x"]
+        assert result["name"] == 2
+        assert result["x"] == 1
+
+    def test_ror_non_dict_mapping_with_stale_proxy_key_document(self) -> None:
+        base = Document.parse('key = "name"\n')
+        key = base["key"]
+        del base["key"]
+        doc = Document({"x": 1})
+        with pytest.raises(RuntimeError, match="stale"):
+            ItemsMapping({"unused": 0}, [[key, 2]]) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+
+    def test_ror_non_dict_mapping_with_stale_proxy_key_dict_item(self) -> None:
+        base = Document.parse('key = "name"\n')
+        key = base["key"]
+        del base["key"]
+        doc = Document.parse("[t]\nx = 1\n")
+        with pytest.raises(RuntimeError, match="stale"):
+            ItemsMapping({"unused": 0}, [[key, 2]]) | doc["t"]
+
+    def test_ror_non_dict_mapping_rejects_malformed_pair_document(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(ValueError, match="expected a length-2 iterable pair"):
+            ItemsMapping({"unused": 0}, [[]]) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+
+    def test_ror_non_dict_mapping_rejects_malformed_pair_dict_item(self) -> None:
+        doc = Document.parse("[t]\nx = 1\n")
+        with pytest.raises(ValueError, match="expected a length-2 iterable pair"):
+            ItemsMapping({"unused": 0}, [[]]) | doc["t"]
+
+    def test_ror_dict_preserves_non_string_key(self) -> None:
+        doc = Document({"x": 1})
+        result = {1: "one"} | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+        assert [type(key) for key in result] == [int, str]
+        assert result[1] == "one"
+        assert result["x"] == 1
+
+    def test_ror_non_dict_mapping_preserves_non_string_key(self) -> None:
+        doc = Document.parse("[t]\nx = 1\n")
+        result = ItemsMapping({"unused": 0}, [[1, "one"]]) | doc["t"]
+        assert [type(key) for key in result] == [int, str]
+        assert result[1] == "one"
+        assert result["x"] == 1
 
     def test_ror_list_pair_mapping_document(self) -> None:
         """items() may yield pair-like sequences, not only tuples."""

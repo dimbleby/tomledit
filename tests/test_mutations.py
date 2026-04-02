@@ -141,6 +141,11 @@ class TestSetNewKeys:
         with pytest.raises(ValueError, match="expected a length-2 iterable pair"):
             doc["meta"] = ItemsMapping({"x": 1}, [pair])
 
+    def test_add_mapping_rejects_non_string_pair_key(self) -> None:
+        doc = Document()
+        with pytest.raises(TypeError, match="keys must be strings"):
+            doc["meta"] = ItemsMapping({"unused": 0}, [[1, "value"]])
+
     def test_add_list_of_dicts(self) -> None:
         doc = Document()
         doc["entries"] = [{"x": 1}, {"x": 2}]

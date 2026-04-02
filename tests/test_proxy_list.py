@@ -1155,6 +1155,28 @@ class TestSliceIndexing:
         doc["arr"][3:5] = []
         assert doc.as_toml() == "arr = [ 1, 2, 3 ]\n"
 
+    def test_aot_setitem_slice_empty_removes_leading_blank_line(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+
+            [[items]]
+            name = "b"
+
+            [[items]]
+            name = "c"
+        """)
+        )
+        doc["items"][0:1] = []
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "b"
+
+            [[items]]
+            name = "c"
+        """)
+
     # ---- additional edge cases ----
 
     def test_append_via_slice_at_end(self) -> None:

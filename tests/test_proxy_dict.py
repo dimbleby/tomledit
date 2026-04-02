@@ -12,6 +12,7 @@ from datetime import datetime
 from types import MappingProxyType
 
 import pytest
+from typing_extensions import override
 
 import tomledit
 from tests.conftest import toml_literal
@@ -49,10 +50,19 @@ class _PlainMapping:
         return iter(self._d)
 
 
+class _ListPairMapping(_PlainMapping):
+    """Mapping whose items() yields list pairs rather than tuples."""
+
+    @override
+    def items(self) -> object:
+        return [[k, v] for k, v in self._d.items()]
+
+
 # Register as a Mapping so is_mapping_like() recognises it.
 from collections.abc import Mapping as _MappingABC  # noqa: E402
 
 _MappingABC.register(_PlainMapping)  # ty: ignore[unresolved-attribute]
+_MappingABC.register(_ListPairMapping)  # ty: ignore[unresolved-attribute]
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +226,13 @@ class TestProxyDictMethods:
 
     def test_update_iterable_of_pairs(self, doc: Document) -> None:
         doc["owner"].update([("name", "Bob"), ("email", "bob@example.com")])
+        assert doc["owner"]["name"] == "Bob"
+        assert doc["owner"]["email"] == "bob@example.com"
+
+    def test_update_list_pair_mapping(self, doc: Document) -> None:
+        doc["owner"].update(
+            _ListPairMapping({"name": "Bob", "email": "bob@example.com"})
+        )
         assert doc["owner"]["name"] == "Bob"
         assert doc["owner"]["email"] == "bob@example.com"
 
@@ -502,6 +519,29 @@ class TestDocumentDictMethods:
         doc.update(MappingProxyType({"x": 10, "y": 20}))
         assert doc["x"] == 10
         assert doc["y"] == 20
+
+    def test_update_list_pair_mapping(self) -> None:
+        doc = Document.parse("x = 1\n")
+        doc.update(_ListPairMapping({"x": 10, "y": 20}))  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
+        assert doc["x"] == 10
+        assert doc["y"] == 20
+
+    @pytest.mark.parametrize(
+        "other",
+        [
+            [[]],
+            [["x"]],
+            [["x", 10, 20]],
+        ],
+        ids=["empty", "short", "long"],
+    )
+    def test_update_rejects_non_pair_iterables(
+        self,
+        other: list[list[object]],
+    ) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(ValueError, match="expected a length-2 iterable pair"):
+            doc.update(other)  # type: ignore[arg-type]  # ty: ignore[no-matching-overload]
 
     # -- setdefault --
 
@@ -1115,6 +1155,15 @@ class TestMergeOperators:
             b = 2
         """)
 
+    def test_document_or_list_pair_mapping(self) -> None:
+        doc = Document.parse("a = 1\n")
+        result = doc | _ListPairMapping({"b": 2})  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+        assert isinstance(result, Document)
+        assert result.as_toml() == toml_literal("""
+            a = 1
+            b = 2
+        """)
+
     def test_document_or_override_keeps_lhs_comment(self) -> None:
         """When RHS overrides a key, the LHS comment on that key is kept."""
         doc = Document.parse("# important\na = 1\n")
@@ -1178,6 +1227,12 @@ class TestMergeOperators:
         assert result["b"].inline_comment == "# inline"
         assert result.value == {"a": 1, "b": 2}
 
+    def test_dict_item_or_list_pair_mapping(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        result = doc["t"] | _ListPairMapping({"b": 2})
+        assert isinstance(result, tomledit.DictItem)
+        assert result.value == {"a": 1, "b": 2}
+
     # -- other | DictItem (__ror__ returns plain dict) --
 
     def test_dict_or_dict_item(self) -> None:
@@ -1209,6 +1264,22 @@ class TestMergeOperators:
         """LHS is a non-dict Mapping against a DictItem."""
         doc = Document.parse("[t]\nb = 2\n")
         result = _PlainMapping({"a": None, "b": 1}) | doc["t"]
+        assert isinstance(result, dict)
+        assert result["a"] is None
+        assert result["b"] == 2
+
+    def test_ror_list_pair_mapping_document(self) -> None:
+        """items() may yield pair-like sequences, not only tuples."""
+        doc = Document({"b": 2})
+        result = _ListPairMapping({"a": None, "b": 1}) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+        assert isinstance(result, dict)
+        assert result["a"] is None
+        assert result["b"] == 2
+
+    def test_ror_list_pair_mapping_dict_item(self) -> None:
+        """DictItem | should accept mappings whose items() yields lists."""
+        doc = Document.parse("[t]\nb = 2\n")
+        result = _ListPairMapping({"a": None, "b": 1}) | doc["t"]
         assert isinstance(result, dict)
         assert result["a"] is None
         assert result["b"] == 2

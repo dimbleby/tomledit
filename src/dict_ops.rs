@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyKeyError, PyTypeError};
+use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use toml_edit::{Decor, Item as ItemRs, TableLike, Value as ValueRs};
@@ -257,23 +257,16 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
         return dict_to_pairs(dict);
     }
 
-    // Mapping — iterate .items() for (key, value) pairs directly.
-    if is_mapping_like(other) {
-        let items = other.call_method0("items")?;
-        let mut pairs = Vec::new();
-        for item in items.try_iter()? {
-            let (key, val): (String, Item) = item?.extract()?;
-            pairs.push((key, val));
-        }
-        return Ok(pairs);
-    }
-
-    // Iterable of (key, value) pairs
+    // Mapping .items() or bare iterable of pairs — same extraction logic.
+    let iter = if is_mapping_like(other) {
+        other.call_method0("items")?.try_iter()?
+    } else {
+        other.try_iter()?
+    };
     let mut pairs = Vec::new();
-    for item in other.try_iter()? {
-        let item = item?;
-        let (key, val): (String, Item) = item.extract()?;
-        pairs.push((key, val));
+    for item in iter {
+        let (key, val) = extract_pair(&item?)?;
+        pairs.push((key.extract::<String>()?, val.extract::<Item>()?));
     }
     Ok(pairs)
 }
@@ -487,6 +480,22 @@ fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> bool {
         .unwrap_or(false)
 }
 
+fn extract_pair<'py>(pair: &Bound<'py, PyAny>) -> PyResult<(Bound<'py, PyAny>, Bound<'py, PyAny>)> {
+    let mut iter = pair.try_iter()?;
+    let key = iter
+        .next()
+        .transpose()?
+        .ok_or_else(|| PyValueError::new_err("expected a length-2 iterable pair"))?;
+    let value = iter
+        .next()
+        .transpose()?
+        .ok_or_else(|| PyValueError::new_err("expected a length-2 iterable pair"))?;
+    if iter.next().transpose()?.is_some() {
+        return Err(PyValueError::new_err("expected a length-2 iterable pair"));
+    }
+    Ok((key, value))
+}
+
 /// Copy entries from a Python mapping into a new `PyDict`, preserving the
 /// original Python values verbatim (no TOML round-trip).
 ///
@@ -503,8 +512,8 @@ pub(crate) fn copy_mapping_to_pydict<'py>(
     let items = other.call_method0("items")?;
     for pair in items.try_iter()? {
         let pair = pair?;
-        let tuple = pair.cast::<PyTuple>()?;
-        dict.set_item(tuple.get_item(0)?, tuple.get_item(1)?)?;
+        let (key, value) = extract_pair(&pair)?;
+        dict.set_item(key, value)?;
     }
     Ok(dict)
 }

@@ -294,6 +294,38 @@ class TestMutatorProxyStaysValid:
         assert len(arr) == 2
 
 
+class TestStaleProxyAsMappingKey:
+    """A stale ScalarItem string used as a key should still raise RuntimeError."""
+
+    def test_document_contains_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document.parse('key = "x"\nx = 1\n')
+        key = doc["key"]
+        del doc["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            assert key in doc
+
+    def test_document_get_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document.parse('key = "x"\nx = 1\n')
+        key = doc["key"]
+        del doc["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            doc.get(key)  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
+
+    def test_document_setitem_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document.parse('key = "x"\nx = 1\n')
+        key = doc["key"]
+        del doc["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            doc[key] = 2  # type: ignore[index]  # ty: ignore[invalid-assignment]
+
+    def test_dict_get_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document.parse('key = "x"\n[t]\nx = 1\n')
+        key = doc["key"]
+        del doc["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["t"].get(key)
+
+
 class TestCommentMutationsPreserveProxies:
     """Setting comments is decoration-only, so proxies stay valid."""
 

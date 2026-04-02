@@ -64,7 +64,7 @@ impl DictProxy {
         key: &Bound<'_, PyAny>,
         default: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
-        let Some(key) = item_ops::extract_key_str(key) else {
+        let Some(key) = item_ops::extract_key_str(key)? else {
             return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
         };
         let base = self_.as_super();
@@ -87,7 +87,7 @@ impl DictProxy {
     ) -> PyResult<Py<PyAny>> {
         let default_val = dict_ops::extract_pop_default(default)?;
 
-        let Some(key_str) = item_ops::extract_key_str(key) else {
+        let Some(key_str) = item_ops::extract_key_str(key)? else {
             return match default_val {
                 Some(d) => Ok(d),
                 None => Err(PyKeyError::new_err(key.repr()?.to_string())),
@@ -223,7 +223,7 @@ impl DictProxy {
         key: &Bound<'_, PyAny>,
         default: Option<Item>,
     ) -> PyResult<Py<PyAny>> {
-        let key = item_ops::extract_key_str(key)
+        let key = item_ops::extract_key_str(key)?
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         let base = self_.into_super();
         {

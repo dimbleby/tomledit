@@ -947,6 +947,19 @@ class TestComment:
         assert doc2["t"]["y"] == 2
         assert doc2["t"]["x"].comment == "# note"
 
+    def test_set_compact_single_key_inline_table_comment(self) -> None:
+        """A compact single-key inline table falls back to canonical spacing."""
+        doc = Document.parse("t = {x = 1}\n")
+        doc["t"]["x"].comment = "# note"
+        assert doc.as_toml() == toml_literal("""
+            t = {
+             # note
+             x = 1}
+        """)
+        doc2 = Document.parse(doc.as_toml())
+        assert doc2["t"]["x"] == 1
+        assert doc2["t"]["x"].comment == "# note"
+
     def test_set_inline_table_non_first_key_comment(self) -> None:
         """Block comment on a non-first inline table key."""
         doc = Document.parse("t = {x = 1, y = 2}\n")
@@ -1859,6 +1872,18 @@ class TestIorPreservesComments:
             b = 2
         """)
 
+    def test_ior_inline_table_preserves_source_comment(self) -> None:
+        target = Document.parse("dst = { a = 1 }\n")
+        source = Document.parse("src = { b = 2 }\n")
+        source["src"]["b"].comment = "# new key comment"
+        target["dst"] |= source["src"]
+        assert target.as_toml() == toml_literal("""
+            dst = { a = 1,
+             # new key comment
+             b = 2 }
+        """)
+        assert target["dst"]["b"].comment == "# new key comment"
+
 
 class TestUpdatePreservesComments:
     """update() preserves comments from both target and source."""
@@ -1892,6 +1917,34 @@ class TestUpdatePreservesComments:
             # new key comment
             b = 2
         """)
+
+    def test_update_inline_table_preserves_source_comment(self) -> None:
+        target = Document.parse("dst = { a = 1 }\n")
+        source = Document.parse("src = { b = 2 }\n")
+        source["src"]["b"].comment = "# new key comment"
+        target["dst"].update(source["src"])
+        assert target.as_toml() == toml_literal("""
+            dst = { a = 1,
+             # new key comment
+             b = 2 }
+        """)
+        assert target["dst"]["b"].comment == "# new key comment"
+
+
+class TestOrPreservesComments:
+    """| preserves source comments in the returned mapping."""
+
+    def test_or_inline_table_preserves_source_comment(self) -> None:
+        target = Document.parse("dst = { a = 1 }\n")
+        source = Document.parse("src = { b = 2 }\n")
+        source["src"]["b"].comment = "# new key comment"
+        result = target["dst"] | source["src"]
+        assert result.as_toml() == toml_literal("""
+            { a = 1,
+             # new key comment
+             b = 2 }
+        """).rstrip("\n")
+        assert result["b"].comment == "# new key comment"
 
 
 class TestCommentIdempotency:

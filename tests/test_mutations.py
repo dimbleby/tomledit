@@ -241,7 +241,7 @@ class TestInlineTableMutation:
         doc["it"]["b"] = {"foo": "bar"}
         assert doc["it"]["b"]["foo"] == "bar"
         assert list(doc["it"]) == ["a", "b"]
-        assert doc.as_toml() == 'it = { a = 1 , b = { foo = "bar" } }\n'
+        assert doc.as_toml() == 'it = { a = 1, b = { foo = "bar" } }\n'
         doc2 = Document.parse(doc.as_toml())
         assert doc2 == doc
 

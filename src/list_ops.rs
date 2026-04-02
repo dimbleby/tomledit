@@ -464,9 +464,13 @@ fn aot_setitem_slice(
         let start_idx = start as usize;
         let stop_idx = stop as usize;
         let tables_count = tables.len();
-        let saved = (start_idx == 0 && stop_idx > 0).then(|| save_aot_entry_prefix(aot, 0));
+        let removes_first = start_idx == 0 && stop_idx > 0;
+        let saved = removes_first.then(|| save_aot_entry_prefix(aot, 0));
         for i in (start_idx..stop_idx).rev() {
             aot.remove(i);
+        }
+        if removes_first && tables_count == 0 {
+            fix_first_aot_prefix(aot);
         }
         if let Some(prefix) = &saved
             && let Some(first) = tables.first_mut()

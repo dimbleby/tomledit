@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- New `ListItem` operations: `+`, `*`, and `*=` for list concatenation and
+  repetition, mirroring Python's `list` interface.
+- PEP 584 merge operators: `|` and `|=` on `Document` and `DictItem` for
+  dict-style merging, plus `popitem()`.
+- Array-of-tables improvements: `replace()`, `insert()`, inline comments,
+  and better spacing/comment preservation throughout AoT mutations.
+- `DictItem.implicit` property to get or set whether a table's header is
+  suppressed in TOML output (e.g. `[a]` is implicit when only `[a.b]` is
+  defined).
+- Broader equality and containment: inline tables now compare equal to any
+  `Mapping`; cross-type proxy equality (e.g. `Table` vs `InlineTable`) works
+  correctly.
+- Comment robustness: block comments survive type changes, TOML-invalid
+  control characters are rejected, and comments/formatting are preserved across
+  `update()` and merge operations.
+- Many double-borrow panic fixes — proxy keys, `update(self)`, `|= self`,
+  `ListItem` self-references, `pop` with proxy keys, and view operations no
+  longer trigger RefCell panics.
+- More precise proxy invalidation: array mutations now only invalidate
+  the affected elements rather than the entire array; views now check
+  freshness.
+- Free-threaded Python wheels are now available.
+
 ## 0.12.1 (20 March 2026)
 
 - Fix `ListItem.remove()` panic when passed an `Item` proxy (e.g.

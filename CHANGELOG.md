@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0 (3 April 2026)
+
 - New `ListItem` operations: `+`, `*`, and `*=` for list concatenation and
   repetition, mirroring Python's `list` interface.
 - PEP 584 merge operators: `|` and `|=` on `Document` and `DictItem` for

@@ -110,6 +110,11 @@ jobs:
       - name: Install llvm-tools
         run: rustup component add llvm-tools
 
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@d858f8113943481093e02986a7586a4819a3bfd6 # v2.71.2
+        with:
+          tool: cargo-llvm-cov
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -120,16 +125,11 @@ jobs:
 
       - name: Build with coverage instrumentation and run tests
         run: |
-          RUSTFLAGS="-Cinstrument-coverage" \
-            LLVM_PROFILE_FILE="target/tomledit-%p-%m.profraw" \
-            uv run --reinstall-package tomledit pytest -q
+          source <(cargo llvm-cov show-env --sh)
+          cargo llvm-cov clean --workspace
+          uv run --reinstall-package tomledit pytest -q
 
       - name: Generate coverage report
         run: |
-          LLVM_TOOLS_PATH="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin"
-          "$LLVM_TOOLS_PATH/llvm-profdata" merge -sparse target/tomledit-*.profraw -o target/tomledit.profdata
-          LIB_PATH=$(find target -name 'libtomledit.so' -path '*/release/*' | head -1)
-          "$LLVM_TOOLS_PATH/llvm-cov" report \
-            "$LIB_PATH" \
-            --instr-profile=target/tomledit.profdata --sources src/ \
-            --show-branch-summary=false
+          source <(cargo llvm-cov show-env --sh)
+          LLVM_COV_FLAGS="--show-branch-summary=false" cargo llvm-cov report --release

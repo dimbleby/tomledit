@@ -49,18 +49,16 @@ ty:
 
 coverage-build: .coverage-stamp
 .coverage-stamp: $(RUST_SOURCES) Cargo.toml Cargo.lock pyproject.toml uv.lock
-	RUSTFLAGS="-Cinstrument-coverage" uv sync --reinstall-package tomledit
+	eval "$$(cargo llvm-cov show-env --sh)" && \
+		uv sync --reinstall-package tomledit
 	@rm -f .build-stamp
 	@touch $@
 
 coverage: coverage-build
-	rm -f target/tomledit-*.profraw
-	LLVM_PROFILE_FILE="target/tomledit-%p-%m.profraw" pytest -q
-	LLVM_TOOLS_PATH="$$(rustc --print sysroot)/lib/rustlib/$$(rustc -vV | awk '/^host:/ {print $$2}')/bin" && \
-	"$$LLVM_TOOLS_PATH/llvm-profdata" merge -sparse target/tomledit-*.profraw -o target/tomledit.profdata && \
-	LIB_PATH=$$(find target -name 'libtomledit.so' -path '*/release/*' | head -1) && \
-	"$$LLVM_TOOLS_PATH/llvm-cov" report "$$LIB_PATH" --instr-profile=target/tomledit.profdata --sources src/ \
-		--show-branch-summary=false
+	eval "$$(cargo llvm-cov show-env --sh)" && \
+		cargo llvm-cov clean --profraw-only && \
+		pytest -q && \
+		LLVM_COV_FLAGS="--show-branch-summary=false" cargo llvm-cov report --release
 
 clean:
 	cargo clean

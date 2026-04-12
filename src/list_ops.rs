@@ -829,22 +829,19 @@ pub(crate) fn resolve_subscript_key<'py>(
     }
     let resolved = crate::item_proxy::resolve_proxy(key)?;
     let resolved_key = resolved.as_ref().map_or(key, |v| v.bind(py));
-    if let Ok(i) = resolved_key.extract::<i64>() {
-        Ok(SubscriptKey::Int(i))
-    } else if resolved_key.extract::<String>().is_ok() {
-        Err(PyTypeError::new_err(
-            "TOML array indices must be integers, not strings",
-        ))
-    } else {
-        let type_name = key
-            .get_type()
-            .name()
-            .map(|n| n.to_string())
-            .unwrap_or_else(|_| "?".to_owned());
-        Err(PyTypeError::new_err(format!(
-            "TOML array indices must be integers or slices, not {type_name}"
-        )))
-    }
+    resolved_key
+        .extract::<i64>()
+        .map(SubscriptKey::Int)
+        .map_err(|_| {
+            let type_name = key
+                .get_type()
+                .name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|_| "?".to_owned());
+            PyTypeError::new_err(format!(
+                "TOML array indices must be integers or slices, not {type_name}"
+            ))
+        })
 }
 
 // ---------------------------------------------------------------------------

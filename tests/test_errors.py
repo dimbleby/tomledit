@@ -116,7 +116,7 @@ class TestWrongTypeErrors:
 
     def test_setitem_str_key_on_array_raises(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")
-        with pytest.raises(TypeError, match="integers, not strings"):
+        with pytest.raises(TypeError, match="integers or slices, not str"):
             doc["arr"]["x"] = 99
 
     def test_delitem_int_key_on_table_raises(self) -> None:
@@ -131,7 +131,7 @@ class TestWrongTypeErrors:
 
     def test_delitem_str_key_on_array_raises(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")
-        with pytest.raises(TypeError, match="integers, not strings"):
+        with pytest.raises(TypeError, match="integers or slices, not str"):
             del doc["arr"]["x"]
 
     def test_setitem_float_key_on_table_raises(self) -> None:

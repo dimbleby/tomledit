@@ -17,7 +17,7 @@ description: Step-by-step checklists and Rust code patterns for adding methods, 
 Pattern for a **read-only property** on a proxy:
 ```rust
 #[getter]
-pub fn my_prop(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<...> {
+pub fn my_prop(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<...> {
     let base = self_.as_super();
     let doc = base.document.bind(py).borrow();
     base.check_fresh(&doc)?;
@@ -48,7 +48,7 @@ pub fn my_prop(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<...> {
 
 Pattern for a **read-only** proxy method:
 ```rust
-pub fn my_method(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<...> {
+pub fn my_method(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<...> {
     let base = self_.as_super();
     let doc = base.document.bind(py).borrow();
     base.check_fresh(&doc)?;
@@ -59,7 +59,7 @@ pub fn my_method(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<...> {
 
 Pattern for a **mutating** proxy method:
 ```rust
-pub fn my_method(self_: PyRefMut<'_, Self>, py: Python<'_>, ...) -> PyResult<...> {
+pub fn my_method(self_: PyClassGuardMut<'_, Self>, py: Python<'_>, ...) -> PyResult<...> {
     let mut base = self_.into_super();
     let mut doc = base.document.bind(py).borrow_mut();
     base.check_fresh(&doc)?;

@@ -1,5 +1,6 @@
 use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
+use pyo3::pyclass::{PyClassGuard, PyClassGuardMut};
 use pyo3::types::{PyDict, PyTuple};
 use toml_edit::DocumentMut as DocumentRs;
 
@@ -24,7 +25,7 @@ impl DictProxy {
         crate::item_proxy::parse_as::<DictProxy>(py, text, "DictItem", "table")
     }
 
-    pub fn keys(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<KeysView> {
+    pub fn keys(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<KeysView> {
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
@@ -35,7 +36,7 @@ impl DictProxy {
         ))
     }
 
-    pub fn values(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<ValuesView> {
+    pub fn values(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<ValuesView> {
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
@@ -46,7 +47,7 @@ impl DictProxy {
         ))
     }
 
-    pub fn items(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<ItemsView> {
+    pub fn items(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<ItemsView> {
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
@@ -59,7 +60,7 @@ impl DictProxy {
 
     #[pyo3(signature = (key, default=None, /))]
     pub fn get(
-        self_: PyRef<'_, Self>,
+        self_: PyClassGuard<'_, Self>,
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         default: Option<&Bound<'_, PyAny>>,
@@ -80,7 +81,7 @@ impl DictProxy {
 
     #[pyo3(signature = (key, /, *default))]
     pub fn pop(
-        self_: PyRefMut<'_, Self>,
+        self_: PyClassGuardMut<'_, Self>,
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         default: &Bound<'_, PyTuple>,
@@ -112,7 +113,10 @@ impl DictProxy {
         }
     }
 
-    pub fn popitem(self_: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
+    pub fn popitem(
+        self_: PyClassGuardMut<'_, Self>,
+        py: Python<'_>,
+    ) -> PyResult<(String, Py<PyAny>)> {
         let base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
@@ -124,7 +128,7 @@ impl DictProxy {
     }
 
     pub fn __or__(
-        self_: PyRef<'_, Self>,
+        self_: PyClassGuard<'_, Self>,
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
@@ -147,7 +151,7 @@ impl DictProxy {
     }
 
     pub fn __ror__(
-        self_: PyRef<'_, Self>,
+        self_: PyClassGuard<'_, Self>,
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
@@ -204,7 +208,7 @@ impl DictProxy {
         base.check_fresh(&doc)?;
         let item = base.navigate_mut(&mut doc.inner)?;
         let mut replaced = match update {
-            Some(u) => u.apply(item)?,
+            Some(u) => u.apply(item, py)?,
             None => Vec::new(),
         };
         if !kwarg_pairs.is_empty() {
@@ -218,7 +222,7 @@ impl DictProxy {
 
     #[pyo3(signature = (key, default=None, /))]
     pub fn setdefault(
-        self_: PyRefMut<'_, Self>,
+        self_: PyClassGuardMut<'_, Self>,
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         default: Option<Item>,
@@ -252,7 +256,7 @@ impl DictProxy {
     /// Setting to ``True`` suppresses the header; setting to ``False``
     /// makes it explicit.  Silently ignored on inline tables.
     #[getter]
-    pub fn get_implicit(self_: PyRef<'_, Self>, py: Python<'_>) -> PyResult<bool> {
+    pub fn get_implicit(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<bool> {
         let base = self_.as_super();
         let doc = base.document.bind(py).borrow();
         base.check_fresh(&doc)?;
@@ -264,7 +268,11 @@ impl DictProxy {
     }
 
     #[setter]
-    pub fn set_implicit(self_: PyRef<'_, Self>, py: Python<'_>, implicit: bool) -> PyResult<()> {
+    pub fn set_implicit(
+        self_: PyClassGuard<'_, Self>,
+        py: Python<'_>,
+        implicit: bool,
+    ) -> PyResult<()> {
         let base = self_.as_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;

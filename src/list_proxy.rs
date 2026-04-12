@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::pyclass::{PyClassGuard, PyClassGuardMut};
+use pyo3::types::PyIterator;
 use toml_edit::DocumentMut as DocumentRs;
 
 use crate::document::Document;
@@ -12,7 +13,7 @@ use crate::list_ops;
 ///
 /// ``isinstance(item, ListItem)`` and
 /// ``isinstance(item, MutableSequence)`` both work.
-#[pyclass(name = "ListItem", module = "tomledit", extends = ItemProxy)]
+#[pyclass(name = "ListItem", module = "tomledit", sequence, extends = ItemProxy)]
 pub(crate) struct ListProxy;
 
 impl ListProxy {
@@ -86,6 +87,158 @@ impl ListProxy {
     fn parse(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
         crate::item_proxy::parse_as::<ListProxy>(py, text, "ListItem", "array")
     }
+
+    // ---- container protocol ----
+
+    pub fn __getitem__(
+        self_: PyClassGuard<'_, Self>,
+        key: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        use list_ops::SubscriptKey;
+        let py = key.py();
+        let resolved = list_ops::resolve_subscript_key(py, key)?;
+        let base = self_.into_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_fresh(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+
+        match resolved {
+            SubscriptKey::Slice(slice) => {
+                let target = list_ops::as_array_like(item, "slicing")?;
+                let si = slice.indices(target.len() as isize)?;
+                let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
+                let proxies: PyResult<Vec<Py<PyAny>>> = indices
+                    .into_iter()
+                    .map(|i| base.child_proxy_typed(py, Key::Int(i)))
+                    .collect();
+                Ok(proxies?.into_pyobject(py)?.into_any().unbind())
+            }
+            SubscriptKey::Int(i) => {
+                let idx = list_ops::require_array_index(item, i)?;
+                base.child_proxy_typed(py, Key::Int(idx))
+            }
+        }
+    }
+
+    pub fn __setitem__(
+        slf: &Bound<'_, Self>,
+        key: &Bound<'_, PyAny>,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        use list_ops::SubscriptKey;
+        let py = key.py();
+        let resolved = list_ops::resolve_subscript_key(py, key)?;
+
+        match resolved {
+            SubscriptKey::Slice(slice) => {
+                // Collect items BEFORE borrowing — value may be the same proxy.
+                let values = collect_items(value)?;
+                let self_mut = slf.borrow_mut();
+                let mut base = self_mut.into_super();
+                let mut doc = base.document.bind(py).borrow_mut();
+                base.check_fresh(&doc)?;
+                let item = base.navigate_mut(&mut doc.inner)?;
+                let target = list_ops::as_array_like_mut(item, "slice assignment")?;
+                let si = slice.indices(target.len() as isize)?;
+                let old_len = target.len();
+                let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
+                let new_count = values.len();
+                list_ops::item_setitem_slice(target, si.start, si.stop, si.step, values)?;
+                if new_count == indices.len() {
+                    for &i in &indices {
+                        base.bump_child(&mut doc, Key::Int(i));
+                    }
+                } else {
+                    let from = indices.iter().min().copied().unwrap_or(si.start as usize);
+                    base.bump_range(&mut doc, from, old_len);
+                }
+                Ok(())
+            }
+            SubscriptKey::Int(i) => {
+                // Extract before borrowing — value may be a proxy from the same cell.
+                let value: Item = value.extract()?;
+                let self_guard = slf.borrow();
+                let base = self_guard.into_super();
+                let mut doc = base.document.bind(py).borrow_mut();
+                base.check_fresh(&doc)?;
+                let item = base.navigate_mut(&mut doc.inner)?;
+                let target = list_ops::as_array_like_mut(item, "__setitem__")?;
+                let replaced_key = list_ops::item_setitem_int(target, i, value)?;
+                base.bump_child(&mut doc, replaced_key);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn __delitem__(self_: PyClassGuardMut<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<()> {
+        use list_ops::SubscriptKey;
+        let py = key.py();
+        let resolved = list_ops::resolve_subscript_key(py, key)?;
+        let mut base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_fresh(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+
+        match resolved {
+            SubscriptKey::Slice(slice) => {
+                let target = list_ops::as_array_like_mut(item, "slice deletion")?;
+                let si = slice.indices(target.len() as isize)?;
+                let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
+                if let Some(&min_idx) = indices.iter().min() {
+                    let old_len = target.len();
+                    list_ops::item_delitem_slice(target, &indices)?;
+                    base.bump_range(&mut doc, min_idx, old_len);
+                }
+                Ok(())
+            }
+            SubscriptKey::Int(i) => {
+                let deleted = list_ops::item_delitem_int(item, i)?;
+                base.bump_affected(&mut doc, deleted);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn __len__(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<usize> {
+        let base = self_.into_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_fresh(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        let target = list_ops::as_array_like(item, "__len__")?;
+        Ok(target.len())
+    }
+
+    pub fn __iter__(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<Py<PyIterator>> {
+        let base = self_.into_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_fresh(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        let len = list_ops::as_array_like(item, "__iter__")?.len();
+        let proxies: PyResult<Vec<Py<PyAny>>> = (0..len)
+            .map(|i| base.child_proxy_typed(py, Key::Int(i)))
+            .collect();
+        let list = proxies?.into_pyobject(py)?;
+        Ok(list.try_iter()?.unbind())
+    }
+
+    pub fn __contains__(self_: PyClassGuard<'_, Self>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let py = value.py();
+        let resolved = resolve_proxy(value)?;
+        let value = resolved.as_ref().map_or(value, |v| v.bind(py));
+        let base = self_.into_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_fresh(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        let target = list_ops::as_array_like(item, "'in'")?;
+        for i in 0..target.len() {
+            if list_ops::element_eq(&target, i, value)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    // ---- list-specific methods ----
 
     pub fn __iadd__(slf: &Bound<'_, Self>, values: &Bound<'_, PyAny>) -> PyResult<()> {
         Self::extend(slf, values.py(), values)

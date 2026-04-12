@@ -78,7 +78,10 @@ fn keys_to_pylist<'py>(
 
 fn get_len(doc: &DocumentRs, path: &[Key]) -> PyResult<usize> {
     let item = item_ops::navigate_path(doc, path)?;
-    item_ops::item_len(item).ok_or_else(|| PyTypeError::new_err("TOML item has no len()"))
+    let tbl = item
+        .as_table_like()
+        .ok_or_else(|| PyTypeError::new_err("TOML item has no len()"))?;
+    Ok(tbl.len())
 }
 
 fn contains_key(doc: &DocumentRs, path: &[Key], key: &str) -> PyResult<bool> {

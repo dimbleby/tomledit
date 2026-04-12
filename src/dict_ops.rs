@@ -200,18 +200,10 @@ pub(crate) fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
 }
 
 pub(crate) fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
-    if let Some(tbl) = item.as_table_like() {
-        return Ok(tbl.contains_key(key));
-    }
-    match item {
-        ItemRs::Value(ValueRs::Array(_)) | ItemRs::ArrayOfTables(_) => Err(PyTypeError::new_err(
-            "TOML array indices must be integers, not strings",
-        )),
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item is not subscriptable (use .value to get the Python object)",
-            item.type_name()
-        ))),
-    }
+    let tbl = item
+        .as_table_like()
+        .ok_or_else(|| unsupported_op(item, "key lookup"))?;
+    Ok(tbl.contains_key(key))
 }
 
 /// Remove and return the last `(key, Item)` pair from a table-like item.
@@ -541,4 +533,15 @@ pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
         },
         _ => Err(unsupported_op(item, "pop()")),
     }
+}
+
+/// Set a string-keyed entry (table / inline table).
+/// Returns `Some(key)` if an existing value was replaced, `None` if a new key
+/// was added.
+///
+/// The caller must ensure `item` is a table or inline table.
+pub(crate) fn item_setitem_str(item: &mut ItemRs, key: String, value: Item) -> Option<Key> {
+    let replaced = item.get(key.as_str()).is_some();
+    set_with_decor_preservation(item, &key, value);
+    if replaced { Some(Key::Str(key)) } else { None }
 }

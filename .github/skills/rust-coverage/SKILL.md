@@ -5,32 +5,53 @@ description: Generate Rust code coverage reports from Python tests for this PyO3
 
 # Rust Code Coverage (from Python tests)
 
-Coverage uses `cargo-llvm-cov`, which handles instrumentation flags, profraw
-management, and report generation.
+Uses `cargo-llvm-cov` for instrumentation and report generation.
 
-## Quick path
-
-```sh
-make coverage        # instrumented build + pytest + summary table
-```
-
-## Per-file detail
-
-To see uncovered lines for a specific file, run the pipeline manually:
+## Summary table
 
 ```sh
-eval "$(cargo llvm-cov show-env --sh)"
-cargo llvm-cov clean --profraw-only
-uv sync --reinstall-package tomledit
-pytest -q
-LLVM_COV_FLAGS="--show-line-counts-or-regions --sources src/item_proxy.rs" \
-  cargo llvm-cov report --release
+make coverage
 ```
 
-## Clean up (mandatory)
+## Uncovered line numbers
 
-The instrumented `.so` stays installed until you rebuild.  Any later
-`uv run` will load it and write profraw files.  Always rebuild clean:
+Use `--lcov` output. **All steps must run in the same shell** (shared env
+vars point pytest's profraw output to the right directory).
+
+### All files
+
+```sh
+eval "$(cargo llvm-cov show-env --sh)" && \
+  cargo llvm-cov clean --profraw-only && \
+  pytest -q && \
+  cargo llvm-cov report --release --lcov | awk '
+    /^SF:/ { file=$0; sub(/^SF:/, "", file); sub(/.*\/src\//, "src/", file) }
+    /^DA:/ && /,0$/ { line=$0; sub(/^DA:/, "", line); sub(/,0$/, "", line); print file ":" line }
+  '
+```
+
+### Single file
+
+```sh
+# same pipeline, filter in the awk:
+  ... | awk '
+    /^SF:/ { file=$0; sub(/^SF:/, "", file); sub(/.*\/src\//, "src/", file) }
+    /^DA:/ && /,0$/ { line=$0; sub(/^DA:/, "", line); sub(/,0$/, "", line);
+      if (file == "src/list_ops.rs") print line }
+  '
+```
+
+## Pitfalls
+
+- `cargo llvm-cov report` gives summary tables; there is no `show`
+  subcommand. Use `--lcov` for line-level data.
+- The `--sources` flag does not work with this project.
+- Running the steps in separate shells causes "not found *.profraw".
+- `make coverage-build` handles the instrumented build.
+
+## Clean up
+
+The instrumented `.so` stays installed until rebuilt:
 
 ```sh
 uv sync --reinstall-package tomledit

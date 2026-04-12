@@ -1,7 +1,7 @@
-use pyo3::exceptions::PyKeyError;
+use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::pyclass::PyClassGuard;
-use pyo3::types::{PyDict, PyTuple};
+use pyo3::types::{PyDict, PyIterator, PyTuple};
 use toml_edit::DocumentMut as DocumentRs;
 
 use crate::dict_ops;
@@ -15,7 +15,7 @@ use crate::views::{ItemsView, KeysView, ValuesView};
 ///
 /// ``isinstance(item, DictItem)`` and
 /// ``isinstance(item, MutableMapping)`` both work.
-#[pyclass(name = "DictItem", module = "tomledit", extends = ItemProxy)]
+#[pyclass(name = "DictItem", module = "tomledit", mapping, extends = ItemProxy)]
 pub(crate) struct DictProxy;
 
 #[pymethods]
@@ -24,6 +24,94 @@ impl DictProxy {
     fn parse(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
         crate::item_proxy::parse_as::<DictProxy>(py, text, "DictItem", "table")
     }
+
+    // ---- container protocol ----
+
+    pub fn __getitem__(
+        self_: PyClassGuard<'_, Self>,
+        key: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let py = key.py();
+        let Some(key_str) = item_ops::extract_key_str(key)? else {
+            return Err(PyTypeError::new_err("TOML table keys must be strings"));
+        };
+        let base = self_.into_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_fresh(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        if !dict_ops::item_has_key(item, &key_str)? {
+            return Err(PyKeyError::new_err(key_str));
+        }
+        base.child_proxy_typed(py, Key::Str(key_str))
+    }
+
+    pub fn __setitem__(
+        slf: &Bound<'_, Self>,
+        key: &Bound<'_, PyAny>,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let py = key.py();
+        let key_str = item_ops::extract_key_str(key)?
+            .ok_or_else(|| PyTypeError::new_err("TOML table keys must be strings"))?;
+        // Extract before borrowing — value may be a proxy from the same cell.
+        let value: Item = value.extract()?;
+        let self_guard = slf.borrow();
+        let base = self_guard.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_fresh(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        if let Some(replaced_key) = dict_ops::item_setitem_str(item, key_str, value) {
+            base.bump_child(&mut doc, replaced_key);
+        }
+        Ok(())
+    }
+
+    pub fn __delitem__(self_: PyClassGuard<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<()> {
+        let py = key.py();
+        let Some(key_str) = item_ops::extract_key_str(key)? else {
+            return Err(PyTypeError::new_err("TOML table keys must be strings"));
+        };
+        let base = self_.into_super();
+        let mut doc = base.document.bind(py).borrow_mut();
+        base.check_fresh(&doc)?;
+        let item = base.navigate_mut(&mut doc.inner)?;
+        let (_removed, k) = dict_ops::table_pop(item, &key_str)?;
+        base.bump_child(&mut doc, k);
+        Ok(())
+    }
+
+    pub fn __len__(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<usize> {
+        let base = self_.into_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_fresh(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        Ok(dict_ops::as_dict_like(item, "__len__")?.len())
+    }
+
+    pub fn __iter__(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<Py<PyIterator>> {
+        let base = self_.into_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_fresh(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        let tbl = dict_ops::as_dict_like(item, "__iter__")?;
+        let keys: Vec<&str> = tbl.iter().map(|(k, _)| k).collect();
+        let list = keys.into_pyobject(py)?;
+        Ok(list.try_iter()?.unbind())
+    }
+
+    pub fn __contains__(self_: PyClassGuard<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let py = key.py();
+        let Some(key_str) = item_ops::extract_key_str(key)? else {
+            return Ok(false);
+        };
+        let base = self_.into_super();
+        let doc = base.document.bind(py).borrow();
+        base.check_fresh(&doc)?;
+        let item = base.navigate(&doc.inner)?;
+        Ok(dict_ops::as_dict_like(item, "'in'")?.contains_key(&key_str))
+    }
+
+    // ---- dict-specific methods ----
 
     pub fn keys(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<KeysView> {
         let base = self_.as_super();

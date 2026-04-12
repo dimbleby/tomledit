@@ -1,5 +1,6 @@
-use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PySlice;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
@@ -287,17 +288,8 @@ pub(crate) fn resolve_index(index: i64, len: usize) -> PyResult<usize> {
 
 /// Resolve an integer index against an array-like item.
 pub(crate) fn require_array_index(item: &ItemRs, index: i64) -> PyResult<usize> {
-    match item {
-        ItemRs::Value(ValueRs::Array(arr)) => resolve_index(index, arr.len()),
-        ItemRs::ArrayOfTables(aot) => resolve_index(index, aot.len()),
-        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_)) => {
-            Err(PyKeyError::new_err(index.to_string()))
-        }
-        _ => Err(PyTypeError::new_err(format!(
-            "TOML {} item is not subscriptable (use .value to get the Python object)",
-            item.type_name()
-        ))),
-    }
+    let target = as_array_like(item, "indexing")?;
+    resolve_index(index, target.len())
 }
 
 /// Collect concrete indices from resolved slice parameters.
@@ -725,7 +717,11 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
 }
 
 /// Test whether element at `index` in `target` equals `value`.
-fn element_eq(target: &ArrayLikeRef<'_>, index: usize, value: &Bound<'_, PyAny>) -> PyResult<bool> {
+pub(crate) fn element_eq(
+    target: &ArrayLikeRef<'_>,
+    index: usize,
+    value: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
     match target {
         ArrayLikeRef::Array(arr) => match arr.get(index) {
             Some(v) => equality::value_eq(v, value),
@@ -804,6 +800,93 @@ pub(crate) fn list_pop(
         }
     };
     item_remove_at(target, idx)
+}
+
+// ---------------------------------------------------------------------------
+// Subscript key resolution (used by ListProxy)
+// ---------------------------------------------------------------------------
+
+/// A subscript key resolved from Python *before* borrowing the document.
+///
+/// Proxy values are resolved to their plain Python equivalents so that
+/// `extract()` works without re-borrowing the document.
+pub(crate) enum SubscriptKey<'py> {
+    Int(i64),
+    Slice(Bound<'py, PySlice>),
+}
+
+/// Resolve a `__getitem__`/`__setitem__`/`__delitem__` key to a typed enum.
+///
+/// This must be called *before* borrowing the document, because resolving a
+/// proxy key borrows it internally.  Returns `TypeError` for non-integer,
+/// non-slice keys.
+pub(crate) fn resolve_subscript_key<'py>(
+    py: Python<'py>,
+    key: &Bound<'py, PyAny>,
+) -> PyResult<SubscriptKey<'py>> {
+    if let Ok(slice) = key.cast::<PySlice>() {
+        return Ok(SubscriptKey::Slice(slice.clone()));
+    }
+    let resolved = crate::item_proxy::resolve_proxy(key)?;
+    let resolved_key = resolved.as_ref().map_or(key, |v| v.bind(py));
+    if let Ok(i) = resolved_key.extract::<i64>() {
+        Ok(SubscriptKey::Int(i))
+    } else if resolved_key.extract::<String>().is_ok() {
+        Err(PyTypeError::new_err(
+            "TOML array indices must be integers, not strings",
+        ))
+    } else {
+        let type_name = key
+            .get_type()
+            .name()
+            .map(|n| n.to_string())
+            .unwrap_or_else(|_| "?".to_owned());
+        Err(PyTypeError::new_err(format!(
+            "TOML array indices must be integers or slices, not {type_name}"
+        )))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Setitem / Delitem (used by ListProxy)
+// ---------------------------------------------------------------------------
+
+/// Set an integer-keyed entry in an array or array of tables.
+/// Returns the key of the replaced element.
+pub(crate) fn item_setitem_int(
+    target: ArrayLikeMut<'_>,
+    idx_raw: i64,
+    value: Item,
+) -> PyResult<crate::item_ops::Key> {
+    use crate::item_ops::Key;
+    match target {
+        ArrayLikeMut::Array(array) => {
+            let idx = resolve_index(idx_raw, array.len())?;
+            let mut v = into_value(value)?;
+            let inline = comments::take_value_inline_comment(&mut v);
+            array.replace(idx, v);
+            if !inline.is_empty() {
+                comments::set_array_inline_comment(array, idx, &inline);
+            }
+            Ok(Key::Int(idx))
+        }
+        ArrayLikeMut::Aot(aot) => {
+            let idx = resolve_index(idx_raw, aot.len())?;
+            let mut table = require_table(value)?;
+            let saved = save_aot_entry_prefix(aot, idx);
+            table.decor_mut().set_prefix(&saved);
+            aot.replace(idx, table);
+            Ok(Key::Int(idx))
+        }
+    }
+}
+
+/// Delete an integer-keyed entry from an array or array of tables.
+pub(crate) fn item_delitem_int(item: &mut ItemRs, idx_raw: i64) -> PyResult<Affected> {
+    let target = as_array_like_mut(item, "__delitem__")?;
+    let idx = resolve_index(idx_raw, target.len())?;
+    let (_removed, affected) = item_remove_at(target, idx)?;
+    Ok(affected)
 }
 
 #[cfg(test)]

@@ -13,13 +13,14 @@ impl<'py> FromPyObject<'_, 'py> for Item {
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         if let Ok(proxy) = obj.cast::<ItemProxy>() {
-            let item_rs = proxy.borrow().clone_item(obj.py())?;
+            let item_rs = proxy.get().clone_item(obj.py())?;
             return Ok(Self(item_rs));
         }
 
         if let Ok(doc) = obj.cast::<Document>() {
-            let doc = doc.borrow();
-            return Ok(Self(doc.inner.as_item().clone()));
+            let doc = doc.get();
+            let inner = doc.inner.read().unwrap();
+            return Ok(Self(inner.as_item().clone()));
         }
 
         if obj.is_none() {

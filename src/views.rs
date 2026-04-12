@@ -15,7 +15,7 @@ use crate::dict_ops;
 use crate::document::Document;
 use crate::equality;
 use crate::item_ops::{self, Key};
-use crate::item_proxy::ItemProxy;
+use crate::item_proxy::{ItemProxy, ReadCtx};
 
 use toml_edit::DocumentMut as DocumentRs;
 
@@ -92,7 +92,9 @@ fn contains_key(doc: &DocumentRs, path: &[Key], key: &str) -> PyResult<bool> {
 /// Invoke `f(key, child_proxy)` for every entry in the table at `path`.
 ///
 /// Shared by `ValuesView` and `ItemsView` for both `__iter__` and
-/// `__reversed__`.
+/// `__reversed__`.  Keys are collected under the read lock, then proxies
+/// are built individually (each `make_child_typed` takes its own short-lived
+/// lock) to avoid a recursive `RwLock::read()`.
 fn with_child_proxies(
     document: &Py<Document>,
     path: &[Key],
@@ -100,15 +102,19 @@ fn with_child_proxies(
     py: Python<'_>,
     mut f: impl FnMut(&str, Py<PyAny>) -> PyResult<()>,
 ) -> PyResult<()> {
-    let doc = document.bind(py).borrow();
+    let doc = document.bind(py).get();
     doc.check_fresh(path, view_revision)?;
-    let revision = doc.revision;
-    let item = item_ops::navigate_path(&doc.inner, path)?;
-    dict_ops::for_each_key(item, |k| {
+    let keys = {
+        let inner = doc.inner.read().unwrap();
+        let item = item_ops::navigate_path(&inner, path)?;
+        dict_ops::item_keys(item)?
+    };
+    for k in &keys {
         let proxy =
-            ItemProxy::make_child_typed(document, path, revision, py, Key::Str(k.to_owned()))?;
-        f(k, proxy)
-    })
+            ItemProxy::make_child_typed(document, path, doc.revision(), py, Key::Str(k.clone()))?;
+        f(k, proxy)?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +122,7 @@ fn with_child_proxies(
 // ---------------------------------------------------------------------------
 
 /// A live view of the string keys in a TOML table (or the document root).
-#[pyclass(name = "KeysView", module = "tomledit")]
+#[pyclass(frozen, name = "KeysView", module = "tomledit")]
 pub(crate) struct KeysView {
     document: Py<Document>,
     path: Vec<Key>,
@@ -136,15 +142,17 @@ impl KeysView {
 #[pymethods]
 impl KeysView {
     fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        get_len(&doc.inner, &self.path)
+        let inner = doc.inner.read().unwrap();
+        get_len(&inner, &self.path)
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let list = keys_to_pylist(&doc.inner, &self.path, py)?;
+        let inner = doc.inner.read().unwrap();
+        let list = keys_to_pylist(&inner, &self.path, py)?;
         Ok(list.try_iter()?.unbind())
     }
 
@@ -152,23 +160,26 @@ impl KeysView {
         let Some(key) = crate::item_ops::extract_key_str(key)? else {
             return Ok(false);
         };
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        contains_key(&doc.inner, &self.path, &key)
+        let inner = doc.inner.read().unwrap();
+        contains_key(&inner, &self.path, &key)
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let keys = get_keys(&doc.inner, &self.path)?;
-        let inner: Vec<String> = keys.iter().map(|k| format!("'{k}'")).collect();
-        Ok(format!("KeysView([{}])", inner.join(", ")))
+        let inner = doc.inner.read().unwrap();
+        let keys = get_keys(&inner, &self.path)?;
+        let inner_str: Vec<String> = keys.iter().map(|k| format!("'{k}'")).collect();
+        Ok(format!("KeysView([{}])", inner_str.join(", ")))
     }
 
     fn __reversed__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let mut keys = get_keys(&doc.inner, &self.path)?;
+        let inner = doc.inner.read().unwrap();
+        let mut keys = get_keys(&inner, &self.path)?;
         keys.reverse();
         let list = keys.into_pyobject(py)?;
         Ok(list.try_iter()?.unbind())
@@ -184,10 +195,11 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PySet>> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let ours = get_key_set(&doc.inner, &self.path)?;
         let theirs = other_to_string_set(other)?;
+        let inner = doc.inner.read().unwrap();
+        let ours = get_key_set(&inner, &self.path)?;
         let result = &ours & &theirs;
         PySet::new(py, result.iter())
     }
@@ -197,10 +209,13 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
         let theirs = iterable_to_pyset(py, other)?;
+        let ours = {
+            let inner = doc.inner.read().unwrap();
+            keys_to_pyset(&inner, &self.path, py)?
+        };
         ours.call_method1("__or__", (theirs,))
     }
 
@@ -209,10 +224,11 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PySet>> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let ours = get_key_set(&doc.inner, &self.path)?;
         let theirs = other_to_string_set(other)?;
+        let inner = doc.inner.read().unwrap();
+        let ours = get_key_set(&inner, &self.path)?;
         let result = &ours - &theirs;
         PySet::new(py, result.iter())
     }
@@ -222,17 +238,23 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
         let theirs = iterable_to_pyset(py, other)?;
+        let ours = {
+            let inner = doc.inner.read().unwrap();
+            keys_to_pyset(&inner, &self.path, py)?
+        };
         ours.call_method1("__xor__", (theirs,))
     }
 
     fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let ours = keys_to_pyset(&doc.inner, &self.path, py)?;
+        let ours = {
+            let inner = doc.inner.read().unwrap();
+            keys_to_pyset(&inner, &self.path, py)?
+        };
         ours.eq(other)
     }
 }
@@ -242,7 +264,7 @@ impl KeysView {
 // ---------------------------------------------------------------------------
 
 /// A live view of the values in a TOML table (or the document root).
-#[pyclass(name = "ValuesView", module = "tomledit")]
+#[pyclass(frozen, name = "ValuesView", module = "tomledit")]
 pub(crate) struct ValuesView {
     document: Py<Document>,
     path: Vec<Key>,
@@ -262,9 +284,10 @@ impl ValuesView {
 #[pymethods]
 impl ValuesView {
     fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        get_len(&doc.inner, &self.path)
+        let inner = doc.inner.read().unwrap();
+        get_len(&inner, &self.path)
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
@@ -276,12 +299,14 @@ impl ValuesView {
     }
 
     fn __contains__(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let parent = item_ops::navigate_path(&doc.inner, &self.path)?;
+        let inner = doc.inner.read().unwrap();
+        let ctx = ReadCtx::new(doc, &inner);
+        let parent = item_ops::navigate_path(&inner, &self.path)?;
         let tbl = dict_ops::as_dict_like(parent, "__contains__")?;
         for (_, item) in tbl.iter() {
-            if equality::item_eq(item, value)? {
+            if equality::item_eq(item, value, &ctx)? {
                 return Ok(true);
             }
         }
@@ -289,9 +314,10 @@ impl ValuesView {
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let len = get_len(&doc.inner, &self.path)?;
+        let inner = doc.inner.read().unwrap();
+        let len = get_len(&inner, &self.path)?;
         Ok(format!("ValuesView(<{len} values>)"))
     }
 
@@ -319,7 +345,7 @@ impl ValuesView {
 // ---------------------------------------------------------------------------
 
 /// A live view of the (key, value) pairs in a TOML table (or the document root).
-#[pyclass(name = "ItemsView", module = "tomledit")]
+#[pyclass(frozen, name = "ItemsView", module = "tomledit")]
 pub(crate) struct ItemsView {
     document: Py<Document>,
     path: Vec<Key>,
@@ -339,9 +365,10 @@ impl ItemsView {
 #[pymethods]
 impl ItemsView {
     fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        get_len(&doc.inner, &self.path)
+        let inner = doc.inner.read().unwrap();
+        get_len(&inner, &self.path)
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
@@ -368,19 +395,22 @@ impl ItemsView {
         };
         let value = tuple.get_item(1)?;
 
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let target = item_ops::navigate_path(&doc.inner, &self.path)?.get(key);
+        let inner = doc.inner.read().unwrap();
+        let ctx = ReadCtx::new(doc, &inner);
+        let target = item_ops::navigate_path(&inner, &self.path)?.get(key);
         match target {
-            Some(item_rs) => equality::item_eq(item_rs, &value),
+            Some(item_rs) => equality::item_eq(item_rs, &value, &ctx),
             None => Ok(false),
         }
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
-        let doc = self.document.bind(py).borrow();
+        let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let len = get_len(&doc.inner, &self.path)?;
+        let inner = doc.inner.read().unwrap();
+        let len = get_len(&inner, &self.path)?;
         Ok(format!("ItemsView(<{len} items>)"))
     }
 
@@ -406,29 +436,38 @@ impl ItemsView {
             return Ok(false);
         }
 
-        let doc = self.document.bind(py).borrow();
-        doc.check_fresh(&self.path, self.revision)?;
-        let our_len = get_len(&doc.inner, &self.path)?;
         let other_len = other.len()?;
-        if our_len != other_len {
-            return Ok(false);
-        }
+        let doc = self.document.bind(py).get();
+        doc.check_fresh(&self.path, self.revision)?;
 
-        // Build plain Python (key, value) tuples and check containment
-        // in `other`.  Using plain values (not proxies) avoids hashing
-        // issues and lets the other side's __contains__ compare correctly.
-        let keys = get_keys(&doc.inner, &self.path)?;
-        let parent = item_ops::navigate_path(&doc.inner, &self.path)?;
-        for key in &keys {
-            if let Some(item) = parent.get(key.as_str()) {
-                let py_val = item_ops::item_to_py(item, py)?;
-                let pair = PyTuple::new(
-                    py,
-                    [key.into_pyobject(py)?.into_any(), py_val.into_bound(py)],
-                )?;
-                if !other.contains(&pair)? {
-                    return Ok(false);
+        // Build plain Python (key, value) tuples under the read lock, then
+        // release it before calling into Python's __contains__ (which could
+        // re-enter our code if `other` is a view from the same document).
+        let pairs = {
+            let inner = doc.inner.read().unwrap();
+            let our_len = get_len(&inner, &self.path)?;
+            if our_len != other_len {
+                return Ok(false);
+            }
+            let keys = get_keys(&inner, &self.path)?;
+            let parent = item_ops::navigate_path(&inner, &self.path)?;
+            let mut pairs = Vec::with_capacity(our_len);
+            for key in &keys {
+                if let Some(item) = parent.get(key.as_str()) {
+                    let py_val = item_ops::item_to_py(item, py)?;
+                    let pair = PyTuple::new(
+                        py,
+                        [key.into_pyobject(py)?.into_any(), py_val.into_bound(py)],
+                    )?;
+                    pairs.push(pair);
                 }
+            }
+            pairs
+        };
+
+        for pair in &pairs {
+            if !other.contains(pair)? {
+                return Ok(false);
             }
         }
         Ok(true)

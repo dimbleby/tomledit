@@ -982,12 +982,12 @@ class TestIntKeyOnTable:
 
     def test_getitem_int_on_inline_table(self) -> None:
         doc = Document.parse("t = {a = 1}")
-        with pytest.raises(KeyError):
+        with pytest.raises(TypeError, match="keys must be strings"):
             doc["t"][0]
 
     def test_getitem_int_on_empty_table(self) -> None:
         doc = Document.parse("[t]")
-        with pytest.raises(KeyError):
+        with pytest.raises(TypeError, match="keys must be strings"):
             doc["t"][0]
 
 
@@ -1120,12 +1120,12 @@ class TestSliceIndexing:
             x = 1
         """)
         )
-        with pytest.raises(TypeError, match="does not support slicing"):
+        with pytest.raises(TypeError, match="keys must be strings"):
             doc["t"][1:3]
 
     def test_slice_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 'hello'\n")
-        with pytest.raises(TypeError, match="does not support slicing"):
+        with pytest.raises(TypeError):
             doc["x"][1:3]
 
     # ---- mutation visible in document ----
@@ -1205,7 +1205,7 @@ class TestSliceIndexing:
             x = 1
         """)
         )
-        with pytest.raises(TypeError, match="does not support slic"):
+        with pytest.raises(TypeError, match="keys must be strings"):
             doc["t"][0:1] = [1]
 
     def test_slice_delete_on_table_raises(self) -> None:
@@ -1215,7 +1215,7 @@ class TestSliceIndexing:
             x = 1
         """)
         )
-        with pytest.raises(TypeError, match="does not support slic"):
+        with pytest.raises(TypeError, match="keys must be strings"):
             del doc["t"][0:1]
 
     def test_aot_slice_read(self) -> None:

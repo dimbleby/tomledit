@@ -1,18 +1,14 @@
-use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyIterator;
 use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
 use crate::comments;
-use crate::dict_ops;
 use crate::dict_proxy::DictProxy;
 use crate::document::Document;
 use crate::equality;
-use crate::item::Item;
 use crate::item_ops::{self, Affected, Key};
-use crate::list_ops;
 use crate::list_proxy::ListProxy;
 use crate::scalar_proxy::ScalarProxy;
 
@@ -266,177 +262,6 @@ fn into_typed_proxy(py: Python<'_>, base: ItemProxy, kind: ItemKind) -> PyResult
 #[pymethods]
 impl ItemProxy {
     // ---- core protocol ----
-
-    pub fn __getitem__(&self, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        use item_ops::SubscriptKey;
-        let py = key.py();
-        let resolved = item_ops::resolve_subscript_key(py, key)?;
-        let doc = self.document.bind(py).borrow();
-        self.check_fresh(&doc)?;
-        let item = self.navigate(&doc.inner)?;
-
-        match resolved {
-            SubscriptKey::Slice(slice) => {
-                let target = list_ops::as_array_like(item, "slicing")?;
-                let si = slice.indices(target.len() as isize)?;
-                let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
-                let proxies: PyResult<Vec<Py<PyAny>>> = indices
-                    .into_iter()
-                    .map(|i| self.child_proxy_typed(py, Key::Int(i)))
-                    .collect();
-                Ok(proxies?.into_pyobject(py)?.into_any().unbind())
-            }
-            SubscriptKey::Str(k) => {
-                if !dict_ops::item_has_key(item, &k)? {
-                    return Err(PyKeyError::new_err(k));
-                }
-                self.child_proxy_typed(py, Key::Str(k))
-            }
-            SubscriptKey::Int(i) => {
-                let idx = list_ops::require_array_index(item, i)?;
-                self.child_proxy_typed(py, Key::Int(idx))
-            }
-            SubscriptKey::Other(bad_key) => Err(item_ops::invalid_subscript(&bad_key, item)),
-        }
-    }
-
-    pub fn __setitem__(
-        self_: &Bound<'_, Self>,
-        key: &Bound<'_, PyAny>,
-        value: &Bound<'_, PyAny>,
-    ) -> PyResult<()> {
-        use item_ops::SubscriptKey;
-        let py = key.py();
-        let resolved = item_ops::resolve_subscript_key(py, key)?;
-
-        match resolved {
-            SubscriptKey::Slice(slice) => {
-                // Collect items BEFORE borrowing the cell — value may be
-                // the same proxy, and collect_items invokes __iter__.
-                let values = crate::list_proxy::collect_items(value)?;
-                let mut self_mut = self_.borrow_mut();
-                let mut doc = self_mut.document.bind(py).borrow_mut();
-                self_mut.check_fresh(&doc)?;
-                let item = self_mut.navigate_mut(&mut doc.inner)?;
-                let target = list_ops::as_array_like_mut(item, "slice assignment")?;
-                let si = slice.indices(target.len() as isize)?;
-                let old_len = target.len();
-                let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
-                let new_count = values.len();
-                list_ops::item_setitem_slice(target, si.start, si.stop, si.step, values)?;
-                if new_count == indices.len() {
-                    // Same-length: stamp only the replaced indices.
-                    for &i in &indices {
-                        self_mut.bump_child(&mut doc, Key::Int(i));
-                    }
-                } else {
-                    // Different length: everything from first affected onward may have shifted.
-                    let from = indices.iter().min().copied().unwrap_or(si.start as usize);
-                    self_mut.bump_range(&mut doc, from, old_len);
-                }
-                Ok(())
-            }
-            SubscriptKey::Str(k) => {
-                // Extract before borrowing — value may be a proxy from the
-                // same cell, and Item::extract borrows proxy cells.
-                let value: Item = value.extract()?;
-                let self_mut = self_.borrow_mut();
-                let mut doc = self_mut.document.bind(py).borrow_mut();
-                self_mut.check_fresh(&doc)?;
-                let item = self_mut.navigate_mut(&mut doc.inner)?;
-                if let Some(replaced_key) = item_ops::item_setitem_str(item, k, value)? {
-                    self_mut.bump_child(&mut doc, replaced_key);
-                }
-                Ok(())
-            }
-            SubscriptKey::Int(i) => {
-                // Extract before borrowing — same reason as Str branch.
-                let value: Item = value.extract()?;
-                let self_mut = self_.borrow_mut();
-                let mut doc = self_mut.document.bind(py).borrow_mut();
-                self_mut.check_fresh(&doc)?;
-                let item = self_mut.navigate_mut(&mut doc.inner)?;
-                let replaced_key = item_ops::item_setitem_int(item, i, value)?;
-                self_mut.bump_child(&mut doc, replaced_key);
-                Ok(())
-            }
-            SubscriptKey::Other(bad_key) => Err(item_ops::invalid_subscript_type(&bad_key)),
-        }
-    }
-
-    pub fn __delitem__(&mut self, key: &Bound<'_, PyAny>) -> PyResult<()> {
-        use item_ops::SubscriptKey;
-        let py = key.py();
-        let resolved = item_ops::resolve_subscript_key(py, key)?;
-        let mut doc = self.document.bind(py).borrow_mut();
-        self.check_fresh(&doc)?;
-        let item = self.navigate_mut(&mut doc.inner)?;
-
-        match resolved {
-            SubscriptKey::Slice(slice) => {
-                let target = list_ops::as_array_like_mut(item, "slice deletion")?;
-                let si = slice.indices(target.len() as isize)?;
-                let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
-                if let Some(&min_idx) = indices.iter().min() {
-                    let old_len = target.len();
-                    list_ops::item_delitem_slice(target, &indices)?;
-                    self.bump_range(&mut doc, min_idx, old_len);
-                }
-                Ok(())
-            }
-            SubscriptKey::Str(k) => {
-                let deleted = item_ops::item_delitem_str(item, &k)?;
-                self.bump_affected(&mut doc, deleted);
-                Ok(())
-            }
-            SubscriptKey::Int(i) => {
-                let deleted = item_ops::item_delitem_int(item, i)?;
-                self.bump_affected(&mut doc, deleted);
-                Ok(())
-            }
-            SubscriptKey::Other(bad_key) => Err(item_ops::invalid_subscript(&bad_key, item)),
-        }
-    }
-
-    pub fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
-        let doc = self.document.bind(py).borrow();
-        self.check_fresh(&doc)?;
-        let item = self.navigate(&doc.inner)?;
-        item_ops::item_len(item).ok_or_else(|| {
-            PyTypeError::new_err(format!(
-                "TOML {} item has no len() (use .value to get the Python object)",
-                item.type_name()
-            ))
-        })
-    }
-
-    pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let doc = self.document.bind(py).borrow();
-        self.check_fresh(&doc)?;
-        let item = self.navigate(&doc.inner)?;
-
-        match item_ops::item_iter_kind(item)? {
-            item_ops::IterKind::TableKeys(keys) => {
-                let list = keys.into_pyobject(py)?;
-                Ok(list.try_iter()?.unbind())
-            }
-            item_ops::IterKind::ArrayLen(len) => {
-                let proxies: PyResult<Vec<Py<PyAny>>> = (0..len)
-                    .map(|i| self.child_proxy_typed(py, Key::Int(i)))
-                    .collect();
-                let list = proxies?.into_pyobject(py)?;
-                Ok(list.try_iter()?.unbind())
-            }
-        }
-    }
-
-    pub fn __contains__(&self, value: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let py = value.py();
-        let doc = self.document.bind(py).borrow();
-        self.check_fresh(&doc)?;
-        let item = self.navigate(&doc.inner)?;
-        item_ops::item_contains(item, value)
-    }
 
     pub fn __bool__(&self, py: Python<'_>) -> PyResult<bool> {
         let doc = self.document.bind(py).borrow();

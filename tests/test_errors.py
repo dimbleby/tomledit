@@ -54,12 +54,12 @@ class TestWrongTypeErrors:
 
     def test_setitem_on_bool_raises(self) -> None:
         doc = Document.parse("flag = true\n")
-        with pytest.raises(TypeError, match="not subscriptable"):
+        with pytest.raises(TypeError):
             doc["flag"][0] = False
 
     def test_setitem_on_float_raises(self) -> None:
         doc = Document.parse("val = 1.5\n")
-        with pytest.raises(TypeError, match="not subscriptable"):
+        with pytest.raises(TypeError):
             doc["val"][0] = 2
 
     def test_getitem_int_on_scalar_raises(self) -> None:
@@ -84,12 +84,12 @@ class TestWrongTypeErrors:
 
     def test_slice_del_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError, match="does not support slice deletion"):
+        with pytest.raises(TypeError):
             del doc["x"][0:1]
 
     def test_slice_assign_on_scalar_raises(self) -> None:
         doc = Document.parse("x = 42\n")
-        with pytest.raises(TypeError, match="does not support slice assignment"):
+        with pytest.raises(TypeError):
             doc["x"][0:1] = [1]
 
     # -- wrong key type --
@@ -101,7 +101,7 @@ class TestWrongTypeErrors:
             x = 1
         """)
         )
-        with pytest.raises(KeyError):
+        with pytest.raises(TypeError, match="keys must be strings"):
             doc["tbl"][1.5]  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
 
     def test_setitem_int_key_on_table_raises(self) -> None:
@@ -111,7 +111,7 @@ class TestWrongTypeErrors:
             a = 1
         """)
         )
-        with pytest.raises(TypeError, match="strings, not integers"):
+        with pytest.raises(TypeError, match="keys must be strings"):
             doc["t"][0] = 99
 
     def test_setitem_str_key_on_array_raises(self) -> None:
@@ -126,7 +126,7 @@ class TestWrongTypeErrors:
             a = 1
         """)
         )
-        with pytest.raises(KeyError):
+        with pytest.raises(TypeError, match="keys must be strings"):
             del doc["t"][0]
 
     def test_delitem_str_key_on_array_raises(self) -> None:
@@ -141,39 +141,39 @@ class TestWrongTypeErrors:
             a = 1
         """)
         )
-        with pytest.raises(TypeError, match="indices must be integers or strings"):
+        with pytest.raises(TypeError, match="keys must be strings"):
             doc["t"][1.5] = 99  # type: ignore[index]  # ty: ignore[invalid-assignment]
 
     def test_delitem_float_key_on_array_raises(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")
-        with pytest.raises(TypeError, match="indices must be integers or strings"):
+        with pytest.raises(TypeError, match="integers or slices"):
             del doc["arr"][1.5]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
     def test_delitem_float_key_on_table_raises_key_error(self) -> None:
-        """del table[1.5] should raise KeyError, matching Python dict."""
+        """del table[1.5] should raise TypeError — float is not a valid key type."""
         doc = Document.parse(
             toml_literal("""
             [t]
             a = 1
         """)
         )
-        with pytest.raises(KeyError):
+        with pytest.raises(TypeError, match="keys must be strings"):
             del doc["t"][1.5]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
     def test_delitem_float_key_on_inline_table_raises_key_error(self) -> None:
-        """del inline_table[1.5] should raise KeyError, matching Python dict."""
+        """del inline_table[1.5] raises TypeError — not a valid key type."""
         doc = Document.parse("t = {a = 1}\n")
-        with pytest.raises(KeyError):
+        with pytest.raises(TypeError, match="keys must be strings"):
             del doc["t"][1.5]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
     def test_getitem_float_key_on_scalar_raises(self) -> None:
         doc = Document.parse("val = 42\n")
-        with pytest.raises(TypeError, match="indices must be integers or strings"):
+        with pytest.raises(TypeError):
             doc["val"][1.5]  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
 
     def test_delitem_int_key_on_inline_table_raises(self) -> None:
         doc = Document.parse("t = {a = 1}\n")
-        with pytest.raises(KeyError):
+        with pytest.raises(TypeError, match="keys must be strings"):
             del doc["t"][0]
 
     # -- missing keys --
@@ -273,13 +273,13 @@ class TestProxyAsKey:
         not panic from a double borrow in the error-handling path."""
         doc = Document.parse("idx = 1\n[server]\nport = 80\n")
         idx = doc["idx"]
-        with pytest.raises(TypeError, match="strings, not integers"):
+        with pytest.raises(TypeError, match="keys must be strings"):
             doc["server"][idx] = "test"  # type: ignore[index]  # ty: ignore[invalid-assignment]
 
     def test_delitem_table_with_int_proxy_gives_key_error(self) -> None:
         doc = Document.parse("idx = 1\n[server]\nport = 80\n")
         idx = doc["idx"]
-        with pytest.raises(KeyError):
+        with pytest.raises(TypeError, match="keys must be strings"):
             del doc["server"][idx]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 

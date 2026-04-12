@@ -4,9 +4,11 @@ use crate::item::Item;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{
-    PyBool, PyDate, PyDateAccess, PyDateTime, PyDelta, PyDeltaAccess, PyFloat, PyInt, PyList,
-    PyMapping, PySequence, PyString, PyTime, PyTimeAccess, PyTuple,
+    PyBool, PyDate, PyDateTime, PyDelta, PyFloat, PyInt, PyList, PyMapping, PySequence, PyString,
+    PyTime, PyTuple,
 };
+
+use crate::datetime_compat::{PyDateAccess, PyDeltaAccess, PyTimeAccess};
 use toml_edit::{
     Array as ArrayRs, ArrayOfTables as ArrayOfTablesRs, Date as DateRs, Datetime as DatetimeRs,
     InlineTable as InlineTableRs, Offset as OffsetRs, Table as TableRs, Time as TimeRs,

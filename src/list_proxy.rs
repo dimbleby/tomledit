@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use pyo3::pyclass::{PyClassGuard, PyClassGuardMut};
 use toml_edit::DocumentMut as DocumentRs;
 
 use crate::document::Document;
@@ -91,7 +92,7 @@ impl ListProxy {
     }
 
     pub fn __add__(
-        self_: PyRef<'_, Self>,
+        self_: PyClassGuard<'_, Self>,
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
@@ -118,7 +119,7 @@ impl ListProxy {
     }
 
     pub fn __radd__(
-        self_: PyRef<'_, Self>,
+        self_: PyClassGuard<'_, Self>,
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
@@ -135,7 +136,7 @@ impl ListProxy {
         Self::wrap_in_doc(py, new_doc)
     }
 
-    pub fn __mul__(self_: PyRef<'_, Self>, py: Python<'_>, n: isize) -> PyResult<Py<PyAny>> {
+    pub fn __mul__(self_: PyClassGuard<'_, Self>, py: Python<'_>, n: isize) -> PyResult<Py<PyAny>> {
         let mut new_doc = DocumentRs::new();
         new_doc["_"] = clone_self_item(self_.as_super(), py)?;
         if n <= 0 {
@@ -147,11 +148,19 @@ impl ListProxy {
         Self::wrap_in_doc(py, new_doc)
     }
 
-    pub fn __rmul__(self_: PyRef<'_, Self>, py: Python<'_>, n: isize) -> PyResult<Py<PyAny>> {
+    pub fn __rmul__(
+        self_: PyClassGuard<'_, Self>,
+        py: Python<'_>,
+        n: isize,
+    ) -> PyResult<Py<PyAny>> {
         Self::__mul__(self_, py, n)
     }
 
-    pub fn __imul__(mut self_: PyRefMut<'_, Self>, py: Python<'_>, n: isize) -> PyResult<()> {
+    pub fn __imul__(
+        mut self_: PyClassGuardMut<'_, Self>,
+        py: Python<'_>,
+        n: isize,
+    ) -> PyResult<()> {
         if n > 1 {
             let source = clone_self_item(self_.as_super(), py)?;
             let base = self_.into_super();
@@ -172,7 +181,7 @@ impl ListProxy {
 
     #[pyo3(signature = (index=None, /))]
     pub fn pop(
-        self_: PyRefMut<'_, Self>,
+        self_: PyClassGuardMut<'_, Self>,
         py: Python<'_>,
         index: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
@@ -196,7 +205,7 @@ impl ListProxy {
     }
 
     #[pyo3(signature = (value, /))]
-    pub fn append(self_: PyRefMut<'_, Self>, py: Python<'_>, value: Item) -> PyResult<()> {
+    pub fn append(self_: PyClassGuardMut<'_, Self>, py: Python<'_>, value: Item) -> PyResult<()> {
         let base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
@@ -208,7 +217,7 @@ impl ListProxy {
 
     #[pyo3(signature = (index, value, /))]
     pub fn insert(
-        self_: PyRefMut<'_, Self>,
+        self_: PyClassGuardMut<'_, Self>,
         py: Python<'_>,
         index: i64,
         value: Item,
@@ -227,7 +236,7 @@ impl ListProxy {
 
     #[pyo3(signature = (value, /))]
     pub fn remove(
-        mut self_: PyRefMut<'_, Self>,
+        mut self_: PyClassGuardMut<'_, Self>,
         py: Python<'_>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
@@ -273,7 +282,7 @@ impl ListProxy {
 
     #[pyo3(signature = (value, /))]
     pub fn count(
-        self_: PyRef<'_, Self>,
+        self_: PyClassGuard<'_, Self>,
         py: Python<'_>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<usize> {
@@ -287,7 +296,7 @@ impl ListProxy {
 
     #[pyo3(signature = (value, start=None, stop=None, /))]
     pub fn index(
-        self_: PyRef<'_, Self>,
+        self_: PyClassGuard<'_, Self>,
         py: Python<'_>,
         value: &Bound<'_, PyAny>,
         start: Option<i64>,
@@ -310,7 +319,11 @@ impl ListProxy {
     /// No-op on empty arrays.  Any comments on the array elements will
     /// be removed.
     #[pyo3(signature = (*, indent=4))]
-    pub fn set_multiline(self_: PyRefMut<'_, Self>, py: Python<'_>, indent: usize) -> PyResult<()> {
+    pub fn set_multiline(
+        self_: PyClassGuardMut<'_, Self>,
+        py: Python<'_>,
+        indent: usize,
+    ) -> PyResult<()> {
         let base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;

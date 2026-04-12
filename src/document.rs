@@ -274,7 +274,7 @@ impl Document {
         let kwarg_pairs = dict_ops::extract_kwargs(kwargs)?;
         let mut doc = slf.borrow_mut();
         let mut replaced = match update {
-            Some(u) => u.apply(doc.inner.as_item_mut())?,
+            Some(u) => u.apply(doc.inner.as_item_mut(), slf.py())?,
             None => Vec::new(),
         };
         if !kwarg_pairs.is_empty() {

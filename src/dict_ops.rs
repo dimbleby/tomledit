@@ -1,5 +1,6 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
+use pyo3::pyclass::PyClassGuard;
 use pyo3::types::{PyDict, PyString, PyTuple};
 use toml_edit::{Decor, Item as ItemRs, TableLike, Value as ValueRs};
 
@@ -351,18 +352,18 @@ pub(crate) fn merge_table_entries(target: &mut ItemRs, source: &ItemRs) -> PyRes
 /// Pre-resolved update source, extracted before taking a mutable borrow
 /// on the target document.  This avoids double-borrow panics when the
 /// source contains proxies from the same document.
-pub(crate) enum ResolvedUpdate<'py> {
+pub(crate) enum ResolvedUpdate {
     /// Source is a TOML-aware type (Document or DictItem).
-    Toml(TomlSource<'py>),
+    Toml(TomlSource),
     /// Source is a plain Python mapping or iterable of pairs.
     Pairs(Vec<(String, Item)>),
 }
 
-impl ResolvedUpdate<'_> {
+impl ResolvedUpdate {
     /// Apply this update to `target`, returning the keys that were replaced.
-    pub(crate) fn apply(self, target: &mut ItemRs) -> PyResult<Vec<String>> {
+    pub(crate) fn apply(self, target: &mut ItemRs, py: Python<'_>) -> PyResult<Vec<String>> {
         match self {
-            Self::Toml(src) => merge_table_entries(target, src.as_item()?),
+            Self::Toml(src) => src.with_item(py, |item| merge_table_entries(target, item)),
             Self::Pairs(pairs) => apply_update_pairs(target, pairs),
         }
     }
@@ -370,38 +371,47 @@ impl ResolvedUpdate<'_> {
 
 /// Resolve `other` into a [`ResolvedUpdate`], doing all Python object
 /// access before the caller takes a mutable borrow on the target document.
-pub(crate) fn resolve_update<'py>(
-    other: &Bound<'py, PyAny>,
-    self_doc: &Bound<'py, Document>,
-) -> PyResult<ResolvedUpdate<'py>> {
+pub(crate) fn resolve_update(
+    other: &Bound<'_, PyAny>,
+    self_doc: &Bound<'_, Document>,
+) -> PyResult<ResolvedUpdate> {
     match resolve_toml_source(other, self_doc)? {
         Some(src) => Ok(ResolvedUpdate::Toml(src)),
         None => Ok(ResolvedUpdate::Pairs(extract_update_pairs(other)?)),
     }
 }
 
-/// A TOML source resolved for merging, holding any necessary borrow guards.
+/// A TOML source resolved for merging.
 ///
-/// Callers obtain this via [`resolve_toml_source`], then call [`.as_item()`]
-/// to get the `&ItemRs` reference.  The `PyRef` guard keeps the source
-/// document borrowed so the reference remains valid while the caller mutates
-/// its own document.
-pub(crate) enum TomlSource<'py> {
-    /// Source is from a different document — borrow guard kept alive, path
-    /// navigated on demand (empty path = document root).
-    Borrowed {
-        doc_ref: PyRef<'py, Document>,
+/// Callers obtain this via [`resolve_toml_source`].  The source document
+/// is kept alive via `Py<Document>` (refcount); actual borrowing happens
+/// on demand in [`with_item`](Self::with_item) using `PyClassGuard`.
+pub(crate) enum TomlSource {
+    /// Source is from a different document — `Py` keeps the document alive,
+    /// borrow is taken on demand in `with_item`.
+    Ref {
+        doc_py: Py<Document>,
         path: Vec<Key>,
     },
-    /// Source is from the same document — had to clone.
+    /// Source is from the same document — had to clone to avoid
+    /// double-borrow.
     Owned(ItemRs),
 }
 
-impl TomlSource<'_> {
-    pub(crate) fn as_item(&self) -> PyResult<&ItemRs> {
+impl TomlSource {
+    /// Borrow the source document and invoke `f` with the resolved item.
+    pub(crate) fn with_item<R>(
+        &self,
+        py: Python<'_>,
+        f: impl FnOnce(&ItemRs) -> PyResult<R>,
+    ) -> PyResult<R> {
         match self {
-            Self::Borrowed { doc_ref, path } => item_ops::navigate_path(&doc_ref.inner, path),
-            Self::Owned(item) => Ok(item),
+            Self::Ref { doc_py, path } => {
+                let guard = doc_py.extract::<PyClassGuard<'_, Document>>(py)?;
+                let item = item_ops::navigate_path(&guard.inner, path)?;
+                f(item)
+            }
+            Self::Owned(item) => f(item),
         }
     }
 }
@@ -409,15 +419,15 @@ impl TomlSource<'_> {
 /// Resolve a TOML-aware source for merging.
 ///
 /// When `other` is an [`ItemProxy`] or [`Document`], returns a
-/// [`TomlSource`] that borrows the underlying item zero-copy — **unless**
-/// the source shares the same document as `self_doc`, in which case it
-/// clones to avoid a double-borrow.
+/// [`TomlSource`] that holds the source document alive zero-copy —
+/// **unless** the source shares the same document as `self_doc`, in which
+/// case it clones to avoid a double-borrow.
 ///
 /// Returns `None` when `other` is a plain Python object.
-pub(crate) fn resolve_toml_source<'py>(
-    other: &Bound<'py, PyAny>,
-    self_doc: &Bound<'py, Document>,
-) -> PyResult<Option<TomlSource<'py>>> {
+pub(crate) fn resolve_toml_source(
+    other: &Bound<'_, PyAny>,
+    self_doc: &Bound<'_, Document>,
+) -> PyResult<Option<TomlSource>> {
     if let Ok(proxy) = other.cast::<ItemProxy>() {
         let proxy_ref = proxy.borrow();
         let doc_bound = proxy_ref.document.bind(other.py());
@@ -428,15 +438,16 @@ pub(crate) fn resolve_toml_source<'py>(
             return Ok(Some(TomlSource::Owned(item)));
         }
         let path = proxy_ref.path.clone();
-        return Ok(Some(TomlSource::Borrowed { doc_ref, path }));
+        let doc_py = proxy_ref.document.clone_ref(other.py());
+        return Ok(Some(TomlSource::Ref { doc_py, path }));
     }
     if let Ok(doc_bound) = other.cast::<Document>() {
         if doc_bound.is(self_doc) {
             let item = doc_bound.borrow().inner.as_item().clone();
             return Ok(Some(TomlSource::Owned(item)));
         }
-        return Ok(Some(TomlSource::Borrowed {
-            doc_ref: doc_bound.borrow(),
+        return Ok(Some(TomlSource::Ref {
+            doc_py: doc_bound.clone().unbind(),
             path: Vec::new(),
         }));
     }

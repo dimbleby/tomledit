@@ -1,6 +1,5 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::pyclass::PyClassGuard;
 use pyo3::types::{PyDict, PyIterator, PyTuple};
 use toml_edit::DocumentMut as DocumentRs;
 
@@ -15,7 +14,7 @@ use crate::views::{ItemsView, KeysView, ValuesView};
 ///
 /// ``isinstance(item, DictItem)`` and
 /// ``isinstance(item, MutableMapping)`` both work.
-#[pyclass(name = "DictItem", module = "tomledit", mapping, extends = ItemProxy)]
+#[pyclass(frozen, name = "DictItem", module = "tomledit", mapping, extends = ItemProxy)]
 pub(crate) struct DictProxy;
 
 #[pymethods]
@@ -27,20 +26,19 @@ impl DictProxy {
 
     // ---- container protocol ----
 
-    pub fn __getitem__(
-        self_: PyClassGuard<'_, Self>,
-        key: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
+    pub fn __getitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         let py = key.py();
         let Some(key_str) = item_ops::extract_key_str(key)? else {
             return Err(PyTypeError::new_err("TOML table keys must be strings"));
         };
-        let base = self_.into_super();
-        let doc = base.document.bind(py).borrow();
-        base.check_fresh(&doc)?;
-        let item = base.navigate(&doc.inner)?;
-        if !dict_ops::item_has_key(item, &key_str)? {
-            return Err(PyKeyError::new_err(key_str));
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        {
+            let inner = doc.inner.read().unwrap();
+            let item = base.navigate(&inner)?;
+            if !dict_ops::item_has_key(item, &key_str)? {
+                return Err(PyKeyError::new_err(key_str));
+            }
         }
         base.child_proxy_typed(py, Key::Str(key_str))
     }
@@ -53,102 +51,98 @@ impl DictProxy {
         let py = key.py();
         let key_str = item_ops::extract_key_str(key)?
             .ok_or_else(|| PyTypeError::new_err("TOML table keys must be strings"))?;
-        // Extract before borrowing — value may be a proxy from the same cell.
+        // Extract before write lock — value may be a proxy from the same document.
         let value: Item = value.extract()?;
-        let self_guard = slf.borrow();
-        let base = self_guard.into_super();
-        let mut doc = base.document.bind(py).borrow_mut();
-        base.check_fresh(&doc)?;
-        let item = base.navigate_mut(&mut doc.inner)?;
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let mut inner = doc.inner.write().unwrap();
+        let item = base.navigate_mut(&mut inner)?;
         if let Some(replaced_key) = dict_ops::item_setitem_str(item, key_str, value) {
-            base.bump_child(&mut doc, replaced_key);
+            base.bump_child(doc, replaced_key);
         }
         Ok(())
     }
 
-    pub fn __delitem__(self_: PyClassGuard<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<()> {
+    pub fn __delitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<()> {
         let py = key.py();
         let Some(key_str) = item_ops::extract_key_str(key)? else {
             return Err(PyTypeError::new_err("TOML table keys must be strings"));
         };
-        let base = self_.into_super();
-        let mut doc = base.document.bind(py).borrow_mut();
-        base.check_fresh(&doc)?;
-        let item = base.navigate_mut(&mut doc.inner)?;
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let mut inner = doc.inner.write().unwrap();
+        let item = base.navigate_mut(&mut inner)?;
         let (_removed, k) = dict_ops::table_pop(item, &key_str)?;
-        base.bump_child(&mut doc, k);
+        base.bump_child(doc, k);
         Ok(())
     }
 
-    pub fn __len__(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<usize> {
-        let base = self_.into_super();
-        let doc = base.document.bind(py).borrow();
-        base.check_fresh(&doc)?;
-        let item = base.navigate(&doc.inner)?;
+    pub fn __len__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<usize> {
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let inner = doc.inner.read().unwrap();
+        let item = base.navigate(&inner)?;
         Ok(dict_ops::as_dict_like(item, "__len__")?.len())
     }
 
-    pub fn __iter__(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let base = self_.into_super();
-        let doc = base.document.bind(py).borrow();
-        base.check_fresh(&doc)?;
-        let item = base.navigate(&doc.inner)?;
+    pub fn __iter__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyIterator>> {
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let inner = doc.inner.read().unwrap();
+        let item = base.navigate(&inner)?;
         let tbl = dict_ops::as_dict_like(item, "__iter__")?;
         let keys: Vec<&str> = tbl.iter().map(|(k, _)| k).collect();
         let list = keys.into_pyobject(py)?;
         Ok(list.try_iter()?.unbind())
     }
 
-    pub fn __contains__(self_: PyClassGuard<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
+    pub fn __contains__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = key.py();
         let Some(key_str) = item_ops::extract_key_str(key)? else {
             return Ok(false);
         };
-        let base = self_.into_super();
-        let doc = base.document.bind(py).borrow();
-        base.check_fresh(&doc)?;
-        let item = base.navigate(&doc.inner)?;
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let inner = doc.inner.read().unwrap();
+        let item = base.navigate(&inner)?;
         Ok(dict_ops::as_dict_like(item, "'in'")?.contains_key(&key_str))
     }
 
     // ---- dict-specific methods ----
 
-    pub fn keys(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<KeysView> {
-        let base = self_.as_super();
-        let doc = base.document.bind(py).borrow();
-        base.check_fresh(&doc)?;
+    pub fn keys(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<KeysView> {
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
         Ok(KeysView::new(
             base.document.clone_ref(py),
             base.path.clone(),
-            doc.revision,
+            doc.revision(),
         ))
     }
 
-    pub fn values(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<ValuesView> {
-        let base = self_.as_super();
-        let doc = base.document.bind(py).borrow();
-        base.check_fresh(&doc)?;
+    pub fn values(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<ValuesView> {
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
         Ok(ValuesView::new(
             base.document.clone_ref(py),
             base.path.clone(),
-            doc.revision,
+            doc.revision(),
         ))
     }
 
-    pub fn items(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<ItemsView> {
-        let base = self_.as_super();
-        let doc = base.document.bind(py).borrow();
-        base.check_fresh(&doc)?;
+    pub fn items(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<ItemsView> {
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
         Ok(ItemsView::new(
             base.document.clone_ref(py),
             base.path.clone(),
-            doc.revision,
+            doc.revision(),
         ))
     }
 
     #[pyo3(signature = (key, default=None, /))]
     pub fn get(
-        self_: PyClassGuard<'_, Self>,
+        slf: &Bound<'_, Self>,
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         default: Option<&Bound<'_, PyAny>>,
@@ -156,11 +150,14 @@ impl DictProxy {
         let Some(key) = item_ops::extract_key_str(key)? else {
             return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
         };
-        let base = self_.as_super();
-        let doc = base.document.bind(py).borrow();
-        base.check_fresh(&doc)?;
-        let item = base.navigate(&doc.inner)?;
-        if dict_ops::item_has_key(item, &key)? {
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let has_key = {
+            let inner = doc.inner.read().unwrap();
+            let item = base.navigate(&inner)?;
+            dict_ops::item_has_key(item, &key)?
+        };
+        if has_key {
             base.child_proxy_typed(py, Key::Str(key))
         } else {
             Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()))
@@ -169,7 +166,7 @@ impl DictProxy {
 
     #[pyo3(signature = (key, /, *default))]
     pub fn pop(
-        self_: PyClassGuard<'_, Self>,
+        slf: &Bound<'_, Self>,
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         default: &Bound<'_, PyTuple>,
@@ -183,17 +180,18 @@ impl DictProxy {
             };
         };
 
-        let base = self_.into_super();
-        let mut doc = base.document.bind(py).borrow_mut();
-        base.check_fresh(&doc)?;
-        let item = base.navigate_mut(&mut doc.inner)?;
-
-        match dict_ops::table_pop(item, &key_str) {
-            Ok((removed, affected_key)) => {
-                base.bump_child(&mut doc, affected_key);
-                let result = item_ops::item_to_py(&removed.0, py)?;
-                Ok(result)
-            }
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let pop_result = {
+            let mut inner = doc.inner.write().unwrap();
+            let item = base.navigate_mut(&mut inner)?;
+            dict_ops::table_pop(item, &key_str).map(|(removed, affected_key)| {
+                base.bump_child(doc, affected_key);
+                removed
+            })
+        };
+        match pop_result {
+            Ok(removed) => item_ops::item_to_py(&removed.0, py),
             Err(e) if default_val.is_some() && e.is_instance_of::<PyKeyError>(py) => {
                 Ok(default_val.unwrap())
             }
@@ -201,56 +199,56 @@ impl DictProxy {
         }
     }
 
-    pub fn popitem(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
-        let base = self_.into_super();
-        let mut doc = base.document.bind(py).borrow_mut();
-        base.check_fresh(&doc)?;
-        let item = base.navigate_mut(&mut doc.inner)?;
-        let (key, removed) = dict_ops::item_popitem(item)?;
-        base.bump_child(&mut doc, Key::Str(key.clone()));
+    pub fn popitem(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let (key, removed) = {
+            let mut inner = doc.inner.write().unwrap();
+            let item = base.navigate_mut(&mut inner)?;
+            let (key, removed) = dict_ops::item_popitem(item)?;
+            base.bump_child(doc, Key::Str(key.clone()));
+            (key, removed)
+        };
         let py_val = item_ops::item_to_py(&removed, py)?;
         Ok((key, py_val))
     }
 
     pub fn __or__(
-        self_: PyClassGuard<'_, Self>,
+        slf: &Bound<'_, Self>,
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         if !dict_ops::is_mapping_like(other) {
             return Ok(py.NotImplemented());
         }
-        let base = self_.into_super();
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
         let mut new_doc = {
-            let doc = base.document.bind(py).borrow();
-            base.check_fresh(&doc)?;
-            let item = base.navigate(&doc.inner)?;
+            let inner = doc.inner.read().unwrap();
+            let item = base.navigate(&inner)?;
             let mut nd = DocumentRs::new();
             nd["_"] = item.clone();
             nd
         };
-        dict_ops::merge_other_into(&mut new_doc["_"], other, py)?;
+        dict_ops::merge_other_into(&mut new_doc["_"], other)?;
         let doc_py = Py::new(py, Document::from_inner(new_doc))?;
         let proxy = ItemProxy::new(doc_py, vec![Key::Str("_".to_owned())], 0);
         ItemProxy::into_typed(py, proxy)
     }
 
     pub fn __ror__(
-        self_: PyClassGuard<'_, Self>,
+        slf: &Bound<'_, Self>,
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         if !dict_ops::is_mapping_like(other) {
             return Ok(py.NotImplemented());
         }
-        // LHS is a plain mapping → result should be a plain dict.
-        // Pass LHS values through verbatim (no TOML round-trip) so that
-        // non-TOML-compatible values like None are preserved.
         let dict = dict_ops::copy_mapping_to_pydict(other, py)?;
-        let base = self_.into_super();
-        let doc = base.document.bind(py).borrow();
-        base.check_fresh(&doc)?;
-        let item = base.navigate(&doc.inner)?;
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let inner = doc.inner.read().unwrap();
+        let item = base.navigate(&inner)?;
         let tbl = item
             .as_table_like()
             .ok_or_else(|| item_ops::unsupported_op(item, "|"))?;
@@ -275,60 +273,57 @@ impl DictProxy {
         other: Option<&Bound<'_, PyAny>>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        // Extract the document reference, then drop the shared borrow
-        // before resolve_update — this avoids a cell-level double-borrow
-        // panic when `other` is the same proxy as `slf`.
-        let self_doc_py = {
-            let r = slf.borrow();
-            r.as_super().document.clone_ref(py)
-        };
-        let self_doc = self_doc_py.bind(py);
-        let update = other
-            .map(|obj| dict_ops::resolve_update(obj, self_doc))
-            .transpose()?;
+        let base = slf.as_super().get();
+        let doc_bound = base.document.bind(py);
+        let doc = doc_bound.get();
+        // Resolve before write lock — iteration may read inner.
+        let update = other.map(|obj| dict_ops::resolve_update(obj)).transpose()?;
         let kwarg_pairs = dict_ops::extract_kwargs(kwargs)?;
-        let self_mut = slf.borrow_mut();
-        let base = self_mut.into_super();
-        let mut doc = self_doc.borrow_mut();
-        base.check_fresh(&doc)?;
-        let item = base.navigate_mut(&mut doc.inner)?;
+        base.check_fresh(doc)?;
+        let mut inner = doc.inner.write().unwrap();
+        let item = base.navigate_mut(&mut inner)?;
         let mut replaced = match update {
-            Some(u) => u.apply(item, py)?,
+            Some(u) => u.apply(item)?,
             None => Vec::new(),
         };
         if !kwarg_pairs.is_empty() {
             replaced.extend(dict_ops::apply_update_pairs(item, kwarg_pairs)?);
         }
         for key in replaced {
-            base.bump_child(&mut doc, Key::Str(key));
+            base.bump_child(doc, Key::Str(key));
         }
         Ok(())
     }
 
     #[pyo3(signature = (key, default=None, /))]
     pub fn setdefault(
-        self_: PyClassGuard<'_, Self>,
+        slf: &Bound<'_, Self>,
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         default: Option<Item>,
     ) -> PyResult<Py<PyAny>> {
         let key = item_ops::extract_key_str(key)?
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
-        let base = self_.into_super();
-        {
-            let mut doc = base.document.bind(py).borrow_mut();
-            base.check_fresh(&doc)?;
-            let item = base.navigate_mut(&mut doc.inner)?;
-
-            if !dict_ops::item_has_key(item, &key)? {
-                let default = default.ok_or_else(|| {
-                    pyo3::exceptions::PyTypeError::new_err(
-                        "setdefault() requires a default value: TOML has no null type",
-                    )
-                })?;
-                dict_ops::set_with_decor_preservation(item, &key, default);
-            }
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        base.check_fresh(doc)?;
+        let mut inner = doc.inner.write().unwrap();
+        let exists = {
+            let item = base.navigate(&inner)?;
+            dict_ops::item_has_key(item, &key)?
+        };
+        if exists {
+            drop(inner);
+            return base.child_proxy_typed(py, Key::Str(key));
         }
+        let default = default.ok_or_else(|| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "setdefault() requires a default value: TOML has no null type",
+            )
+        })?;
+        let item = base.navigate_mut(&mut inner)?;
+        dict_ops::set_with_decor_preservation(item, &key, default);
+        drop(inner);
         base.child_proxy_typed(py, Key::Str(key))
     }
 
@@ -341,11 +336,11 @@ impl DictProxy {
     /// Setting to ``True`` suppresses the header; setting to ``False``
     /// makes it explicit.  Silently ignored on inline tables.
     #[getter]
-    pub fn get_implicit(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<bool> {
-        let base = self_.as_super();
-        let doc = base.document.bind(py).borrow();
-        base.check_fresh(&doc)?;
-        let item = base.navigate(&doc.inner)?;
+    pub fn get_implicit(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<bool> {
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let inner = doc.inner.read().unwrap();
+        let item = base.navigate(&inner)?;
         match item {
             toml_edit::Item::Table(tbl) => Ok(tbl.is_implicit()),
             _ => Ok(false),
@@ -353,15 +348,11 @@ impl DictProxy {
     }
 
     #[setter]
-    pub fn set_implicit(
-        self_: PyClassGuard<'_, Self>,
-        py: Python<'_>,
-        implicit: bool,
-    ) -> PyResult<()> {
-        let base = self_.as_super();
-        let mut doc = base.document.bind(py).borrow_mut();
-        base.check_fresh(&doc)?;
-        let item = base.navigate_mut(&mut doc.inner)?;
+    pub fn set_implicit(slf: &Bound<'_, Self>, py: Python<'_>, implicit: bool) -> PyResult<()> {
+        let base = slf.as_super().get();
+        let doc = base.checked_doc(py)?;
+        let mut inner = doc.inner.write().unwrap();
+        let item = base.navigate_mut(&mut inner)?;
         if let toml_edit::Item::Table(tbl) = item {
             tbl.set_implicit(implicit);
         }

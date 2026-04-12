@@ -6,7 +6,7 @@ use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
 use crate::item::Item;
-use crate::item_proxy::ItemProxy;
+use crate::item_proxy::with_proxy_item;
 use crate::list_ops;
 
 // ---------------------------------------------------------------------------
@@ -97,17 +97,11 @@ pub(crate) fn extract_key_str(value: &Bound<'_, PyAny>) -> PyResult<Option<Strin
     if let Ok(s) = value.extract::<String>() {
         return Ok(Some(s));
     }
-    let Ok(proxy) = value.cast::<ItemProxy>() else {
-        return Ok(None);
-    };
-    let proxy = proxy.borrow();
-    let doc = proxy.document.bind(value.py()).borrow();
-    proxy.check_fresh(&doc)?;
-    let item = proxy.navigate(&doc.inner)?;
-    Ok(match item {
+    Ok(with_proxy_item(value, |item| match item {
         ItemRs::Value(ValueRs::String(s)) => Some(s.value().to_owned()),
         _ => None,
-    })
+    })?
+    .flatten())
 }
 
 /// Python truthiness for a TOML item.

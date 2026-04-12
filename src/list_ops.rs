@@ -9,6 +9,7 @@ use crate::comments::CommentPreservation;
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{Affected, into_value};
+use crate::item_proxy::ReadCtx;
 
 // ---------------------------------------------------------------------------
 // Array-like enum — constrains list operations to valid item types
@@ -165,7 +166,7 @@ fn apply_first_prefix(arr: &mut toml_edit::Array, prefix: Option<String>) {
 /// Block comments and spacing separators live in each table's decor prefix.
 /// Mutations that replace an entry must save this first, then stamp the
 /// saved prefix onto the new table before inserting/replacing it.
-pub(crate) fn save_aot_entry_prefix(aot: &toml_edit::ArrayOfTables, index: usize) -> String {
+fn save_aot_entry_prefix(aot: &toml_edit::ArrayOfTables, index: usize) -> String {
     aot.get(index)
         .and_then(|t| t.decor().prefix()?.as_str())
         .unwrap_or_default()
@@ -176,7 +177,7 @@ pub(crate) fn save_aot_entry_prefix(aot: &toml_edit::ArrayOfTables, index: usize
 ///
 /// When entry 0 is removed, the new first entry may have a leading `\n`
 /// separator (left over from being a non-first entry).  Strip it.
-pub(crate) fn fix_first_aot_prefix(aot: &mut toml_edit::ArrayOfTables) {
+fn fix_first_aot_prefix(aot: &mut toml_edit::ArrayOfTables) {
     let Some(first) = aot.get_mut(0) else {
         return;
     };
@@ -201,7 +202,7 @@ pub(crate) fn fix_first_aot_prefix(aot: &mut toml_edit::ArrayOfTables) {
 /// When inserting at position 0 the new element needs no prefix (it is now
 /// first), but the *old* first element — now at position 1 — was re-pushed
 /// with its original prefix and must be fixed instead.
-pub(crate) fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
+fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
     // Detect whether the nearest non-first neighbour uses blank-line spacing.
     // Prefer the element *before* — elements after may also be newly pushed
     // and not yet corrected.
@@ -251,7 +252,7 @@ pub(crate) fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: 
     }
 }
 
-pub(crate) fn require_table(item: Item) -> PyResult<toml_edit::Table> {
+fn require_table(item: Item) -> PyResult<toml_edit::Table> {
     match item.0 {
         ItemRs::Table(t) => Ok(t),
         ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.into_table()),
@@ -515,7 +516,7 @@ fn aot_setitem_slice(
 
 /// Decoration state captured before an array removal so that the opening and
 /// closing brackets stay in their original positions.
-pub(crate) struct RemovalDecor {
+struct RemovalDecor {
     pub(crate) first_prefix: Option<String>,
     pub(crate) last_suffix: Option<String>,
 }
@@ -527,7 +528,7 @@ pub(crate) struct RemovalDecor {
 /// affect element 0 or element `len − 1`.  Returns `None` fields when the
 /// corresponding boundary is unaffected or the array is too small to need
 /// repair (single-element arrays becoming empty).
-pub(crate) fn save_removal_decor(
+fn save_removal_decor(
     arr: &toml_edit::Array,
     removing_first: bool,
     removing_last: bool,
@@ -548,7 +549,7 @@ pub(crate) fn save_removal_decor(
 }
 
 /// Apply saved decoration fixes after a removal + `restore_inline_comments`.
-pub(crate) fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDecor) {
+fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDecor) {
     // --- First-element prefix ---
     // The new first element inherits a prefix meant to follow a comma (e.g.
     // `" "` in `[1, 2]` or `" # note\n    "` in multiline arrays).  Replace
@@ -721,23 +722,28 @@ pub(crate) fn element_eq(
     target: &ArrayLikeRef<'_>,
     index: usize,
     value: &Bound<'_, PyAny>,
+    ctx: &ReadCtx<'_>,
 ) -> PyResult<bool> {
     match target {
         ArrayLikeRef::Array(arr) => match arr.get(index) {
-            Some(v) => equality::value_eq(v, value),
+            Some(v) => equality::value_eq(v, value, ctx),
             None => Ok(false),
         },
         ArrayLikeRef::Aot(aot) => match aot.get(index) {
-            Some(table) => equality::table_eq(table, value),
+            Some(table) => equality::table_eq(table, value, ctx),
             None => Ok(false),
         },
     }
 }
 
-pub(crate) fn item_count(target: ArrayLikeRef<'_>, value: &Bound<'_, PyAny>) -> PyResult<usize> {
+pub(crate) fn item_count(
+    target: ArrayLikeRef<'_>,
+    value: &Bound<'_, PyAny>,
+    ctx: &ReadCtx<'_>,
+) -> PyResult<usize> {
     let mut count = 0;
     for i in 0..target.len() {
-        if element_eq(&target, i, value)? {
+        if element_eq(&target, i, value, ctx)? {
             count += 1;
         }
     }
@@ -749,12 +755,13 @@ pub(crate) fn item_index(
     value: &Bound<'_, PyAny>,
     start: Option<i64>,
     stop: Option<i64>,
+    ctx: &ReadCtx<'_>,
 ) -> PyResult<usize> {
     let len = target.len();
     let start = clamp_index(start.unwrap_or(0), len);
     let stop = clamp_index(stop.unwrap_or(len as i64), len);
     for i in start..stop {
-        if element_eq(&target, i, value)? {
+        if element_eq(&target, i, value, ctx)? {
             return Ok(i);
         }
     }
@@ -806,10 +813,10 @@ pub(crate) fn list_pop(
 // Subscript key resolution (used by ListProxy)
 // ---------------------------------------------------------------------------
 
-/// A subscript key resolved from Python *before* borrowing the document.
+/// A subscript key resolved from Python *before* locking the document.
 ///
 /// Proxy values are resolved to their plain Python equivalents so that
-/// `extract()` works without re-borrowing the document.
+/// `extract()` works without locking the document.
 pub(crate) enum SubscriptKey<'py> {
     Int(i64),
     Slice(Bound<'py, PySlice>),
@@ -817,8 +824,8 @@ pub(crate) enum SubscriptKey<'py> {
 
 /// Resolve a `__getitem__`/`__setitem__`/`__delitem__` key to a typed enum.
 ///
-/// This must be called *before* borrowing the document, because resolving a
-/// proxy key borrows it internally.  Returns `TypeError` for non-integer,
+/// This must be called *before* taking the document's write lock, because
+/// resolving a proxy key reads the document.  Returns `TypeError` for non-integer,
 /// non-slice keys.
 pub(crate) fn resolve_subscript_key<'py>(
     py: Python<'py>,

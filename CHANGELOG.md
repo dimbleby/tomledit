@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Use frozen pyclasses with `RwLock` internally, allowing concurrent reads
+  in free-threaded Python builds instead of serializing all access.
+
 ## 1.0.0 (3 April 2026)
 
 - New `ListItem` operations: `+`, `*`, and `*=` for list concatenation and

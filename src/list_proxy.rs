@@ -205,7 +205,7 @@ impl ListProxy {
     }
 
     #[pyo3(signature = (value, /))]
-    pub fn append(self_: PyClassGuardMut<'_, Self>, py: Python<'_>, value: Item) -> PyResult<()> {
+    pub fn append(self_: PyClassGuard<'_, Self>, py: Python<'_>, value: Item) -> PyResult<()> {
         let base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
@@ -320,7 +320,7 @@ impl ListProxy {
     /// be removed.
     #[pyo3(signature = (*, indent=4))]
     pub fn set_multiline(
-        self_: PyClassGuardMut<'_, Self>,
+        self_: PyClassGuard<'_, Self>,
         py: Python<'_>,
         indent: usize,
     ) -> PyResult<()> {

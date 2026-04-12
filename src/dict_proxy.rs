@@ -1,6 +1,6 @@
 use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
-use pyo3::pyclass::{PyClassGuard, PyClassGuardMut};
+use pyo3::pyclass::PyClassGuard;
 use pyo3::types::{PyDict, PyTuple};
 use toml_edit::DocumentMut as DocumentRs;
 
@@ -81,7 +81,7 @@ impl DictProxy {
 
     #[pyo3(signature = (key, /, *default))]
     pub fn pop(
-        self_: PyClassGuardMut<'_, Self>,
+        self_: PyClassGuard<'_, Self>,
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         default: &Bound<'_, PyTuple>,
@@ -113,10 +113,7 @@ impl DictProxy {
         }
     }
 
-    pub fn popitem(
-        self_: PyClassGuardMut<'_, Self>,
-        py: Python<'_>,
-    ) -> PyResult<(String, Py<PyAny>)> {
+    pub fn popitem(self_: PyClassGuard<'_, Self>, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
         let base = self_.into_super();
         let mut doc = base.document.bind(py).borrow_mut();
         base.check_fresh(&doc)?;
@@ -222,7 +219,7 @@ impl DictProxy {
 
     #[pyo3(signature = (key, default=None, /))]
     pub fn setdefault(
-        self_: PyClassGuardMut<'_, Self>,
+        self_: PyClassGuard<'_, Self>,
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         default: Option<Item>,

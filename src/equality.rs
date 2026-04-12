@@ -1,8 +1,7 @@
 use pyo3::prelude::*;
-use pyo3::types::{
-    PyBool, PyDate, PyDateAccess, PyDateTime, PyList, PyString, PyTime, PyTimeAccess,
-    PyTzInfoAccess,
-};
+use pyo3::types::{PyBool, PyDate, PyDateTime, PyList, PyString, PyTime, PyTzInfoAccess};
+
+use crate::datetime_compat::{PyDateAccess, PyTimeAccess};
 use toml_edit::Item as ItemRs;
 
 use crate::dict_ops;

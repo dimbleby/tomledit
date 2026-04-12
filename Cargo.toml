@@ -11,6 +11,9 @@ crate-type = ["cdylib"]
 [dependencies]
 toml_edit = "0.25.9"
 
+[features]
+abi3 = ["pyo3/abi3-py310"]
+
 [dependencies.pyo3]
 version = "0.28"
 features = ["generate-import-lib"]

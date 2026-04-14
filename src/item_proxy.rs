@@ -42,8 +42,7 @@ pub(crate) fn with_proxy_item<R>(
 /// When a method holds `doc.inner.read()` (or `.write()`) and needs to compare
 /// against a value that may be a proxy from the same document, this context
 /// allows [`with_proxy_item_ctx`] to reuse the guard instead of acquiring a
-/// recursive read lock (which violates `std::sync::RwLock`'s API contract and
-/// can deadlock on write-preferring implementations).
+/// nested read lock (which would deadlock under a write guard).
 pub(crate) struct ReadCtx<'a> {
     doc: &'a Document,
     inner: &'a DocumentRs,
@@ -68,9 +67,9 @@ pub(crate) fn with_proxy_item_ctx<R>(
 /// Like [`with_proxy_item_ctx`], but handles [`Document`] objects instead of
 /// proxies.  When `other` is a `Document` and shares the same underlying
 /// document as the existing read guard in `ctx`, the guard is reused — this
-/// prevents recursive `RwLock::read()` (undefined behaviour) and
-/// write-then-read deadlocks.  For a different `Document`, a fresh read lock
-/// is acquired.  Returns `None` when `other` is not a `Document`.
+/// avoids nested locking and write-then-read deadlocks.  For a different
+/// `Document`, a fresh read lock is acquired.  Returns `None` when `other` is
+/// not a `Document`.
 pub(crate) fn with_doc_item_ctx<R>(
     other: &Bound<'_, PyAny>,
     ctx: &ReadCtx<'_>,
@@ -83,7 +82,7 @@ pub(crate) fn with_doc_item_ctx<R>(
     if std::ptr::eq(ctx.doc, doc) {
         Ok(Some(f(ctx.inner.as_item())))
     } else {
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         Ok(Some(f(inner.as_item())))
     }
 }
@@ -107,7 +106,7 @@ fn resolve_proxy_item<R>(
         let item = proxy.navigate(ctx.inner)?;
         return Ok(Some(f(item)));
     }
-    let inner = doc.inner.read().unwrap();
+    let inner = doc.inner.read();
     let item = proxy.navigate(&inner)?;
     Ok(Some(f(item)))
 }
@@ -196,7 +195,7 @@ impl ItemProxy {
     /// cloned value's decor suffix so that it travels with the value.
     pub(crate) fn clone_item(&self, py: Python<'_>) -> PyResult<ItemRs> {
         let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = self.navigate(&inner)?;
         let mut cloned = item.clone();
         if let Some(comment) = self.element_inline_comment(&inner)?
@@ -243,7 +242,7 @@ impl ItemProxy {
     pub(crate) fn into_typed(py: Python<'_>, base: ItemProxy) -> PyResult<Py<PyAny>> {
         let kind = {
             let doc = base.document.bind(py).get();
-            let inner = doc.inner.read().unwrap();
+            let inner = doc.inner.read();
             let item = base.navigate(&inner)?;
             item_kind(item)
         };
@@ -358,21 +357,21 @@ impl ItemProxy {
 
     pub fn __bool__(&self, py: Python<'_>) -> PyResult<bool> {
         let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = self.navigate(&inner)?;
         Ok(item_ops::item_bool(item))
     }
 
     pub fn __str__(&self, py: Python<'_>) -> PyResult<String> {
         let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = self.navigate(&inner)?;
         item_ops::item_str(item, py)
     }
 
     pub fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = self.navigate(&inner)?;
         Ok(item_ops::item_repr(item))
     }
@@ -380,7 +379,7 @@ impl ItemProxy {
     /// Return the TOML representation of this item.
     pub fn as_toml(&self, py: Python<'_>) -> PyResult<String> {
         let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = self.navigate(&inner)?;
         Ok(item.to_string().trim().to_owned())
     }
@@ -388,7 +387,7 @@ impl ItemProxy {
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = other.py();
         let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let ctx = ReadCtx::new(doc, &inner);
         let item = self.navigate(&inner)?;
         equality::item_eq(item, other, &ctx)
@@ -398,7 +397,7 @@ impl ItemProxy {
     #[getter]
     pub fn value(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = self.navigate(&inner)?;
         item_ops::item_to_py(item, py)
     }
@@ -412,7 +411,7 @@ impl ItemProxy {
             return Ok(None);
         }
         let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         if let Some((ancestor_path, key)) = self.block_comment_target(&inner)? {
             let ancestor = item_ops::navigate_path(&inner, ancestor_path)?;
             Ok(comments::get_block_comment(ancestor, key))
@@ -437,7 +436,7 @@ impl ItemProxy {
             return Err(PyTypeError::new_err("cannot set comment on root"));
         }
         let doc = self.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         if let Some((ancestor_path, key)) = self.block_comment_target(&inner)? {
             let key = key.to_owned();
             let ancestor = item_ops::navigate_path_mut(&mut inner, ancestor_path)?;
@@ -458,7 +457,7 @@ impl ItemProxy {
     #[getter]
     pub fn inline_comment(&self, py: Python<'_>) -> PyResult<Option<String>> {
         let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         if let Some(comment) = self.element_inline_comment(&inner)? {
             return Ok(Some(comment));
         }
@@ -473,7 +472,7 @@ impl ItemProxy {
     #[setter]
     pub fn set_inline_comment(&self, py: Python<'_>, value: Option<&str>) -> PyResult<()> {
         let doc = self.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let raw = match value {
             Some(text) => comments::validate_inline_comment(text)?,
             None => String::new(),
@@ -503,7 +502,7 @@ impl ItemProxy {
 
     pub fn clear(&self, py: Python<'_>) -> PyResult<()> {
         let doc = self.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = self.navigate_mut(&mut inner)?;
         item_ops::item_clear(item)?;
         self.bump_self(doc);
@@ -517,7 +516,7 @@ impl ItemProxy {
     /// Note: any comments on the formatted item will be removed.
     pub fn fmt(&self, py: Python<'_>) -> PyResult<()> {
         let doc = self.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = self.navigate_mut(&mut inner)?;
         item_ops::item_fmt(item);
         Ok(())

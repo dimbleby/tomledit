@@ -1,4 +1,4 @@
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -36,7 +36,7 @@ impl Document {
 
     /// The current document revision (read from the trie).
     pub(crate) fn revision(&self) -> u64 {
-        self.trie.read().unwrap().revision()
+        self.trie.read().revision()
     }
 
     fn make_proxy(slf: &Bound<'_, Self>, key: &str) -> ItemProxy {
@@ -47,24 +47,24 @@ impl Document {
 
     /// Record a mutation at the given path. Returns the new revision.
     pub(crate) fn bump_at(&self, path: &[Key]) -> u64 {
-        self.trie.write().unwrap().stamp(path)
+        self.trie.write().stamp(path)
     }
 
     /// Record a mutation at `path + [child]` without cloning the path.
     /// Returns the new revision.
     pub(crate) fn bump_at_child(&self, path: &[Key], child: &Key) -> u64 {
-        self.trie.write().unwrap().stamp_child(path, child)
+        self.trie.write().stamp_child(path, child)
     }
 
     /// Stamp each index in `from..to` as changed at `path`.
     /// Returns the new revision.
     pub(crate) fn bump_range(&self, path: &[Key], from: usize, to: usize) -> u64 {
-        self.trie.write().unwrap().stamp_range(path, from, to)
+        self.trie.write().stamp_range(path, from, to)
     }
 
     /// Check whether a proxy at `path` created at `revision` is still fresh.
     pub(crate) fn check_fresh(&self, path: &[Key], revision: u64) -> PyResult<()> {
-        if self.trie.read().unwrap().is_valid(path, revision) {
+        if self.trie.read().is_valid(path, revision) {
             Ok(())
         } else {
             Err(pyo3::exceptions::PyRuntimeError::new_err(
@@ -107,12 +107,12 @@ impl Document {
         let Some(key) = item_ops::extract_key_str(key)? else {
             return Ok(false);
         };
-        Ok(self.inner.read().unwrap().contains_key(&key))
+        Ok(self.inner.read().contains_key(&key))
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let list = PyList::empty(py);
-        for (k, _) in self.inner.read().unwrap().iter() {
+        for (k, _) in self.inner.read().iter() {
             list.append(k)?;
         }
         Ok(list.try_iter()?.unbind())
@@ -134,7 +134,7 @@ impl Document {
     }
 
     pub fn __len__(&self) -> usize {
-        self.inner.read().unwrap().len()
+        self.inner.read().len()
     }
 
     #[pyo3(signature = (key, default=None, /))]
@@ -147,7 +147,7 @@ impl Document {
         let Some(key) = item_ops::extract_key_str(key)? else {
             return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
         };
-        if slf.get().inner.read().unwrap().get(&key).is_some() {
+        if slf.get().inner.read().get(&key).is_some() {
             let proxy = Self::make_proxy(slf, &key);
             ItemProxy::into_typed(py, proxy)
         } else {
@@ -159,7 +159,7 @@ impl Document {
         let Some(key) = item_ops::extract_key_str(key)? else {
             return Err(PyKeyError::new_err(key.repr()?.to_string()));
         };
-        if !slf.get().inner.read().unwrap().contains_key(&key) {
+        if !slf.get().inner.read().contains_key(&key) {
             return Err(PyKeyError::new_err(key.clone()));
         }
         let proxy = Self::make_proxy(slf, &key);
@@ -171,7 +171,7 @@ impl Document {
             return Err(PyTypeError::new_err("keys must be strings"));
         };
         let doc = slf.get();
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let replaced = inner.contains_key(&key);
         dict_ops::set_with_decor_preservation(inner.as_item_mut(), &key, value);
         if replaced {
@@ -185,7 +185,7 @@ impl Document {
             return Err(PyKeyError::new_err(key.repr()?.to_string()));
         };
         let doc = slf.get();
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         if inner.remove(&key).is_none() {
             return Err(PyKeyError::new_err(key));
         }
@@ -211,7 +211,7 @@ impl Document {
 
         let doc = slf.get();
         let removed = {
-            let mut inner = doc.inner.write().unwrap();
+            let mut inner = doc.inner.write();
             match inner.remove(&key) {
                 Some(item) => {
                     doc.bump_at(&[Key::Str(key)]);
@@ -231,7 +231,7 @@ impl Document {
     pub fn popitem(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
         let doc = slf.get();
         let (key, removed) = {
-            let mut inner = doc.inner.write().unwrap();
+            let mut inner = doc.inner.write();
             let (key, removed) = dict_ops::item_popitem(inner.as_item_mut())?;
             doc.bump_at(&[Key::Str(key.clone())]);
             (key, removed)
@@ -245,7 +245,7 @@ impl Document {
         if !dict_ops::is_mapping_like(other) {
             return Ok(py.NotImplemented());
         }
-        let mut new_inner = slf.get().inner.read().unwrap().clone();
+        let mut new_inner = slf.get().inner.read().clone();
         dict_ops::merge_other_into(new_inner.as_item_mut(), other)?;
         let doc = Self::from_inner(new_inner);
         Ok(Py::new(py, doc)?.into_any())
@@ -257,7 +257,7 @@ impl Document {
             return Ok(py.NotImplemented());
         }
         let dict = dict_ops::copy_mapping_to_pydict(other, py)?;
-        let inner = slf.get().inner.read().unwrap();
+        let inner = slf.get().inner.read();
         for (k, v) in inner.iter() {
             dict.set_item(k, item_ops::item_to_py(v, py)?)?;
         }
@@ -278,7 +278,7 @@ impl Document {
         // Resolve before write lock — iteration may read inner.
         let update = other.map(|obj| dict_ops::resolve_update(obj)).transpose()?;
         let kwarg_pairs = dict_ops::extract_kwargs(kwargs)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let mut replaced = match update {
             Some(u) => u.apply(inner.as_item_mut())?,
             None => Vec::new(),
@@ -305,7 +305,7 @@ impl Document {
         let key = item_ops::extract_key_str(key)?
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         let doc = slf.get();
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         if inner.contains_key(&key) {
             drop(inner);
             let proxy = Self::make_proxy(slf, &key);
@@ -323,27 +323,27 @@ impl Document {
     }
 
     pub fn clear(&self) {
-        let mut inner = self.inner.write().unwrap();
+        let mut inner = self.inner.write();
         inner.clear();
         self.bump_at(&[]);
     }
 
     pub fn __str__(&self, py: Python<'_>) -> PyResult<String> {
-        let dict = table_to_pydict(self.inner.read().unwrap().iter(), py)?;
+        let dict = table_to_pydict(self.inner.read().iter(), py)?;
         dict.str().map(|s| s.to_string())
     }
 
     pub fn __repr__(&self) -> String {
-        format!("Document({} keys)", self.inner.read().unwrap().len())
+        format!("Document({} keys)", self.inner.read().len())
     }
 
     /// Return the document serialised as a TOML string.
     pub fn as_toml(&self) -> String {
-        self.inner.read().unwrap().to_string()
+        self.inner.read().to_string()
     }
 
     pub fn __bool__(&self) -> bool {
-        !self.inner.read().unwrap().is_empty()
+        !self.inner.read().is_empty()
     }
 
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
@@ -352,21 +352,21 @@ impl Document {
             if std::ptr::eq(self, other_doc) {
                 return Ok(true);
             }
-            let self_inner = self.inner.read().unwrap();
-            let other_inner = other_doc.inner.read().unwrap();
+            let self_inner = self.inner.read();
+            let other_inner = other_doc.inner.read();
             Ok(equality::items_structural_eq(
                 self_inner.as_item(),
                 other_inner.as_item(),
             ))
         } else {
-            let inner = self.inner.read().unwrap();
+            let inner = self.inner.read();
             let ctx = ReadCtx::new(self, &inner);
             equality::table_eq(inner.as_table(), other, &ctx)
         }
     }
 
     pub fn __copy__(&self) -> Self {
-        Self::from_inner(self.inner.read().unwrap().clone())
+        Self::from_inner(self.inner.read().clone())
     }
 
     #[pyo3(signature = (_memo=None))]
@@ -382,14 +382,14 @@ impl Document {
     /// Useful after mutations that leave awkward top-level whitespace.
     /// Note: comments on formatted root-level entries are removed.
     pub fn fmt(&self) {
-        self.inner.write().unwrap().fmt();
+        self.inner.write().fmt();
     }
 
     /// The entire document as a native Python dict.
     #[getter]
     pub fn value(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
-        for (k, v) in self.inner.read().unwrap().iter() {
+        for (k, v) in self.inner.read().iter() {
             dict.set_item(k, item_ops::item_to_py(v, py)?)?;
         }
         Ok(dict.into_any().unbind())

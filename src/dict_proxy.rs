@@ -34,7 +34,7 @@ impl DictProxy {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
         {
-            let inner = doc.inner.read().unwrap();
+            let inner = doc.inner.read();
             let item = base.navigate(&inner)?;
             if !dict_ops::item_has_key(item, &key_str)? {
                 return Err(PyKeyError::new_err(key_str));
@@ -55,7 +55,7 @@ impl DictProxy {
         let value: Item = value.extract()?;
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
         if let Some(replaced_key) = dict_ops::item_setitem_str(item, key_str, value) {
             base.bump_child(doc, replaced_key);
@@ -70,7 +70,7 @@ impl DictProxy {
         };
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
         let (_removed, k) = dict_ops::table_pop(item, &key_str)?;
         base.bump_child(doc, k);
@@ -80,7 +80,7 @@ impl DictProxy {
     pub fn __len__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<usize> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = base.navigate(&inner)?;
         Ok(dict_ops::as_dict_like(item, "__len__")?.len())
     }
@@ -88,7 +88,7 @@ impl DictProxy {
     pub fn __iter__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = base.navigate(&inner)?;
         let tbl = dict_ops::as_dict_like(item, "__iter__")?;
         let keys: Vec<&str> = tbl.iter().map(|(k, _)| k).collect();
@@ -103,7 +103,7 @@ impl DictProxy {
         };
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = base.navigate(&inner)?;
         Ok(dict_ops::as_dict_like(item, "'in'")?.contains_key(&key_str))
     }
@@ -153,7 +153,7 @@ impl DictProxy {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
         let has_key = {
-            let inner = doc.inner.read().unwrap();
+            let inner = doc.inner.read();
             let item = base.navigate(&inner)?;
             dict_ops::item_has_key(item, &key)?
         };
@@ -183,7 +183,7 @@ impl DictProxy {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
         let pop_result = {
-            let mut inner = doc.inner.write().unwrap();
+            let mut inner = doc.inner.write();
             let item = base.navigate_mut(&mut inner)?;
             dict_ops::table_pop(item, &key_str).map(|(removed, affected_key)| {
                 base.bump_child(doc, affected_key);
@@ -203,7 +203,7 @@ impl DictProxy {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
         let (key, removed) = {
-            let mut inner = doc.inner.write().unwrap();
+            let mut inner = doc.inner.write();
             let item = base.navigate_mut(&mut inner)?;
             let (key, removed) = dict_ops::item_popitem(item)?;
             base.bump_child(doc, Key::Str(key.clone()));
@@ -224,7 +224,7 @@ impl DictProxy {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
         let mut new_doc = {
-            let inner = doc.inner.read().unwrap();
+            let inner = doc.inner.read();
             let item = base.navigate(&inner)?;
             let mut nd = DocumentRs::new();
             nd["_"] = item.clone();
@@ -247,7 +247,7 @@ impl DictProxy {
         let dict = dict_ops::copy_mapping_to_pydict(other, py)?;
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = base.navigate(&inner)?;
         let tbl = item
             .as_table_like()
@@ -280,7 +280,7 @@ impl DictProxy {
         let update = other.map(|obj| dict_ops::resolve_update(obj)).transpose()?;
         let kwarg_pairs = dict_ops::extract_kwargs(kwargs)?;
         base.check_fresh(doc)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
         let mut replaced = match update {
             Some(u) => u.apply(item)?,
@@ -306,7 +306,7 @@ impl DictProxy {
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let exists = {
             let item = base.navigate(&inner)?;
             dict_ops::item_has_key(item, &key)?
@@ -338,7 +338,7 @@ impl DictProxy {
     pub fn get_implicit(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<bool> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = base.navigate(&inner)?;
         match item {
             toml_edit::Item::Table(tbl) => Ok(tbl.is_implicit()),
@@ -350,7 +350,7 @@ impl DictProxy {
     pub fn set_implicit(slf: &Bound<'_, Self>, py: Python<'_>, implicit: bool) -> PyResult<()> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
         if let toml_edit::Item::Table(tbl) = item {
             tbl.set_implicit(implicit);

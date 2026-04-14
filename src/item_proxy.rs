@@ -65,6 +65,29 @@ pub(crate) fn with_proxy_item_ctx<R>(
     resolve_proxy_item(other, Some(ctx), f)
 }
 
+/// Like [`with_proxy_item_ctx`], but handles [`Document`] objects instead of
+/// proxies.  When `other` is a `Document` and shares the same underlying
+/// document as the existing read guard in `ctx`, the guard is reused — this
+/// prevents recursive `RwLock::read()` (undefined behaviour) and
+/// write-then-read deadlocks.  For a different `Document`, a fresh read lock
+/// is acquired.  Returns `None` when `other` is not a `Document`.
+pub(crate) fn with_doc_item_ctx<R>(
+    other: &Bound<'_, PyAny>,
+    ctx: &ReadCtx<'_>,
+    f: impl FnOnce(&toml_edit::Item) -> R,
+) -> PyResult<Option<R>> {
+    let Ok(doc_bound) = other.cast::<Document>() else {
+        return Ok(None);
+    };
+    let doc = doc_bound.get();
+    if std::ptr::eq(ctx.doc, doc) {
+        Ok(Some(f(ctx.inner.as_item())))
+    } else {
+        let inner = doc.inner.read().unwrap();
+        Ok(Some(f(inner.as_item())))
+    }
+}
+
 /// Shared implementation for [`with_proxy_item`] and [`with_proxy_item_ctx`].
 ///
 /// When `ctx` is `Some` and the proxy targets the same document, the existing

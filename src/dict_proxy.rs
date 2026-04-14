@@ -306,7 +306,6 @@ impl DictProxy {
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        base.check_fresh(doc)?;
         let mut inner = doc.inner.write().unwrap();
         let exists = {
             let item = base.navigate(&inner)?;

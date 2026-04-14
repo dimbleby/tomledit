@@ -6,7 +6,7 @@ use toml_edit::Item as ItemRs;
 
 use crate::dict_ops;
 use crate::item_ops::datetime_to_py;
-use crate::item_proxy::{ReadCtx, with_proxy_item_ctx};
+use crate::item_proxy::{ReadCtx, with_doc_item_ctx, with_proxy_item_ctx};
 
 /// Semantically compare two toml_edit Datetimes, treating Offset::Z and
 /// Offset::Custom { minutes: 0 } as equivalent, and normalizing optional
@@ -142,6 +142,12 @@ pub(crate) fn value_eq(
     })? {
         return Ok(result);
     }
+    if let Some(result) = with_doc_item_ctx(other, ctx, |other_item| match other_item {
+        ItemRs::Value(v) => values_structural_eq(value, v),
+        other => item_value_eq(other, value),
+    })? {
+        return Ok(result);
+    }
     match value {
         toml_edit::Value::Boolean(b) => {
             if let Ok(other_b) = other.extract::<bool>() {
@@ -261,6 +267,13 @@ pub(crate) fn table_eq(
     })? {
         return Ok(result);
     }
+    if let Some(result) = with_doc_item_ctx(other, ctx, |other_item| match other_item {
+        ItemRs::Table(t) => tables_structural_eq(table, t),
+        ItemRs::Value(toml_edit::Value::InlineTable(it)) => table_inline_eq(table, it),
+        _ => false,
+    })? {
+        return Ok(result);
+    }
     mapping_eq(table.iter(), table.len(), other, |item, o| {
         item_eq(item, o, ctx)
     })
@@ -276,6 +289,11 @@ pub(crate) fn item_eq(
     ctx: &ReadCtx<'_>,
 ) -> PyResult<bool> {
     if let Some(result) = with_proxy_item_ctx(other, ctx, |other_item| {
+        items_structural_eq(item, other_item)
+    })? {
+        return Ok(result);
+    }
+    if let Some(result) = with_doc_item_ctx(other, ctx, |other_item| {
         items_structural_eq(item, other_item)
     })? {
         return Ok(result);

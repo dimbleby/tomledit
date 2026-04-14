@@ -623,6 +623,19 @@ class TestAdd:
         assert len(result) == 2
         assert result[1] == {"name": "b"}
 
+    def test_radd_aot(self) -> None:
+        """__radd__ on an AoT exercises empty_array_like for AoT kind."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+        """)
+        )
+        result = [{"name": "z"}] + doc["items"]
+        assert len(result) == 2
+        assert result[0] == {"name": "z"}
+        assert result[1] == {"name": "a"}
+
     def test_add_array_plus_aot(self) -> None:
         """Cross-kind: plain array + AoT works (falls back to value extraction)."""
         doc = Document.parse(
@@ -1100,6 +1113,16 @@ class TestSliceIndexing:
         doc = Document.parse(self.TOML)
         del doc["arr"][::2]
         assert doc["arr"] == [2, 4]
+
+    def test_delitem_negative_step(self) -> None:
+        doc = Document.parse(self.TOML)
+        del doc["arr"][::-2]
+        assert doc["arr"] == [2, 4]
+
+    def test_delitem_negative_step_range(self) -> None:
+        doc = Document.parse(self.TOML)
+        del doc["arr"][3:0:-1]
+        assert doc["arr"] == [1, 5]
 
     def test_delitem_empty_slice_noop(self) -> None:
         doc = Document.parse(self.TOML)

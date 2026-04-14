@@ -220,3 +220,19 @@ class TestDocumentCopy:
         doc = Document.parse(text)
         doc2 = copy.copy(doc)
         assert doc2.as_toml() == text
+
+
+class TestDocumentUpdate:
+    """Document.update() with **kwargs exercises the kwarg_pairs branch."""
+
+    def test_update_kwargs_only(self) -> None:
+        doc = Document({"a": 1})
+        doc.update(b=2, c=3)
+        assert doc["b"] == 2
+        assert doc["c"] == 3
+
+    def test_update_dict_and_kwargs(self) -> None:
+        doc = Document({"a": 1})
+        doc.update({"b": 2}, c=3)
+        assert doc["b"] == 2
+        assert doc["c"] == 3

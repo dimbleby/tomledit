@@ -40,9 +40,9 @@ pub(crate) fn with_proxy_item<R>(
 /// Read context that carries an existing `inner` read guard reference.
 ///
 /// When a method holds `doc.inner.read()` (or `.write()`) and needs to compare
-/// against a value that may be a proxy from the same document, this context
-/// allows [`with_proxy_item_ctx`] to reuse the guard instead of acquiring a
-/// nested read lock (which would deadlock under a write guard).
+/// against a value that may be a proxy or `Document` from the same document,
+/// this context allows [`resolve_other_item`] to reuse the guard instead of
+/// acquiring a nested read lock (which would deadlock under a write guard).
 pub(crate) struct ReadCtx<'a> {
     doc: &'a Document,
     inner: &'a DocumentRs,
@@ -54,23 +54,25 @@ impl<'a> ReadCtx<'a> {
     }
 }
 
-/// Like [`with_proxy_item`], but reuses an existing read guard when the proxy
-/// is from the same document, avoiding a recursive `RwLock::read()` call.
-pub(crate) fn with_proxy_item_ctx<R>(
+/// Resolve `other` as either an [`ItemProxy`] or a [`Document`], calling `f`
+/// with the underlying `toml_edit::Item`.  Returns `None` when `other` is
+/// neither.
+///
+/// Same-document guards are reused via `ctx` to avoid nested locking.
+pub(crate) fn resolve_other_item<R>(
     other: &Bound<'_, PyAny>,
     ctx: &ReadCtx<'_>,
-    f: impl FnOnce(&toml_edit::Item) -> R,
+    f: impl Fn(&toml_edit::Item) -> R,
 ) -> PyResult<Option<R>> {
-    resolve_proxy_item(other, Some(ctx), f)
+    if let Some(r) = resolve_proxy_item(other, Some(ctx), &f)? {
+        return Ok(Some(r));
+    }
+    resolve_doc_item(other, ctx, f)
 }
 
-/// Like [`with_proxy_item_ctx`], but handles [`Document`] objects instead of
-/// proxies.  When `other` is a `Document` and shares the same underlying
-/// document as the existing read guard in `ctx`, the guard is reused — this
-/// avoids nested locking and write-then-read deadlocks.  For a different
-/// `Document`, a fresh read lock is acquired.  Returns `None` when `other` is
-/// not a `Document`.
-pub(crate) fn with_doc_item_ctx<R>(
+/// Resolve a [`Document`] to its root item, reusing the guard from `ctx`
+/// when it is the same document.
+fn resolve_doc_item<R>(
     other: &Bound<'_, PyAny>,
     ctx: &ReadCtx<'_>,
     f: impl FnOnce(&toml_edit::Item) -> R,
@@ -87,7 +89,7 @@ pub(crate) fn with_doc_item_ctx<R>(
     }
 }
 
-/// Shared implementation for [`with_proxy_item`] and [`with_proxy_item_ctx`].
+/// Shared implementation for [`with_proxy_item`] and [`resolve_other_item`].
 ///
 /// When `ctx` is `Some` and the proxy targets the same document, the existing
 /// guard is reused.  Otherwise a fresh read lock is acquired.

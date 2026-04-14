@@ -792,13 +792,12 @@ pub(crate) fn item_set_multiline(target: ArrayLikeMut<'_>, indent: usize) -> PyR
 /// Pop an element from an array-like item.
 ///
 /// When `index` is `Some`, pops by index; when `None`, pops the last element.
-pub(crate) fn list_pop(
-    target: ArrayLikeMut<'_>,
-    index: Option<&Bound<'_, PyAny>>,
-) -> PyResult<(Item, Affected)> {
+/// The caller must resolve the index to `i64` **before** locking the document,
+/// because `extract::<i64>()` can invoke Python's `__index__` protocol.
+pub(crate) fn list_pop(target: ArrayLikeMut<'_>, index: Option<i64>) -> PyResult<(Item, Affected)> {
     let len = target.len();
     let idx = match index {
-        Some(key_obj) => resolve_index(key_obj.extract::<i64>()?, len)?,
+        Some(i) => resolve_index(i, len)?,
         None => {
             if len == 0 {
                 return Err(PyIndexError::new_err("pop from empty array"));

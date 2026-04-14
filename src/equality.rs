@@ -6,7 +6,7 @@ use toml_edit::Item as ItemRs;
 
 use crate::dict_ops;
 use crate::item_ops::datetime_to_py;
-use crate::item_proxy::{ReadCtx, with_doc_item_ctx, with_proxy_item_ctx};
+use crate::item_proxy::{ReadCtx, resolve_other_item};
 
 /// Semantically compare two toml_edit Datetimes, treating Offset::Z and
 /// Offset::Custom { minutes: 0 } as equivalent, and normalizing optional
@@ -136,16 +136,10 @@ pub(crate) fn value_eq(
     other: &Bound<'_, PyAny>,
     ctx: &ReadCtx<'_>,
 ) -> PyResult<bool> {
-    if let Some(result) = with_proxy_item_ctx(other, ctx, |other_item| match other_item {
+    if let Some(result) = resolve_other_item(other, ctx, |other_item| match other_item {
         ItemRs::Value(v) => values_structural_eq(value, v),
         other => item_value_eq(other, value),
     })? {
-        return Ok(result);
-    }
-    // Document root is always a Table, so no Value arm needed.
-    if let Some(result) =
-        with_doc_item_ctx(other, ctx, |other_item| item_value_eq(other_item, value))?
-    {
         return Ok(result);
     }
     match value {
@@ -260,18 +254,10 @@ pub(crate) fn table_eq(
     other: &Bound<'_, PyAny>,
     ctx: &ReadCtx<'_>,
 ) -> PyResult<bool> {
-    if let Some(result) = with_proxy_item_ctx(other, ctx, |other_item| match other_item {
+    if let Some(result) = resolve_other_item(other, ctx, |other_item| match other_item {
         ItemRs::Table(t) => tables_structural_eq(table, t),
         ItemRs::Value(toml_edit::Value::InlineTable(it)) => table_inline_eq(table, it),
         _ => false,
-    })? {
-        return Ok(result);
-    }
-    // Document root is always a Table, so only the Table arm is needed.
-    if let Some(result) = with_doc_item_ctx(other, ctx, |other_item| {
-        other_item
-            .as_table()
-            .is_some_and(|t| tables_structural_eq(table, t))
     })? {
         return Ok(result);
     }
@@ -289,12 +275,7 @@ pub(crate) fn item_eq(
     other: &Bound<'_, PyAny>,
     ctx: &ReadCtx<'_>,
 ) -> PyResult<bool> {
-    if let Some(result) = with_proxy_item_ctx(other, ctx, |other_item| {
-        items_structural_eq(item, other_item)
-    })? {
-        return Ok(result);
-    }
-    if let Some(result) = with_doc_item_ctx(other, ctx, |other_item| {
+    if let Some(result) = resolve_other_item(other, ctx, |other_item| {
         items_structural_eq(item, other_item)
     })? {
         return Ok(result);

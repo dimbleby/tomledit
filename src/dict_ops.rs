@@ -385,13 +385,13 @@ fn resolve_toml_item(other: &Bound<'_, PyAny>) -> PyResult<Option<ItemRs>> {
         let proxy_ref = proxy.get();
         let doc = proxy_ref.document.bind(other.py()).get();
         proxy_ref.check_fresh(doc)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = proxy_ref.navigate(&inner)?.clone();
         return Ok(Some(item));
     }
     if let Ok(doc_bound) = other.cast::<Document>() {
         let doc = doc_bound.get();
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = inner.as_item().clone();
         return Ok(Some(item));
     }
@@ -413,7 +413,7 @@ pub(crate) fn merge_other_into(
     }
     if let Ok(doc_bound) = other.cast::<Document>() {
         let doc = doc_bound.get();
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         return merge_table_entries(target, inner.as_item());
     }
     // Plain mapping / iterable — no TOML decor to preserve.

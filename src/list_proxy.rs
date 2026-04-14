@@ -26,7 +26,7 @@ impl ListProxy {
 /// Read a proxy's document and clone the underlying `toml_edit::Item`.
 fn clone_self_item(base: &ItemProxy, py: Python<'_>) -> PyResult<toml_edit::Item> {
     let doc = base.checked_doc(py)?;
-    let inner = doc.inner.read().unwrap();
+    let inner = doc.inner.read();
     Ok(base.navigate(&inner)?.clone())
 }
 
@@ -99,7 +99,7 @@ impl ListProxy {
         match resolved {
             SubscriptKey::Slice(slice) => {
                 let indices = {
-                    let inner = doc.inner.read().unwrap();
+                    let inner = doc.inner.read();
                     let item = base.navigate(&inner)?;
                     let target = list_ops::as_array_like(item, "slicing")?;
                     let si = slice.indices(target.len() as isize)?;
@@ -113,7 +113,7 @@ impl ListProxy {
             }
             SubscriptKey::Int(i) => {
                 let idx = {
-                    let inner = doc.inner.read().unwrap();
+                    let inner = doc.inner.read();
                     let item = base.navigate(&inner)?;
                     list_ops::require_array_index(item, i)?
                 };
@@ -137,7 +137,7 @@ impl ListProxy {
                 let values = collect_items(value)?;
                 let base = slf.as_super().get();
                 let doc = base.checked_doc(py)?;
-                let mut inner = doc.inner.write().unwrap();
+                let mut inner = doc.inner.write();
                 let item = base.navigate_mut(&mut inner)?;
                 let target = list_ops::as_array_like_mut(item, "slice assignment")?;
                 let si = slice.indices(target.len() as isize)?;
@@ -160,7 +160,7 @@ impl ListProxy {
                 let value: Item = value.extract()?;
                 let base = slf.as_super().get();
                 let doc = base.checked_doc(py)?;
-                let mut inner = doc.inner.write().unwrap();
+                let mut inner = doc.inner.write();
                 let item = base.navigate_mut(&mut inner)?;
                 let target = list_ops::as_array_like_mut(item, "__setitem__")?;
                 let replaced_key = list_ops::item_setitem_int(target, i, value)?;
@@ -176,7 +176,7 @@ impl ListProxy {
         let resolved = list_ops::resolve_subscript_key(py, key)?;
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
 
         match resolved {
@@ -202,7 +202,7 @@ impl ListProxy {
     pub fn __len__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<usize> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let item = base.navigate(&inner)?;
         let target = list_ops::as_array_like(item, "__len__")?;
         Ok(target.len())
@@ -212,7 +212,7 @@ impl ListProxy {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
         let len = {
-            let inner = doc.inner.read().unwrap();
+            let inner = doc.inner.read();
             let item = base.navigate(&inner)?;
             list_ops::as_array_like(item, "__iter__")?.len()
         };
@@ -227,7 +227,7 @@ impl ListProxy {
         let py = value.py();
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let ctx = ReadCtx::new(doc, &inner);
         let item = base.navigate(&inner)?;
         let target = list_ops::as_array_like(item, "'in'")?;
@@ -311,12 +311,12 @@ impl ListProxy {
         if n > 1 {
             let source = clone_self_item(base, py)?;
             let doc = base.checked_doc(py)?;
-            let mut inner = doc.inner.write().unwrap();
+            let mut inner = doc.inner.write();
             let item = base.navigate_mut(&mut inner)?;
             clone_elements_into(item, &source, n as usize - 1);
         } else if n <= 0 {
             let doc = base.checked_doc(py)?;
-            let mut inner = doc.inner.write().unwrap();
+            let mut inner = doc.inner.write();
             let item = base.navigate_mut(&mut inner)?;
             item_ops::item_clear(item)?;
             base.bump_self(doc);
@@ -344,7 +344,7 @@ impl ListProxy {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
         let removed = {
-            let mut inner = doc.inner.write().unwrap();
+            let mut inner = doc.inner.write();
             let item = base.navigate_mut(&mut inner)?;
             let target = list_ops::as_array_like_mut(item, "pop()")?;
             let (removed, affected_key) = list_ops::list_pop(target, resolved_i64)?;
@@ -358,7 +358,7 @@ impl ListProxy {
     pub fn append(slf: &Bound<'_, Self>, py: Python<'_>, value: Item) -> PyResult<()> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
         let target = list_ops::as_array_like_mut(item, "append()")?;
         list_ops::item_append(target, value)?;
@@ -369,7 +369,7 @@ impl ListProxy {
     pub fn insert(slf: &Bound<'_, Self>, py: Python<'_>, index: i64, value: Item) -> PyResult<()> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
         let target = list_ops::as_array_like_mut(item, "insert()")?;
         let affected = list_ops::item_insert(target, index, value)?;
@@ -387,14 +387,14 @@ impl ListProxy {
         // Find the index under a READ lock so that equality callbacks
         // (which may read the document) don't deadlock.
         let index = {
-            let inner = doc.inner.read().unwrap();
+            let inner = doc.inner.read();
             let ctx = ReadCtx::new(doc, &inner);
             let item = base.navigate(&inner)?;
             let target = list_ops::as_array_like(item, "remove()")?;
             list_ops::item_index(target, value, None, None, &ctx)?
         };
         // Re-acquire as write lock and remove.
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
         let target = list_ops::as_array_like_mut(item, "remove()")?;
         let (_removed, affected_key) = list_ops::item_remove_at(target, index)?;
@@ -413,7 +413,7 @@ impl ListProxy {
         let items = collect_items(values)?;
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
         let target = list_ops::as_array_like_mut(item, "extend()")?;
         list_ops::item_extend(target, items)?;
@@ -428,7 +428,7 @@ impl ListProxy {
     ) -> PyResult<usize> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let ctx = ReadCtx::new(doc, &inner);
         let item = base.navigate(&inner)?;
         let target = list_ops::as_array_like(item, "count()")?;
@@ -445,7 +445,7 @@ impl ListProxy {
     ) -> PyResult<usize> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read().unwrap();
+        let inner = doc.inner.read();
         let ctx = ReadCtx::new(doc, &inner);
         let item = base.navigate(&inner)?;
         let target = list_ops::as_array_like(item, "index()")?;
@@ -464,7 +464,7 @@ impl ListProxy {
     pub fn set_multiline(slf: &Bound<'_, Self>, py: Python<'_>, indent: usize) -> PyResult<()> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write().unwrap();
+        let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
         let target = list_ops::as_array_like_mut(item, "set_multiline()")?;
         list_ops::item_set_multiline(target, indent)

@@ -19,7 +19,7 @@ impl<'py> FromPyObject<'_, 'py> for Item {
 
         if let Ok(doc) = obj.cast::<Document>() {
             let doc = doc.get();
-            let inner = doc.inner.read().unwrap();
+            let inner = doc.inner.read();
             return Ok(Self(inner.as_item().clone()));
         }
 

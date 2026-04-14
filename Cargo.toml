@@ -9,6 +9,7 @@ name = "tomledit"
 crate-type = ["cdylib"]
 
 [dependencies]
+parking_lot = "0.12"
 toml_edit = "0.25.9"
 
 [features]

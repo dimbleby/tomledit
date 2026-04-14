@@ -716,3 +716,41 @@ class TestDocumentAsEqualityOperand:
         doc = Document({"a": 1, "b": 2})
         assert doc == {"a": 1, "b": 2}
         assert doc != {"a": 1, "c": 3}
+
+    def test_aot_contains_different_document(self) -> None:
+        """AoT element_eq → table_eq → with_doc_item_ctx."""
+        doc = Document.parse("[[arr]]\na = 1\n")
+        other = Document({"a": 1})
+        assert other in doc["arr"]
+
+    def test_aot_contains_same_document(self) -> None:
+        doc = Document.parse("[[arr]]\na = 1\n")
+        assert doc not in doc["arr"]
+
+    def test_aot_count_different_document(self) -> None:
+        doc = Document.parse("[[arr]]\na = 1\n[[arr]]\na = 2\n")
+        other = Document({"a": 1})
+        assert doc["arr"].count(other) == 1
+
+    def test_aot_index_different_document(self) -> None:
+        doc = Document.parse("[[arr]]\na = 1\n[[arr]]\na = 2\n")
+        other = Document({"a": 2})
+        assert doc["arr"].index(other) == 1
+
+    def test_aot_remove_different_document(self) -> None:
+        doc = Document.parse("[[arr]]\na = 1\n[[arr]]\na = 2\n")
+        other = Document({"a": 1})
+        doc["arr"].remove(other)
+        assert len(doc["arr"]) == 1
+        assert doc["arr"][0] == {"a": 2}
+
+    def test_inline_array_contains_different_document(self) -> None:
+        """Array of inline tables → value_eq → with_doc_item_ctx."""
+        doc = Document.parse("arr = [{a = 1}]\n")
+        other = Document({"a": 1})
+        assert other in doc["arr"]
+
+    def test_document_eq_self_identity(self) -> None:
+        """Document.__eq__ same-object identity fast path."""
+        doc = Document({"a": 1})
+        assert doc == doc

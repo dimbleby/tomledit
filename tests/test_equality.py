@@ -8,6 +8,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+import pytest
 from typing_extensions import override
 
 from tests.conftest import toml_literal
@@ -613,3 +614,105 @@ class TestMappingEquality:
     def test_document_ne_non_mapping(self) -> None:
         doc = Document({"a": 1})
         assert doc != [("a", 1)]
+
+
+# ---------------------------------------------------------------------------
+# Document as equality operand — lock safety (regression tests)
+# ---------------------------------------------------------------------------
+
+
+class TestDocumentAsEqualityOperand:
+    """Equality with a Document operand must use lock-reuse, not Python callbacks.
+
+    Without the lock-reuse fast path for Document objects, these comparisons
+    would recursively acquire (or write-then-read) the same RwLock, causing
+    undefined behaviour or guaranteed deadlock.
+    """
+
+    def test_proxy_eq_same_document(self) -> None:
+        """ItemProxy.__eq__(own Document) — recursive read lock."""
+        doc = Document.parse("[server]\nport = 8080\n")
+        assert doc["server"] != doc
+
+    def test_proxy_eq_different_document_equal(self) -> None:
+        """ItemProxy.__eq__(other Document) — cross-document, equal content."""
+        doc = Document.parse("[server]\nport = 8080\n")
+        other = Document({"port": 8080})
+        assert doc["server"] == other
+
+    def test_proxy_eq_different_document_not_equal(self) -> None:
+        doc = Document.parse("[server]\nport = 8080\n")
+        other = Document({"port": 9090})
+        assert doc["server"] != other
+
+    def test_list_remove_same_document(self) -> None:
+        """ListProxy.remove(own Document) — write-then-read GUARANTEED deadlock."""
+        doc = Document.parse("arr = [{a = 1}]\n")
+        with pytest.raises(ValueError, match="not in array"):
+            doc["arr"].remove(doc)
+
+    def test_list_remove_different_document(self) -> None:
+        """ListProxy.remove(other Document) — cross-document, matching content."""
+        doc = Document.parse("arr = [{a = 1}, {b = 2}]\n")
+        other = Document({"a": 1})
+        doc["arr"].remove(other)
+        assert len(doc["arr"]) == 1
+        assert doc["arr"][0] == {"b": 2}
+
+    def test_list_contains_same_document(self) -> None:
+        """ListProxy.__contains__(own Document) — recursive read lock."""
+        doc = Document.parse("arr = [{a = 1}]\n")
+        assert doc not in doc["arr"]
+
+    def test_list_contains_different_document(self) -> None:
+        """A different Document whose root matches an array element."""
+        doc = Document.parse("arr = [{a = 1}]\n")
+        other = Document({"a": 1})
+        assert other in doc["arr"]
+
+    def test_list_count_same_document(self) -> None:
+        """ListProxy.count(own Document) — recursive read lock."""
+        doc = Document.parse("arr = [{a = 1}]\n")
+        assert doc["arr"].count(doc) == 0
+
+    def test_list_count_different_document(self) -> None:
+        doc = Document.parse("arr = [{a = 1}]\n")
+        other = Document({"a": 1})
+        assert doc["arr"].count(other) == 1
+
+    def test_list_index_same_document(self) -> None:
+        """ListProxy.index(own Document) — recursive read lock."""
+        doc = Document.parse("arr = [{a = 1}]\n")
+        with pytest.raises(ValueError, match="not in array"):
+            doc["arr"].index(doc)
+
+    def test_list_index_different_document(self) -> None:
+        doc = Document.parse("arr = [{a = 1}]\n")
+        other = Document({"a": 1})
+        assert doc["arr"].index(other) == 0
+
+    def test_values_view_contains_same_document(self) -> None:
+        """ValuesView.__contains__(own Document) — recursive read lock."""
+        doc = Document.parse(
+            toml_literal("""
+            [section]
+            key = 1
+        """)
+        )
+        assert doc not in doc.values()
+
+    def test_items_view_contains_same_document(self) -> None:
+        """ItemsView.__contains__ with (key, Document) tuple."""
+        doc = Document.parse(
+            toml_literal("""
+            [section]
+            key = 1
+        """)
+        )
+        assert ("section", doc) not in doc.items()  # type: ignore[comparison-overlap]
+
+    def test_document_eq_document_else_branch(self) -> None:
+        """Document.__eq__ else branch (non-Document other) still works."""
+        doc = Document({"a": 1, "b": 2})
+        assert doc == {"a": 1, "b": 2}
+        assert doc != {"a": 1, "c": 3}

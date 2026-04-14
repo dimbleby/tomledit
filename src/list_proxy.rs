@@ -330,12 +330,16 @@ impl ListProxy {
         py: Python<'_>,
         index: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
-        // Resolve proxy index before write lock — extract() on a
-        // ScalarItem triggers __index__ which reads the document.
-        let resolved_index = index.map(|i| resolve_proxy(i)).transpose()?.flatten();
-        let index = match (&resolved_index, index) {
-            (Some(resolved), _) => Some(resolved.bind(py) as &Bound<'_, PyAny>),
-            (None, orig) => orig,
+        // Resolve the index to i64 before the write lock.
+        // extract::<i64>() invokes Python's __index__ protocol, which could
+        // read the document and deadlock if the write lock is already held.
+        let resolved_i64: Option<i64> = match index {
+            Some(i) => {
+                let resolved = resolve_proxy(i)?;
+                let key = resolved.as_ref().map_or(i, |v| v.bind(py));
+                Some(key.extract::<i64>()?)
+            }
+            None => None,
         };
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
@@ -343,7 +347,7 @@ impl ListProxy {
             let mut inner = doc.inner.write().unwrap();
             let item = base.navigate_mut(&mut inner)?;
             let target = list_ops::as_array_like_mut(item, "pop()")?;
-            let (removed, affected_key) = list_ops::list_pop(target, index)?;
+            let (removed, affected_key) = list_ops::list_pop(target, resolved_i64)?;
             base.bump_affected(doc, affected_key);
             removed
         };
@@ -380,15 +384,17 @@ impl ListProxy {
         let base = slf.as_super().get();
         let doc = base.document.bind(py).get();
         base.check_fresh(doc)?;
-        let mut inner = doc.inner.write().unwrap();
-        // Find the index under the write lock.  ReadCtx from the write guard
-        // lets same-document proxy comparisons reuse this guard via ptr::eq.
+        // Find the index under a READ lock so that equality callbacks
+        // (which may read the document) don't deadlock.
         let index = {
+            let inner = doc.inner.read().unwrap();
             let ctx = ReadCtx::new(doc, &inner);
             let item = base.navigate(&inner)?;
             let target = list_ops::as_array_like(item, "remove()")?;
             list_ops::item_index(target, value, None, None, &ctx)?
         };
+        // Re-acquire as write lock and remove.
+        let mut inner = doc.inner.write().unwrap();
         let item = base.navigate_mut(&mut inner)?;
         let target = list_ops::as_array_like_mut(item, "remove()")?;
         let (_removed, affected_key) = list_ops::item_remove_at(target, index)?;

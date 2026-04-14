@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import pytest
 
 from tests.conftest import toml_literal
@@ -1578,3 +1581,76 @@ class TestEmptySliceDeletion:
         doc = Document.parse("arr = []\n")
         del doc["arr"][::2]
         assert list(doc["arr"]) == []
+
+
+# ---------------------------------------------------------------------------
+# Write-lock deadlock regression tests
+#
+# These verify that list operations that hold a write lock do not deadlock
+# when Python callbacks (__eq__, __index__) access the same document.
+# Each test should complete instantly; a hang means a deadlock.
+# ---------------------------------------------------------------------------
+
+
+class TestWriteLockDeadlocks:
+    """Deadlocks caused by Python callbacks under a write lock.
+
+    These tests run in subprocesses with a timeout because the bugs cause
+    the process to hang forever.  Once fixed, the subprocess will exit
+    cleanly and the assertions can be checked inline.
+    """
+
+    def test_remove_custom_eq_reads_document(self) -> None:
+        """remove() holds write lock, calls __eq__ → custom __eq__ reads doc."""
+        code = """\
+from tomledit import Document
+
+class Tricky:
+    def __init__(self, doc):
+        self.doc = doc
+    def __eq__(self, other):
+        return len(self.doc) > 0
+
+doc = Document.parse("arr = [1, 2, 3]\\n")
+tricky = Tricky(doc)
+doc["arr"].remove(tricky)
+assert doc["arr"] == [2, 3]
+"""
+        try:
+            result = subprocess.run(  # noqa: S603
+                [sys.executable, "-c", code],
+                timeout=5,
+                capture_output=True,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.xfail("deadlock: write lock held during __eq__ callback")
+        assert result.returncode == 0, result.stderr.decode()
+
+    def test_pop_custom_index_reads_document(self) -> None:
+        """pop() holds write lock, calls __index__ → custom __index__ reads doc."""
+        code = """\
+from tomledit import Document
+
+class Tricky:
+    def __init__(self, doc):
+        self.doc = doc
+    def __index__(self):
+        return len(self.doc["arr"]) - 1
+
+doc = Document.parse("arr = [1, 2, 3]\\n")
+tricky = Tricky(doc)
+val = doc["arr"].pop(tricky)
+assert val == 3
+assert doc["arr"] == [1, 2]
+"""
+        try:
+            result = subprocess.run(  # noqa: S603
+                [sys.executable, "-c", code],
+                timeout=5,
+                capture_output=True,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.xfail("deadlock: write lock held during __index__ callback")
+        assert result.returncode == 0, result.stderr.decode()

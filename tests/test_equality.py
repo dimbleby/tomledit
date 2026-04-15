@@ -523,15 +523,14 @@ class TestNumericTowerEquality:
         assert 1 in doc["arr"]
 
     def test_cross_type_proxy_eq(self) -> None:
-        """Two proxies: int 1 vs float 1.0 — structural eq stays strict."""
+        """Two proxies: int 1 vs float 1.0 — cross-type numeric equality."""
         doc = Document.parse(
             toml_literal("""
             x = 1
             y = 1.0
         """)
         )
-        # Proxy-to-proxy uses TOML structural equality (type-aware)
-        assert doc["x"] != doc["y"]
+        assert doc["x"] == doc["y"]
 
     def test_large_int_proxy_not_equal_to_rounded_python_float(self) -> None:
         """Large integers should not compare equal to rounded IEEE-754 floats."""

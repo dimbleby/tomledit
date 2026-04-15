@@ -39,12 +39,24 @@ fn datetime_eq(a: &toml_edit::Datetime, b: &toml_edit::Datetime) -> bool {
         && normalize_offset(&a.offset) == normalize_offset(&b.offset)
 }
 
+/// Check whether an integer and a float represent the same numeric value,
+/// mirroring Python's cross-type `int == float` semantics.
+fn int_float_eq(i: i64, f: f64) -> bool {
+    // Fast reject: non-finite floats are never equal to an integer.
+    // Then check that the float is a whole number and round-trips exactly.
+    f.is_finite() && f == (i as f64) && (f as i64) == i
+}
+
 /// Compare two toml_edit Values structurally (pure Rust, no Python allocation).
 fn values_structural_eq(a: &toml_edit::Value, b: &toml_edit::Value) -> bool {
     match (a, b) {
         (toml_edit::Value::String(a), toml_edit::Value::String(b)) => a.value() == b.value(),
         (toml_edit::Value::Integer(a), toml_edit::Value::Integer(b)) => a.value() == b.value(),
         (toml_edit::Value::Float(a), toml_edit::Value::Float(b)) => a.value() == b.value(),
+        (toml_edit::Value::Integer(i), toml_edit::Value::Float(f))
+        | (toml_edit::Value::Float(f), toml_edit::Value::Integer(i)) => {
+            int_float_eq(*i.value(), *f.value())
+        }
         (toml_edit::Value::Boolean(a), toml_edit::Value::Boolean(b)) => a.value() == b.value(),
         (toml_edit::Value::Datetime(a), toml_edit::Value::Datetime(b)) => {
             datetime_eq(a.value(), b.value())

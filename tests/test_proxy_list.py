@@ -168,6 +168,28 @@ class TestProxyListMethods:
         with pytest.raises(ValueError, match="not in array"):
             doc["items"].remove("not a dict")
 
+    # -- cross-type numeric equality in remove ----------------------------------
+
+    def test_remove_float_finds_integer(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        doc["arr"].remove(2.0)
+        assert doc["arr"] == [1, 3]
+
+    def test_remove_integer_finds_float(self) -> None:
+        doc = Document.parse("arr = [1.0, 2.0, 3.0]\n")
+        doc["arr"].remove(2)
+        assert doc["arr"] == [1.0, 3.0]
+
+    def test_remove_float_proxy_finds_integer(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\nx = 2.0\n")
+        doc["arr"].remove(doc["x"])
+        assert doc["arr"] == [1, 3]
+
+    def test_remove_integer_proxy_finds_float(self) -> None:
+        doc = Document.parse("arr = [1.0, 2.0, 3.0]\nx = 2\n")
+        doc["arr"].remove(doc["x"])
+        assert doc["arr"] == [1.0, 3.0]
+
     # -- boundary-decoration preservation on removal --------------------------
 
     def test_remove_first_preserves_padded_prefix(self) -> None:

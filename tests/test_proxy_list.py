@@ -1583,19 +1583,23 @@ class TestEmptySliceDeletion:
 # ---------------------------------------------------------------------------
 # Write-lock deadlock regression tests
 #
-# These verify that list operations that hold a write lock do not deadlock
-# when Python callbacks (__eq__, __index__) access the same document.
+# These verify that list operations do not deadlock when Python callbacks
+# (__eq__, __index__) access the same document.
 # Each test should complete instantly; a hang means a deadlock.
 # ---------------------------------------------------------------------------
 
 
 class TestWriteLockDeadlocks:
     """Python callbacks (__eq__, __index__) that read the document must not
-    deadlock when called from list operations that previously held a write lock.
+    deadlock when called from list operations that hold a write lock.
     """
 
     def test_remove_custom_eq_reads_document(self) -> None:
-        """remove() must not deadlock when __eq__ reads the same document."""
+        """remove() must not deadlock when __eq__ reads the same document.
+
+        Non-TOML objects are not found in the array, so remove() raises
+        ValueError rather than searching via Python __eq__.
+        """
 
         class Tricky:
             def __init__(self, doc: Document) -> None:
@@ -1608,8 +1612,8 @@ class TestWriteLockDeadlocks:
 
         doc = Document.parse("arr = [1, 2, 3]\n")
         tricky = Tricky(doc)
-        doc["arr"].remove(tricky)
-        assert doc["arr"] == [2, 3]
+        with pytest.raises(ValueError, match="not in array"):
+            doc["arr"].remove(tricky)
 
     def test_pop_custom_index_reads_document(self) -> None:
         """pop() must not deadlock when __index__ reads the same document."""

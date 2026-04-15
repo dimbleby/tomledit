@@ -1,3 +1,4 @@
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyIterator;
 use toml_edit::DocumentMut as DocumentRs;
@@ -5,7 +6,7 @@ use toml_edit::DocumentMut as DocumentRs;
 use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
-use crate::item_proxy::{ItemProxy, ReadCtx, resolve_proxy};
+use crate::item_proxy::{ItemProxy, ReadCtx, resolve_other_item, resolve_proxy};
 use crate::list_ops;
 
 /// A TOML array or array of tables.
@@ -331,8 +332,9 @@ impl ListProxy {
         index: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         // Resolve the index to i64 before the write lock.
-        // extract::<i64>() invokes Python's __index__ protocol, which could
-        // read the document and deadlock if the write lock is already held.
+        //
+        // extract::<i64>() invokes Python's __index__ protocol, which could read the document and
+        // deadlock if the write lock is already held.
         let resolved_i64: Option<i64> = match index {
             Some(i) => {
                 let resolved = resolve_proxy(i)?;
@@ -382,23 +384,34 @@ impl ListProxy {
     #[pyo3(signature = (value, /))]
     pub fn remove(slf: &Bound<'_, Self>, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
         let base = slf.as_super().get();
-        let doc = base.document.bind(py).get();
-        base.check_fresh(doc)?;
-        // Find the index under a READ lock so that equality callbacks
-        // (which may read the document) don't deadlock.
-        let index = {
-            let inner = doc.inner.read();
-            let ctx = ReadCtx::new(doc, &inner);
-            let item = base.navigate(&inner)?;
-            let target = list_ops::as_array_like(item, "remove()")?;
-            list_ops::item_index(target, value, None, None, &ctx)?
+        let doc = base.checked_doc(py)?;
+
+        // Try to resolve as a proxy or Document under a write lock, comparing in-place without
+        // cloning. ReadCtx handles same-document guard reuse.
+        {
+            let mut inner = doc.inner.write();
+            let resolved = {
+                let ctx = ReadCtx::new(doc, &inner);
+                resolve_other_item(value, &ctx, |needle| needle.clone())?
+            };
+            if let Some(needle) = resolved {
+                let item = base.navigate_mut(&mut inner)?;
+                let affected = list_ops::find_and_remove(item, &needle)?;
+                base.bump_affected(doc, affected);
+                return Ok(());
+            }
+        }
+
+        // Plain Python value — extract before locking since extract may read the document for
+        // nested proxies or Documents.
+        let needle: Item = match value.extract() {
+            Ok(item) => item,
+            Err(_) => return Err(PyValueError::new_err("value not in array")),
         };
-        // Re-acquire as write lock and remove.
         let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
-        let target = list_ops::as_array_like_mut(item, "remove()")?;
-        let (_removed, affected_key) = list_ops::item_remove_at(target, index)?;
-        base.bump_affected(doc, affected_key);
+        let affected = list_ops::find_and_remove(item, &needle.0)?;
+        base.bump_affected(doc, affected);
         Ok(())
     }
 
@@ -408,8 +421,8 @@ impl ListProxy {
         py: Python<'_>,
         values: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        // Collect items before write lock — values may be
-        // the same proxy, and collect_items invokes __iter__.
+        // Collect items before write lock — values may be the same proxy, and collect_items
+        // invokes __iter__.
         let items = collect_items(values)?;
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
@@ -454,12 +467,10 @@ impl ListProxy {
 
     /// Format the array as multiline.
     ///
-    /// Each element is placed on its own line, indented by *indent*
-    /// spaces, with a trailing comma after the last element.
-    /// Use ``.fmt()`` to collapse back to a single line.
+    /// Each element is placed on its own line, indented by *indent* spaces, with a trailing comma
+    /// after the last element. Use ``.fmt()`` to collapse back to a single line.
     ///
-    /// No-op on empty arrays.  Any comments on the array elements will
-    /// be removed.
+    /// No-op on empty arrays.  Any comments on the array elements will be removed.
     #[pyo3(signature = (*, indent=4))]
     pub fn set_multiline(slf: &Bound<'_, Self>, py: Python<'_>, indent: usize) -> PyResult<()> {
         let base = slf.as_super().get();

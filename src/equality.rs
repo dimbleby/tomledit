@@ -79,8 +79,8 @@ fn table_inline_eq(table: &toml_edit::Table, it: &toml_edit::InlineTable) -> boo
 }
 
 /// Compare an Item with a Value across the Table/InlineTable and AoT/Array
-/// boundaries without cloning.
-fn item_value_eq(item: &ItemRs, value: &toml_edit::Value) -> bool {
+/// boundaries.
+pub(crate) fn item_value_eq(item: &ItemRs, value: &toml_edit::Value) -> bool {
     match item {
         ItemRs::Value(v) => values_structural_eq(v, value),
         ItemRs::Table(t) => {
@@ -102,27 +102,30 @@ fn aot_array_eq(aot: &toml_edit::ArrayOfTables, arr: &toml_edit::Array) -> bool 
             .all(|(t, v)| matches!(v, toml_edit::Value::InlineTable(it) if table_inline_eq(t, it)))
 }
 
+/// Compare an Item with a Table across the Table/InlineTable boundary.
+pub(crate) fn item_table_eq(item: &ItemRs, table: &toml_edit::Table) -> bool {
+    match item {
+        ItemRs::Table(t) => tables_structural_eq(t, table),
+        ItemRs::Value(toml_edit::Value::InlineTable(it)) => table_inline_eq(table, it),
+        _ => false,
+    }
+}
+
 pub(crate) fn items_structural_eq(a: &ItemRs, b: &ItemRs) -> bool {
-    match (a, b) {
-        (ItemRs::Value(va), ItemRs::Value(vb)) => values_structural_eq(va, vb),
-        (ItemRs::Table(ta), ItemRs::Table(tb)) => tables_structural_eq(ta, tb),
-        (ItemRs::ArrayOfTables(aa), ItemRs::ArrayOfTables(ab)) => {
-            aa.len() == ab.len()
-                && aa
-                    .iter()
-                    .zip(ab.iter())
-                    .all(|(ta, tb)| tables_structural_eq(ta, tb))
-        }
-        // Cross-type: Table ↔ InlineTable
-        (ItemRs::Table(t), ItemRs::Value(toml_edit::Value::InlineTable(it)))
-        | (ItemRs::Value(toml_edit::Value::InlineTable(it)), ItemRs::Table(t)) => {
-            table_inline_eq(t, it)
-        }
-        // Cross-type: AoT ↔ Array
-        (ItemRs::ArrayOfTables(aot), ItemRs::Value(toml_edit::Value::Array(arr)))
-        | (ItemRs::Value(toml_edit::Value::Array(arr)), ItemRs::ArrayOfTables(aot)) => {
-            aot_array_eq(aot, arr)
-        }
+    match b {
+        ItemRs::Value(v) => item_value_eq(a, v),
+        ItemRs::Table(t) => item_table_eq(a, t),
+        ItemRs::ArrayOfTables(ab) => match a {
+            ItemRs::ArrayOfTables(aa) => {
+                aa.len() == ab.len()
+                    && aa
+                        .iter()
+                        .zip(ab.iter())
+                        .all(|(ta, tb)| tables_structural_eq(ta, tb))
+            }
+            ItemRs::Value(toml_edit::Value::Array(arr)) => aot_array_eq(ab, arr),
+            _ => false,
+        },
         _ => false,
     }
 }

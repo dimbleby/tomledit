@@ -306,23 +306,18 @@ impl DictProxy {
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write();
-        let exists = {
-            let item = base.navigate(&inner)?;
-            dict_ops::item_has_key(item, &key)?
-        };
-        if exists {
-            drop(inner);
-            return base.child_proxy_typed(py, Key::Str(key));
+        {
+            let mut inner = doc.inner.write();
+            let item = base.navigate_mut(&mut inner)?;
+            if !dict_ops::item_has_key(item, &key)? {
+                let default = default.ok_or_else(|| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "setdefault() requires a default value: TOML has no null type",
+                    )
+                })?;
+                dict_ops::set_with_decor_preservation(item, &key, default);
+            }
         }
-        let default = default.ok_or_else(|| {
-            pyo3::exceptions::PyTypeError::new_err(
-                "setdefault() requires a default value: TOML has no null type",
-            )
-        })?;
-        let item = base.navigate_mut(&mut inner)?;
-        dict_ops::set_with_decor_preservation(item, &key, default);
-        drop(inner);
         base.child_proxy_typed(py, Key::Str(key))
     }
 

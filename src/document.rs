@@ -305,19 +305,17 @@ impl Document {
         let key = item_ops::extract_key_str(key)?
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         let doc = slf.get();
-        let mut inner = doc.inner.write();
-        if inner.contains_key(&key) {
-            drop(inner);
-            let proxy = Self::make_proxy(slf, &key);
-            return ItemProxy::into_typed(py, proxy);
+        {
+            let mut inner = doc.inner.write();
+            if !inner.contains_key(&key) {
+                let default = default.ok_or_else(|| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "setdefault() requires a default value: TOML has no null type",
+                    )
+                })?;
+                dict_ops::set_with_decor_preservation(inner.as_item_mut(), &key, default);
+            }
         }
-        let default = default.ok_or_else(|| {
-            pyo3::exceptions::PyTypeError::new_err(
-                "setdefault() requires a default value: TOML has no null type",
-            )
-        })?;
-        dict_ops::set_with_decor_preservation(inner.as_item_mut(), &key, default);
-        drop(inner);
         let proxy = Self::make_proxy(slf, &key);
         ItemProxy::into_typed(py, proxy)
     }

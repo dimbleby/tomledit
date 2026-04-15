@@ -768,6 +768,38 @@ pub(crate) fn item_index(
     Err(PyValueError::new_err("value not in array"))
 }
 
+/// Find the index of the first element structurally equal to `needle`.
+fn item_index_structural(target: ArrayLikeRef<'_>, needle: &ItemRs) -> PyResult<usize> {
+    let len = target.len();
+    for i in 0..len {
+        let found = match &target {
+            ArrayLikeRef::Array(arr) => arr
+                .get(i)
+                .is_some_and(|v| equality::item_value_eq(needle, v)),
+            ArrayLikeRef::Aot(aot) => aot
+                .get(i)
+                .is_some_and(|t| equality::item_table_eq(needle, t)),
+        };
+        if found {
+            return Ok(i);
+        }
+    }
+    Err(PyValueError::new_err("value not in array"))
+}
+
+/// Find and remove the first element structurally equal to `needle`.
+///
+/// Returns the key/index affected for staleness tracking.
+pub(crate) fn find_and_remove(item: &mut ItemRs, needle: &ItemRs) -> PyResult<Affected> {
+    let index = {
+        let target = as_array_like(item, "remove()")?;
+        item_index_structural(target, needle)?
+    };
+    let target = as_array_like_mut(item, "remove()")?;
+    let (_removed, affected) = item_remove_at(target, index)?;
+    Ok(affected)
+}
+
 /// Format an array as multiline, with each element on its own line.
 /// No-op on empty arrays.
 pub(crate) fn item_set_multiline(target: ArrayLikeMut<'_>, indent: usize) -> PyResult<()> {

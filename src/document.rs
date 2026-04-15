@@ -10,7 +10,7 @@ use crate::dict_ops;
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{self, Key, table_to_pydict};
-use crate::item_proxy::{ItemProxy, ReadCtx};
+use crate::item_proxy::{ItemProxy, with_resolved_item};
 use crate::trie::MutationTrie;
 use crate::value::Table;
 use crate::views::{ItemsView, KeysView, ValuesView};
@@ -357,9 +357,10 @@ impl Document {
                 other_inner.as_item(),
             ))
         } else {
-            let inner = self.inner.read();
-            let ctx = ReadCtx::new(self, &inner);
-            equality::table_eq(inner.as_table(), other, &ctx)
+            Ok(with_resolved_item(other, self, |inner, needle| {
+                Ok(equality::items_structural_eq(inner.as_item(), needle))
+            })?
+            .unwrap_or(false))
         }
     }
 

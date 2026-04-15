@@ -10,6 +10,7 @@ use crate::comments;
 use crate::dict_proxy::DictProxy;
 use crate::document::Document;
 use crate::equality;
+use crate::item::Item;
 use crate::item_ops::{self, Affected, Key};
 use crate::list_proxy::ListProxy;
 use crate::scalar_proxy::ScalarProxy;
@@ -111,6 +112,49 @@ fn resolve_proxy_item<R>(
     let inner = doc.inner.read();
     let item = proxy.navigate(&inner)?;
     Ok(Some(f(item)))
+}
+
+/// Try to extract a Python object as a `toml_edit::Item` for equality
+/// comparison.
+///
+/// Returns `None` for objects that are not representable as TOML values
+/// (the caller should treat this as "not equal").
+///
+/// Only `TypeError` is caught — other exceptions from the extraction
+/// (e.g. a mapping whose `items()` raises) propagate to the caller.
+fn extract_for_eq(other: &Bound<'_, PyAny>) -> PyResult<Option<Item>> {
+    match other.extract::<Item>() {
+        Ok(item) => Ok(Some(item)),
+        Err(e) if e.is_instance_of::<PyTypeError>(other.py()) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Resolve a Python value to a `toml_edit::Item` and call `f` with it.
+///
+/// Fast path: if `value` is a proxy or `Document`, `f` runs under the
+/// existing read lock — zero cloning.  Slow path: the value is extracted
+/// to an owned `Item` (no lock held), then `f` runs under a fresh lock.
+///
+/// Returns `None` when the value is not representable as a TOML item
+/// (the caller should treat this as "not found" / "not equal").
+pub(crate) fn with_resolved_item<R>(
+    value: &Bound<'_, PyAny>,
+    doc: &Document,
+    f: impl Fn(&DocumentRs, &ItemRs) -> PyResult<R>,
+) -> PyResult<Option<R>> {
+    {
+        let inner = doc.inner.read();
+        let ctx = ReadCtx::new(doc, &inner);
+        if let Some(result) = resolve_other_item(value, &ctx, |item| f(&inner, item))? {
+            return result.map(Some);
+        }
+    }
+    let Some(extracted) = extract_for_eq(value)? else {
+        return Ok(None);
+    };
+    let inner = doc.inner.read();
+    f(&inner, &extracted.0).map(Some)
 }
 
 /// A live reference to a TOML value inside a Document.
@@ -389,10 +433,11 @@ impl ItemProxy {
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = other.py();
         let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read();
-        let ctx = ReadCtx::new(doc, &inner);
-        let item = self.navigate(&inner)?;
-        equality::item_eq(item, other, &ctx)
+        Ok(with_resolved_item(other, doc, |inner, needle| {
+            let item = self.navigate(inner)?;
+            Ok(equality::items_structural_eq(item, needle))
+        })?
+        .unwrap_or(false))
     }
 
     /// The underlying data as a native Python object (int, str, list, dict, etc).

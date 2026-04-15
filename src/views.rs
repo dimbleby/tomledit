@@ -15,7 +15,7 @@ use crate::dict_ops;
 use crate::document::Document;
 use crate::equality;
 use crate::item_ops::{self, Key};
-use crate::item_proxy::{ItemProxy, ReadCtx};
+use crate::item_proxy::{ItemProxy, with_resolved_item};
 
 use toml_edit::DocumentMut as DocumentRs;
 
@@ -301,16 +301,14 @@ impl ValuesView {
     fn __contains__(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
-        let ctx = ReadCtx::new(doc, &inner);
-        let parent = item_ops::navigate_path(&inner, &self.path)?;
-        let tbl = dict_ops::as_dict_like(parent, "__contains__")?;
-        for (_, item) in tbl.iter() {
-            if equality::item_eq(item, value, &ctx)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        Ok(with_resolved_item(value, doc, |inner, needle| {
+            let parent = item_ops::navigate_path(inner, &self.path)?;
+            let tbl = dict_ops::as_dict_like(parent, "__contains__")?;
+            Ok(tbl
+                .iter()
+                .any(|(_, item)| equality::items_structural_eq(item, needle)))
+        })?
+        .unwrap_or(false))
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
@@ -397,13 +395,11 @@ impl ItemsView {
 
         let doc = self.document.bind(py).get();
         doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
-        let ctx = ReadCtx::new(doc, &inner);
-        let target = item_ops::navigate_path(&inner, &self.path)?.get(key);
-        match target {
-            Some(item_rs) => equality::item_eq(item_rs, &value, &ctx),
-            None => Ok(false),
-        }
+        Ok(with_resolved_item(&value, doc, |inner, needle| {
+            let target = item_ops::navigate_path(inner, &self.path)?.get(&key);
+            Ok(target.is_some_and(|item_rs| equality::items_structural_eq(item_rs, needle)))
+        })?
+        .unwrap_or(false))
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {

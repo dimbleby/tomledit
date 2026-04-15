@@ -629,15 +629,15 @@ class TestItemParse:
 
 
 # ---------------------------------------------------------------------------
-# Tuple-to-array conversion
+# Tuple rejection
 # ---------------------------------------------------------------------------
 
 
-class TestTupleToArray:
-    def test_mixed_tuple_and_list(self) -> None:
+class TestTupleRejection:
+    def test_tuple_assignment_raises(self) -> None:
         doc = Document.parse("x = 1\n")
-        doc["x"] = (1, [2, 3])
-        assert doc["x"] == [1, [2, 3]]
+        with pytest.raises(TypeError, match="tuple"):
+            doc["x"] = (1, 2, 3)
 
 
 # ---------------------------------------------------------------------------

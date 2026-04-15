@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import date, datetime, time, timedelta, timezone
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -753,3 +753,48 @@ class TestDocumentAsEqualityOperand:
         """Document.__eq__ same-object identity fast path."""
         doc = Document({"a": 1})
         assert doc == doc
+
+
+class TestEqualityErrorPropagation:
+    """Non-TypeError exceptions from extraction must propagate, not silently
+    return False."""
+
+    def test_eq_propagates_mapping_error(self) -> None:
+        msg = "boom"
+
+        class BadMapping(Mapping[str, object]):
+            @override
+            def __getitem__(self, key: str) -> object:
+                raise RuntimeError(msg)
+
+            @override
+            def __iter__(self) -> Iterator[str]:
+                raise RuntimeError(msg)
+
+            @override
+            def __len__(self) -> int:
+                return 1
+
+        doc = Document({"a": 1})
+        with pytest.raises(RuntimeError, match="boom"):
+            assert doc == BadMapping()
+
+    def test_contains_propagates_mapping_error(self) -> None:
+        msg = "boom"
+
+        class BadMapping(Mapping[str, object]):
+            @override
+            def __getitem__(self, key: str) -> object:
+                raise RuntimeError(msg)
+
+            @override
+            def __iter__(self) -> Iterator[str]:
+                raise RuntimeError(msg)
+
+            @override
+            def __len__(self) -> int:
+                return 1
+
+        doc = Document.parse("arr = [{a = 1}]\n")
+        with pytest.raises(RuntimeError, match="boom"):
+            assert BadMapping() in doc["arr"]

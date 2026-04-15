@@ -6,7 +6,9 @@ use toml_edit::DocumentMut as DocumentRs;
 use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
-use crate::item_proxy::{ItemProxy, ReadCtx, resolve_other_item, resolve_proxy};
+use crate::item_proxy::{
+    ItemProxy, ReadCtx, resolve_other_item, resolve_proxy, with_resolved_item,
+};
 use crate::list_ops;
 
 /// A TOML array or array of tables.
@@ -228,16 +230,12 @@ impl ListProxy {
         let py = value.py();
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read();
-        let ctx = ReadCtx::new(doc, &inner);
-        let item = base.navigate(&inner)?;
-        let target = list_ops::as_array_like(item, "'in'")?;
-        for i in 0..target.len() {
-            if list_ops::element_eq(&target, i, value, &ctx)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        Ok(with_resolved_item(value, doc, |inner, needle| {
+            let item = base.navigate(inner)?;
+            let target = list_ops::as_array_like(item, "'in'")?;
+            Ok(list_ops::contains_structural(target, needle))
+        })?
+        .unwrap_or(false))
     }
 
     // ---- list-specific methods ----
@@ -441,11 +439,12 @@ impl ListProxy {
     ) -> PyResult<usize> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read();
-        let ctx = ReadCtx::new(doc, &inner);
-        let item = base.navigate(&inner)?;
-        let target = list_ops::as_array_like(item, "count()")?;
-        list_ops::item_count(target, value, &ctx)
+        Ok(with_resolved_item(value, doc, |inner, needle| {
+            let item = base.navigate(inner)?;
+            let target = list_ops::as_array_like(item, "count()")?;
+            Ok(list_ops::item_count_structural(target, needle))
+        })?
+        .unwrap_or(0))
     }
 
     #[pyo3(signature = (value, start=None, stop=None, /))]
@@ -458,11 +457,12 @@ impl ListProxy {
     ) -> PyResult<usize> {
         let base = slf.as_super().get();
         let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read();
-        let ctx = ReadCtx::new(doc, &inner);
-        let item = base.navigate(&inner)?;
-        let target = list_ops::as_array_like(item, "index()")?;
-        list_ops::item_index(target, value, start, stop, &ctx)
+        with_resolved_item(value, doc, |inner, needle| {
+            let item = base.navigate(inner)?;
+            let target = list_ops::as_array_like(item, "index()")?;
+            list_ops::item_index_structural_range(target, needle, start, stop)
+        })?
+        .ok_or_else(|| PyValueError::new_err("value not in array"))
     }
 
     /// Format the array as multiline.

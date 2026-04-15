@@ -9,7 +9,6 @@ use crate::comments::CommentPreservation;
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{Affected, into_value};
-use crate::item_proxy::ReadCtx;
 
 // ---------------------------------------------------------------------------
 // Array-like enum — constrains list operations to valid item types
@@ -717,70 +716,43 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
     }
 }
 
-/// Test whether element at `index` in `target` equals `value`.
-pub(crate) fn element_eq(
-    target: &ArrayLikeRef<'_>,
-    index: usize,
-    value: &Bound<'_, PyAny>,
-    ctx: &ReadCtx<'_>,
-) -> PyResult<bool> {
+/// Test whether the element at `index` structurally equals `needle`.
+fn structural_element_eq(target: &ArrayLikeRef<'_>, index: usize, needle: &ItemRs) -> bool {
     match target {
-        ArrayLikeRef::Array(arr) => match arr.get(index) {
-            Some(v) => equality::value_eq(v, value, ctx),
-            None => Ok(false),
-        },
-        ArrayLikeRef::Aot(aot) => match aot.get(index) {
-            Some(table) => equality::table_eq(table, value, ctx),
-            None => Ok(false),
-        },
+        ArrayLikeRef::Array(arr) => arr
+            .get(index)
+            .is_some_and(|v| equality::item_value_eq(needle, v)),
+        ArrayLikeRef::Aot(aot) => aot
+            .get(index)
+            .is_some_and(|t| equality::item_table_eq(needle, t)),
     }
 }
 
-pub(crate) fn item_count(
-    target: ArrayLikeRef<'_>,
-    value: &Bound<'_, PyAny>,
-    ctx: &ReadCtx<'_>,
-) -> PyResult<usize> {
-    let mut count = 0;
-    for i in 0..target.len() {
-        if element_eq(&target, i, value, ctx)? {
-            count += 1;
-        }
-    }
-    Ok(count)
+/// Check if any element structurally equals `needle`.
+pub(crate) fn contains_structural(target: ArrayLikeRef<'_>, needle: &ItemRs) -> bool {
+    (0..target.len()).any(|i| structural_element_eq(&target, i, needle))
 }
 
-pub(crate) fn item_index(
+/// Count how many elements structurally equal `needle`.
+pub(crate) fn item_count_structural(target: ArrayLikeRef<'_>, needle: &ItemRs) -> usize {
+    (0..target.len())
+        .filter(|&i| structural_element_eq(&target, i, needle))
+        .count()
+}
+
+/// Find the index of the first element structurally equal to `needle`
+/// within the range `[start, stop)`.
+pub(crate) fn item_index_structural_range(
     target: ArrayLikeRef<'_>,
-    value: &Bound<'_, PyAny>,
+    needle: &ItemRs,
     start: Option<i64>,
     stop: Option<i64>,
-    ctx: &ReadCtx<'_>,
 ) -> PyResult<usize> {
     let len = target.len();
     let start = clamp_index(start.unwrap_or(0), len);
     let stop = clamp_index(stop.unwrap_or(len as i64), len);
     for i in start..stop {
-        if element_eq(&target, i, value, ctx)? {
-            return Ok(i);
-        }
-    }
-    Err(PyValueError::new_err("value not in array"))
-}
-
-/// Find the index of the first element structurally equal to `needle`.
-fn item_index_structural(target: ArrayLikeRef<'_>, needle: &ItemRs) -> PyResult<usize> {
-    let len = target.len();
-    for i in 0..len {
-        let found = match &target {
-            ArrayLikeRef::Array(arr) => arr
-                .get(i)
-                .is_some_and(|v| equality::item_value_eq(needle, v)),
-            ArrayLikeRef::Aot(aot) => aot
-                .get(i)
-                .is_some_and(|t| equality::item_table_eq(needle, t)),
-        };
-        if found {
+        if structural_element_eq(&target, i, needle) {
             return Ok(i);
         }
     }
@@ -793,7 +765,7 @@ fn item_index_structural(target: ArrayLikeRef<'_>, needle: &ItemRs) -> PyResult<
 pub(crate) fn find_and_remove(item: &mut ItemRs, needle: &ItemRs) -> PyResult<Affected> {
     let index = {
         let target = as_array_like(item, "remove()")?;
-        item_index_structural(target, needle)?
+        item_index_structural_range(target, needle, None, None)?
     };
     let target = as_array_like_mut(item, "remove()")?;
     let (_removed, affected) = item_remove_at(target, index)?;

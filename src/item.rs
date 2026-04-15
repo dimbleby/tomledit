@@ -3,7 +3,7 @@ use crate::item_proxy::ItemProxy;
 use crate::value::{ArrayOfTables, Table, Value};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyMapping, PyTuple};
+use pyo3::types::{PyList, PyMapping};
 use toml_edit::Item as ItemRs;
 
 pub(crate) struct Item(pub(crate) ItemRs);
@@ -34,7 +34,7 @@ impl<'py> FromPyObject<'_, 'py> for Item {
             return Ok(Self(ItemRs::Table(table.0)));
         }
 
-        if (obj.is_instance_of::<PyList>() || obj.is_instance_of::<PyTuple>())
+        if obj.is_instance_of::<PyList>()
             && obj.len().is_ok_and(|n| n > 0)
             && let Ok(array_of_tables) = ArrayOfTables::extract(obj)
         {

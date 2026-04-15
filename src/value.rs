@@ -5,7 +5,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{
     PyBool, PyDate, PyDateTime, PyDelta, PyFloat, PyInt, PyList, PyMapping, PySequence, PyString,
-    PyTime, PyTuple,
+    PyTime,
 };
 
 use crate::datetime_compat::{PyDateAccess, PyDeltaAccess, PyTimeAccess};
@@ -262,10 +262,10 @@ impl<'py> FromPyObject<'_, 'py> for Value {
             return Ok(Self(ValueRs::from(inline_table.0)));
         }
 
-        // Only accept list and tuple as TOML arrays.  Other sequence types
+        // Only accept list as TOML arrays.  Tuples and other sequence types
         // (bytes, bytearray, memoryview, range, …) don't have obvious TOML
         // semantics.  Users can wrap them with list() if needed.
-        if obj.is_instance_of::<PyList>() || obj.is_instance_of::<PyTuple>() {
+        if obj.is_instance_of::<PyList>() {
             let py_sequence = obj.cast::<PySequence>()?;
             let array: Array = py_sequence.extract()?;
             return Ok(Self(ValueRs::from(array.0)));

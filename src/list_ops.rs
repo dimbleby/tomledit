@@ -100,12 +100,42 @@ fn multiline_prefix(arr: &toml_edit::Array) -> Option<String> {
     indent_only(raw)
 }
 
-/// Apply multiline decor to a newly created value, matching the array's style.
-fn apply_multiline_decor(arr: &toml_edit::Array, v: &mut ValueRs) {
+/// For a single-line array, return the prefix a newly inserted element
+/// should have, matching the array's inter-element separator.  Returns
+/// `None` for multiline or empty arrays.
+pub(crate) fn single_line_separator(arr: &toml_edit::Array) -> Option<String> {
+    if multiline_prefix(arr).is_some() {
+        return None;
+    }
+    inter_element_prefix(arr)
+}
+
+/// The prefix of an existing non-first element — the whitespace that
+/// follows a comma in a single-line array.  Falls back to `" "` when the
+/// array has only one element; `None` when the array is empty.
+///
+/// Only meaningful for single-line arrays; on a multiline array element 1's
+/// prefix includes the line break and possibly a block comment.
+fn inter_element_prefix(arr: &toml_edit::Array) -> Option<String> {
+    if arr.is_empty() {
+        return None;
+    }
+    let sep = arr
+        .get(1)
+        .and_then(|e| e.decor().prefix())
+        .and_then(|r| r.as_str())
+        .unwrap_or(" ");
+    Some(sep.to_string())
+}
+
+/// Apply decor to a newly created value, matching the array's existing style.
+fn apply_element_decor(arr: &toml_edit::Array, v: &mut ValueRs) {
     if let Some(prefix) = multiline_prefix(arr) {
         let decor = v.decor_mut();
         decor.set_prefix(prefix);
         decor.set_suffix("");
+    } else if let Some(sep) = inter_element_prefix(arr) {
+        v.decor_mut().set_prefix(sep);
     }
 }
 
@@ -594,7 +624,7 @@ pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()>
             let mut ic = arr.save_inline_comments();
             let mut v = into_value(value)?;
             let inline = comments::take_value_inline_comment(&mut v);
-            apply_multiline_decor(arr, &mut v);
+            apply_element_decor(arr, &mut v);
             arr.push(v);
             ic.push(inline);
             arr.restore_inline_comments(&ic);
@@ -627,7 +657,7 @@ pub(crate) fn item_insert(
             let mut ic = arr.save_inline_comments();
             let mut v = into_value(value)?;
             let inline = comments::take_value_inline_comment(&mut v);
-            apply_multiline_decor(arr, &mut v);
+            apply_element_decor(arr, &mut v);
             arr.insert(resolved, v);
             ic.insert(resolved, inline);
             arr.restore_inline_comments(&ic);
@@ -693,7 +723,7 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
             let mut ic = arr.save_inline_comments();
             for mut v in converted {
                 let inline = comments::take_value_inline_comment(&mut v);
-                apply_multiline_decor(arr, &mut v);
+                apply_element_decor(arr, &mut v);
                 arr.push(v);
                 ic.push(inline);
             }

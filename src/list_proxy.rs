@@ -46,8 +46,18 @@ fn clone_elements_into(dest: &mut toml_edit::Item, source: &toml_edit::Item, n: 
             toml_edit::Item::Value(toml_edit::Value::Array(src_arr)),
         ) => {
             for _ in 0..n {
-                for v in src_arr.iter() {
-                    dest_arr.push_formatted(v.clone());
+                for (src_i, v) in src_arr.iter().enumerate() {
+                    let mut v = v.clone();
+                    // Source element 0 has no leading separator; for a
+                    // single-line seam, inject the destination's.  Multiline
+                    // element-0 prefixes already carry `\n`-indent (and
+                    // possibly a block comment) and are left alone.
+                    if src_i == 0
+                        && let Some(sep) = list_ops::single_line_separator(dest_arr)
+                    {
+                        v.decor_mut().set_prefix(sep);
+                    }
+                    dest_arr.push_formatted(v);
                 }
             }
             true

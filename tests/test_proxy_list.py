@@ -787,6 +787,49 @@ class TestMul:
             ]
         """)
 
+    def test_mul_single_line_spacing(self) -> None:
+        """Repeated single-line arrays keep the ', ' separator at every seam."""
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        assert (doc["arr"] * 2).as_toml() == "[1, 2, 3, 1, 2, 3]"
+        assert (3 * doc["arr"]).as_toml() == "[1, 2, 3, 1, 2, 3, 1, 2, 3]"
+
+    def test_mul_no_space_style_preserved(self) -> None:
+        """A no-space source stays no-space when repeated."""
+        doc = Document.parse("arr = [1,2,3]\n")
+        assert (doc["arr"] * 2).as_toml() == "[1,2,3,1,2,3]"
+        assert (3 * doc["arr"]).as_toml() == "[1,2,3,1,2,3,1,2,3]"
+
+    def test_add_single_line_spacing(self) -> None:
+        """Concatenating single-line arrays keeps the ', ' separator at the seam."""
+        doc = Document({"a": [1, 2], "b": [3, 4]})
+        assert (doc["a"] + doc["b"]).as_toml() == "[1, 2, 3, 4]"
+        assert (doc["a"] + [5, 6]).as_toml() == "[1, 2, 5, 6]"
+        assert ([0] + doc["a"]).as_toml() == "[0, 1, 2]"
+
+    def test_add_no_space_style_preserved(self) -> None:
+        """Concatenation onto a no-space array stays no-space."""
+        doc = Document.parse("a = [1,2]\nb = [3,4]\n")
+        assert (doc["a"] + doc["b"]).as_toml() == "[1,2,3,4]"
+        assert (doc["a"] + [5, 6]).as_toml() == "[1,2,5,6]"
+
+    def test_append_no_space_style_preserved(self) -> None:
+        """append() on a no-space array stays no-space."""
+        doc = Document.parse("arr = [1,2,3]\n")
+        doc["arr"].append(4)
+        assert doc.as_toml() == "arr = [1,2,3,4]\n"
+
+    def test_extend_no_space_style_preserved(self) -> None:
+        """extend() on a no-space array stays no-space."""
+        doc = Document.parse("arr = [1,2,3]\n")
+        doc["arr"].extend([4, 5])
+        assert doc.as_toml() == "arr = [1,2,3,4,5]\n"
+
+    def test_insert_no_space_style_preserved(self) -> None:
+        """insert() at the end of a no-space array stays no-space."""
+        doc = Document.parse("arr = [1,2,3]\n")
+        doc["arr"].insert(3, 4)
+        assert doc.as_toml() == "arr = [1,2,3,4]\n"
+
 
 # ---------------------------------------------------------------------------
 # count() and index()

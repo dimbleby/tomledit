@@ -338,14 +338,21 @@ fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
 }
 
 fn require_table(item: Item) -> PyResult<toml_edit::Table> {
-    match item.0 {
-        ItemRs::Table(t) => Ok(t),
-        ItemRs::Value(ValueRs::InlineTable(it)) => Ok(it.into_table()),
-        other => Err(pyo3::exceptions::PyTypeError::new_err(format!(
-            "cannot append {} to array of tables (expected a table/dict)",
-            other.type_name()
-        ))),
-    }
+    let mut table = match item.0 {
+        ItemRs::Table(t) => t,
+        ItemRs::Value(ValueRs::InlineTable(it)) => it.into_table(),
+        other => {
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "cannot append {} to array of tables (expected a table/dict)",
+                other.type_name()
+            )));
+        }
+    };
+    // Clear any source position — when a table is cloned from another
+    // document, its span would otherwise cause toml_edit to interleave the
+    // rendering of AoT entries in span order rather than push order.
+    table.set_position(None);
+    Ok(table)
 }
 
 /// Clamp a signed index to `0..len` (negative counts from end, out-of-range clamps).
@@ -825,7 +832,11 @@ pub(crate) fn clone_elements_into(dest: &mut ItemRs, source: ArrayLikeRef<'_>, n
         (ItemRs::ArrayOfTables(dest_aot), ArrayLikeRef::Aot(src_aot)) => {
             for _ in 0..n {
                 for t in src_aot.iter() {
-                    dest_aot.push(t.clone());
+                    let mut t = t.clone();
+                    // Clear source position so toml_edit renders the cloned
+                    // entry in push order rather than interleaving it by span.
+                    t.set_position(None);
+                    dest_aot.push(t);
                     fix_inserted_aot_spacing(dest_aot, dest_aot.len() - 1);
                 }
             }

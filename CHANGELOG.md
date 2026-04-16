@@ -8,6 +8,10 @@
   the same document.
 - Fix `aot *= n` losing blank-line spacing at the seam between the original
   entries and the repeated copies.
+- Fix AoT operations (`append`, `insert`, `extend`, `+=`) interleaving
+  entries by source span when the source tables came from another parsed
+  document.  Cloned table positions are now cleared so rendering follows
+  push order.
 
 ## 1.0.0 (16 April 2026)
 

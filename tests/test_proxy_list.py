@@ -398,6 +398,30 @@ class TestProxyListMethods:
             name = "c"
         """)
 
+    def test_append_aot_entry_from_other_document(self) -> None:
+        """Appending an AoT entry from another document renders in push order."""
+        doc = Document.parse(
+            toml_literal("""
+            [[items]]
+            name = "a"
+
+            [[items]]
+            name = "b"
+            """)
+        )
+        other = Document.parse('[[src]]\nname = "c"\n')
+        doc["items"].append(other["src"][0])
+        assert doc.as_toml() == toml_literal("""
+            [[items]]
+            name = "a"
+
+            [[items]]
+            name = "b"
+
+            [[items]]
+            name = "c"
+        """)
+
     def test_append_aot_compact(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -582,6 +606,75 @@ class TestIadd:
         doc = Document.parse("b = [1, 2, 3]\n[[a]]\nx = 1\n")
         with pytest.raises(TypeError):
             doc["a"].extend(doc["b"])
+
+    def test_extend_aot_from_other_document_preserves_order(self) -> None:
+        """Extending an AoT with an AoT from another document appends in order.
+
+        Without clearing source positions, toml_edit renders AoT entries in
+        span-position order, which interleaves entries cloned from another
+        document.
+        """
+        text = toml_literal("""
+            [[a]]
+            x = 1
+
+            [[a]]
+            x = 2
+        """)
+        doc = Document.parse(text)
+        doc2 = Document.parse(text)
+        doc["a"].extend(doc2["a"])
+        assert [dict(t) for t in doc["a"]] == [
+            {"x": 1},
+            {"x": 2},
+            {"x": 1},
+            {"x": 2},
+        ]
+        assert doc.as_toml() == toml_literal("""
+            [[a]]
+            x = 1
+
+            [[a]]
+            x = 2
+
+            [[a]]
+            x = 1
+
+            [[a]]
+            x = 2
+        """)
+
+    def test_iadd_aot_from_other_document_preserves_order(self) -> None:
+        """`aot += other_aot` from a different document appends in order."""
+        text = toml_literal("""
+            [[a]]
+            x = 1
+
+            [[a]]
+            x = 2
+        """)
+        doc = Document.parse(text)
+        doc2 = Document.parse(text)
+        doc["a"] += doc2["a"]
+        assert [dict(t) for t in doc["a"]] == [
+            {"x": 1},
+            {"x": 2},
+            {"x": 1},
+            {"x": 2},
+        ]
+        assert doc.as_toml() == toml_literal("""
+            [[a]]
+            x = 1
+
+            [[a]]
+            x = 2
+
+            [[a]]
+            x = 1
+
+            [[a]]
+            x = 2
+        """)
 
 
 class TestAdd:

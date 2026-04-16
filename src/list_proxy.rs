@@ -28,8 +28,7 @@ impl ListProxy {
 
 /// Read a proxy's document and clone the underlying `toml_edit::Item`.
 fn clone_self_item(base: &ItemProxy, py: Python<'_>) -> PyResult<toml_edit::Item> {
-    let doc = base.checked_doc(py)?;
-    let inner = doc.inner.read();
+    let (_doc, inner) = base.read_checked(py)?;
     Ok(base.navigate(&inner)?.clone())
 }
 
@@ -111,12 +110,11 @@ impl ListProxy {
         let py = key.py();
         let resolved = list_ops::resolve_subscript_key(py, key)?;
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
 
         match resolved {
             SubscriptKey::Slice(slice) => {
                 let indices = {
-                    let inner = doc.inner.read();
+                    let (_doc, inner) = base.read_checked(py)?;
                     let item = base.navigate(&inner)?;
                     let target = list_ops::as_array_like(item, "slicing")?;
                     let si = slice.indices(target.len() as isize)?;
@@ -130,7 +128,7 @@ impl ListProxy {
             }
             SubscriptKey::Int(i) => {
                 let idx = {
-                    let inner = doc.inner.read();
+                    let (_doc, inner) = base.read_checked(py)?;
                     let item = base.navigate(&inner)?;
                     list_ops::require_array_index(item, i)?
                 };
@@ -153,8 +151,7 @@ impl ListProxy {
                 // Collect items before write lock — value may be the same proxy.
                 let values = collect_items(value)?;
                 let base = slf.as_super().get();
-                let doc = base.checked_doc(py)?;
-                let mut inner = doc.inner.write();
+                let (doc, mut inner) = base.write_checked(py)?;
                 let item = base.navigate_mut(&mut inner)?;
                 let target = list_ops::as_array_like_mut(item, "slice assignment")?;
                 let si = slice.indices(target.len() as isize)?;
@@ -176,8 +173,7 @@ impl ListProxy {
                 // Extract before write lock — value may be a proxy from the same document.
                 let value: Item = value.extract()?;
                 let base = slf.as_super().get();
-                let doc = base.checked_doc(py)?;
-                let mut inner = doc.inner.write();
+                let (doc, mut inner) = base.write_checked(py)?;
                 let item = base.navigate_mut(&mut inner)?;
                 let target = list_ops::as_array_like_mut(item, "__setitem__")?;
                 let replaced_key = list_ops::item_setitem_int(target, i, value)?;
@@ -192,8 +188,7 @@ impl ListProxy {
         let py = key.py();
         let resolved = list_ops::resolve_subscript_key(py, key)?;
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write();
+        let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
 
         match resolved {
@@ -218,8 +213,7 @@ impl ListProxy {
 
     pub fn __len__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<usize> {
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = base.read_checked(py)?;
         let item = base.navigate(&inner)?;
         let target = list_ops::as_array_like(item, "__len__")?;
         Ok(target.len())
@@ -227,9 +221,8 @@ impl ListProxy {
 
     pub fn __iter__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
         let len = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = base.read_checked(py)?;
             let item = base.navigate(&inner)?;
             list_ops::as_array_like(item, "__iter__")?.len()
         };
@@ -243,12 +236,17 @@ impl ListProxy {
     pub fn __contains__(slf: &Bound<'_, Self>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let py = value.py();
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
-        Ok(with_resolved_item(value, doc, |inner, needle| {
-            let item = base.navigate(inner)?;
-            let target = list_ops::as_array_like(item, "'in'")?;
-            Ok(list_ops::contains_structural(target, needle))
-        })?
+        let doc = base.doc(py);
+        Ok(with_resolved_item(
+            value,
+            doc,
+            |d| base.check_fresh(d),
+            |inner, needle| {
+                let item = base.navigate(inner)?;
+                let target = list_ops::as_array_like(item, "'in'")?;
+                Ok(list_ops::contains_structural(target, needle))
+            },
+        )?
         .unwrap_or(false))
     }
 
@@ -314,8 +312,7 @@ impl ListProxy {
         if n == 1 {
             return Ok(());
         }
-        let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write();
+        let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         if n <= 0 {
             item_ops::item_clear(item)?;
@@ -345,9 +342,8 @@ impl ListProxy {
             None => None,
         };
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
         let removed = {
-            let mut inner = doc.inner.write();
+            let (doc, mut inner) = base.write_checked(py)?;
             let item = base.navigate_mut(&mut inner)?;
             let target = list_ops::as_array_like_mut(item, "pop()")?;
             let (removed, affected_key) = list_ops::list_pop(target, resolved_i64)?;
@@ -360,8 +356,7 @@ impl ListProxy {
     #[pyo3(signature = (value, /))]
     pub fn append(slf: &Bound<'_, Self>, py: Python<'_>, value: Item) -> PyResult<()> {
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write();
+        let (_doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         let target = list_ops::as_array_like_mut(item, "append()")?;
         list_ops::item_append(target, value)?;
@@ -371,8 +366,7 @@ impl ListProxy {
     #[pyo3(signature = (index, value, /))]
     pub fn insert(slf: &Bound<'_, Self>, py: Python<'_>, index: i64, value: Item) -> PyResult<()> {
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write();
+        let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         let target = list_ops::as_array_like_mut(item, "insert()")?;
         let affected = list_ops::item_insert(target, index, value)?;
@@ -385,12 +379,11 @@ impl ListProxy {
     #[pyo3(signature = (value, /))]
     pub fn remove(slf: &Bound<'_, Self>, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
 
         // Try to resolve as a proxy or Document under a write lock, comparing in-place without
         // cloning. ReadCtx handles same-document guard reuse.
         {
-            let mut inner = doc.inner.write();
+            let (doc, mut inner) = base.write_checked(py)?;
             let resolved = {
                 let ctx = ReadCtx::new(doc, &inner);
                 resolve_other_item(value, &ctx, |needle| needle.clone())?
@@ -409,7 +402,7 @@ impl ListProxy {
             Ok(item) => item,
             Err(_) => return Err(PyValueError::new_err("value not in array")),
         };
-        let mut inner = doc.inner.write();
+        let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         let affected = list_ops::find_and_remove(item, &needle.0)?;
         base.bump_affected(doc, affected);
@@ -424,43 +417,47 @@ impl ListProxy {
     ) -> PyResult<()> {
         let base = slf.as_super().get();
         let source = prepare_source(values)?;
-        let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write();
+        let (_doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         append_source(item, source, "extend()")
     }
 
     #[pyo3(signature = (value, /))]
-    pub fn count(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        value: &Bound<'_, PyAny>,
-    ) -> PyResult<usize> {
+    pub fn count(slf: &Bound<'_, Self>, value: &Bound<'_, PyAny>) -> PyResult<usize> {
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
-        Ok(with_resolved_item(value, doc, |inner, needle| {
-            let item = base.navigate(inner)?;
-            let target = list_ops::as_array_like(item, "count()")?;
-            Ok(list_ops::item_count_structural(target, needle))
-        })?
+        let doc = base.doc(value.py());
+        Ok(with_resolved_item(
+            value,
+            doc,
+            |d| base.check_fresh(d),
+            |inner, needle| {
+                let item = base.navigate(inner)?;
+                let target = list_ops::as_array_like(item, "count()")?;
+                Ok(list_ops::item_count_structural(target, needle))
+            },
+        )?
         .unwrap_or(0))
     }
 
     #[pyo3(signature = (value, start=None, stop=None, /))]
     pub fn index(
         slf: &Bound<'_, Self>,
-        py: Python<'_>,
         value: &Bound<'_, PyAny>,
         start: Option<i64>,
         stop: Option<i64>,
     ) -> PyResult<usize> {
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
-        with_resolved_item(value, doc, |inner, needle| {
-            let item = base.navigate(inner)?;
-            let target = list_ops::as_array_like(item, "index()")?;
-            list_ops::item_index_structural_range(target, needle, start, stop)
-        })?
+        let doc = base.doc(value.py());
+        with_resolved_item(
+            value,
+            doc,
+            |d| base.check_fresh(d),
+            |inner, needle| {
+                let item = base.navigate(inner)?;
+                let target = list_ops::as_array_like(item, "index()")?;
+                list_ops::item_index_structural_range(target, needle, start, stop)
+            },
+        )?
         .ok_or_else(|| PyValueError::new_err("value not in array"))
     }
 
@@ -473,8 +470,7 @@ impl ListProxy {
     #[pyo3(signature = (*, indent=4))]
     pub fn set_multiline(slf: &Bound<'_, Self>, py: Python<'_>, indent: usize) -> PyResult<()> {
         let base = slf.as_super().get();
-        let doc = base.checked_doc(py)?;
-        let mut inner = doc.inner.write();
+        let (_doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         let target = list_ops::as_array_like_mut(item, "set_multiline()")?;
         list_ops::item_set_multiline(target, indent)

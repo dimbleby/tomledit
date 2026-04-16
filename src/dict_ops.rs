@@ -189,6 +189,18 @@ pub(crate) fn for_each_key(item: &ItemRs, mut f: impl FnMut(&str) -> PyResult<()
     Ok(())
 }
 
+/// Iterate `(key, item)` pairs of a dict-like item, propagating errors.
+pub(crate) fn for_each_entry(
+    item: &ItemRs,
+    mut f: impl FnMut(&str, &ItemRs) -> PyResult<()>,
+) -> PyResult<()> {
+    let tbl = as_dict_like(item, "items()")?;
+    for (k, v) in tbl.iter() {
+        f(k, v)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn item_keys(item: &ItemRs) -> PyResult<Vec<String>> {
     let mut keys = Vec::new();
     for_each_key(item, |k| {

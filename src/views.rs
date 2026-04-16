@@ -58,6 +58,38 @@ fn keys_to_pyset<'py>(
     PySet::new(py, keys.iter())
 }
 
+/// Build a Python set of `(key, value)` tuples from the table at `path`.
+///
+/// Values are converted via `item_to_py`; non-hashable values (tables,
+/// arrays) cause `PySet::add` to raise `TypeError`, matching the behavior
+/// of `dict.items()` on the same input.
+/// Build a `(key, item_to_py(item))` Python tuple.
+fn entry_to_pytuple<'py>(
+    py: Python<'py>,
+    key: &str,
+    item: &toml_edit::Item,
+) -> PyResult<Bound<'py, PyTuple>> {
+    let py_val = item_ops::item_to_py(item, py)?;
+    PyTuple::new(
+        py,
+        [key.into_pyobject(py)?.into_any(), py_val.into_bound(py)],
+    )
+}
+
+fn items_to_pyset<'py>(
+    doc: &DocumentRs,
+    path: &[Key],
+    py: Python<'py>,
+) -> PyResult<Bound<'py, PySet>> {
+    let parent = item_ops::navigate_path(doc, path)?;
+    let set = PySet::empty(py)?;
+    dict_ops::for_each_entry(parent, |key, item| {
+        set.add(entry_to_pytuple(py, key, item)?)?;
+        Ok(())
+    })?;
+    Ok(set)
+}
+
 fn get_keys(doc: &DocumentRs, path: &[Key]) -> PyResult<Vec<String>> {
     let item = item_ops::navigate_path(doc, path)?;
     dict_ops::item_keys(item)
@@ -246,6 +278,50 @@ impl KeysView {
             keys_to_pyset(&inner, &self.path, py)?
         };
         ours.call_method1("__xor__", (theirs,))
+    }
+
+    // Reflected set operators for `set() OP keys`.  `|`, `&` and `^` are
+    // commutative, so they delegate to the forward methods.  `-` is not:
+    // `other - keys` subtracts *our* keys from `other`, which we do by
+    // building a Python set of our keys and calling its `__sub__`.
+
+    fn __ror__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.__or__(py, other)
+    }
+
+    fn __rand__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PySet>> {
+        self.__and__(py, other)
+    }
+
+    fn __rxor__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.__xor__(py, other)
+    }
+
+    fn __rsub__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let doc = self.document.bind(py).get();
+        doc.check_fresh(&self.path, self.revision)?;
+        let theirs = iterable_to_pyset(py, other)?;
+        let ours = {
+            let inner = doc.inner.read();
+            keys_to_pyset(&inner, &self.path, py)?
+        };
+        theirs.call_method1("__sub__", (ours,))
     }
 
     fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
@@ -445,19 +521,12 @@ impl ItemsView {
             if our_len != other_len {
                 return Ok(false);
             }
-            let keys = get_keys(&inner, &self.path)?;
             let parent = item_ops::navigate_path(&inner, &self.path)?;
             let mut pairs = Vec::with_capacity(our_len);
-            for key in &keys {
-                if let Some(item) = parent.get(key.as_str()) {
-                    let py_val = item_ops::item_to_py(item, py)?;
-                    let pair = PyTuple::new(
-                        py,
-                        [key.into_pyobject(py)?.into_any(), py_val.into_bound(py)],
-                    )?;
-                    pairs.push(pair);
-                }
-            }
+            dict_ops::for_each_entry(parent, |key, item| {
+                pairs.push(entry_to_pytuple(py, key, item)?);
+                Ok(())
+            })?;
             pairs
         };
 
@@ -467,5 +536,110 @@ impl ItemsView {
             }
         }
         Ok(true)
+    }
+
+    // Set operations.  Items are (key, value) tuples; we build a Python set
+    // of them and delegate.  Unhashable values raise `TypeError` during set
+    // construction — matching Python's `dict_items` semantics.
+
+    fn __or__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let doc = self.document.bind(py).get();
+        doc.check_fresh(&self.path, self.revision)?;
+        let theirs = iterable_to_pyset(py, other)?;
+        let ours = {
+            let inner = doc.inner.read();
+            items_to_pyset(&inner, &self.path, py)?
+        };
+        ours.call_method1("__or__", (theirs,))
+    }
+
+    fn __and__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let doc = self.document.bind(py).get();
+        doc.check_fresh(&self.path, self.revision)?;
+        let theirs = iterable_to_pyset(py, other)?;
+        let ours = {
+            let inner = doc.inner.read();
+            items_to_pyset(&inner, &self.path, py)?
+        };
+        ours.call_method1("__and__", (theirs,))
+    }
+
+    fn __sub__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let doc = self.document.bind(py).get();
+        doc.check_fresh(&self.path, self.revision)?;
+        let theirs = iterable_to_pyset(py, other)?;
+        let ours = {
+            let inner = doc.inner.read();
+            items_to_pyset(&inner, &self.path, py)?
+        };
+        ours.call_method1("__sub__", (theirs,))
+    }
+
+    fn __xor__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let doc = self.document.bind(py).get();
+        doc.check_fresh(&self.path, self.revision)?;
+        let theirs = iterable_to_pyset(py, other)?;
+        let ours = {
+            let inner = doc.inner.read();
+            items_to_pyset(&inner, &self.path, py)?
+        };
+        ours.call_method1("__xor__", (theirs,))
+    }
+
+    // Reflected forms: `|`, `&`, `^` are commutative; `-` is not.
+
+    fn __ror__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.__or__(py, other)
+    }
+
+    fn __rand__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.__and__(py, other)
+    }
+
+    fn __rxor__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.__xor__(py, other)
+    }
+
+    fn __rsub__<'py>(
+        &self,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let doc = self.document.bind(py).get();
+        doc.check_fresh(&self.path, self.revision)?;
+        let theirs = iterable_to_pyset(py, other)?;
+        let ours = {
+            let inner = doc.inner.read();
+            items_to_pyset(&inner, &self.path, py)?
+        };
+        theirs.call_method1("__sub__", (ours,))
     }
 }

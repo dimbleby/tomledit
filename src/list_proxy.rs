@@ -7,7 +7,7 @@ use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
 use crate::item_proxy::{
-    ItemProxy, ReadCtx, resolve_other_item, resolve_proxy, with_resolved_item,
+    ItemProxy, ReadCtx, resolve_other_item, resolve_proxy, with_proxy_item, with_resolved_item,
 };
 use crate::list_ops;
 
@@ -33,47 +33,6 @@ fn clone_self_item(base: &ItemProxy, py: Python<'_>) -> PyResult<toml_edit::Item
     Ok(base.navigate(&inner)?.clone())
 }
 
-/// Clone elements from `source` into `dest`, preserving formatting and comments.
-///
-/// Both items must be the same array kind (both plain arrays, or both AoT).
-/// Returns `true` if the types matched and elements were cloned, `false` if
-/// the types are incompatible (e.g. array + AoT) — the caller should fall
-/// back to value extraction in that case.
-fn clone_elements_into(dest: &mut toml_edit::Item, source: &toml_edit::Item, n: usize) -> bool {
-    match (dest, source) {
-        (
-            toml_edit::Item::Value(toml_edit::Value::Array(dest_arr)),
-            toml_edit::Item::Value(toml_edit::Value::Array(src_arr)),
-        ) => {
-            for _ in 0..n {
-                for (src_i, v) in src_arr.iter().enumerate() {
-                    let mut v = v.clone();
-                    // Source element 0 has no leading separator; for a
-                    // single-line seam, inject the destination's.  Multiline
-                    // element-0 prefixes already carry `\n`-indent (and
-                    // possibly a block comment) and are left alone.
-                    if src_i == 0
-                        && let Some(sep) = list_ops::single_line_separator(dest_arr)
-                    {
-                        v.decor_mut().set_prefix(sep);
-                    }
-                    dest_arr.push_formatted(v);
-                }
-            }
-            true
-        }
-        (toml_edit::Item::ArrayOfTables(dest_aot), toml_edit::Item::ArrayOfTables(src_aot)) => {
-            for _ in 0..n {
-                for t in src_aot.iter() {
-                    dest_aot.push(t.clone());
-                }
-            }
-            true
-        }
-        _ => false,
-    }
-}
-
 /// Create an empty array-like item matching the kind (array vs AoT) of `source`.
 fn empty_array_like(source: list_ops::ArrayLikeRef<'_>) -> toml_edit::Item {
     match source {
@@ -87,10 +46,55 @@ fn empty_array_like(source: list_ops::ArrayLikeRef<'_>) -> toml_edit::Item {
 }
 
 /// Extract Python values from an iterable into a `Vec<Item>`.
-pub(crate) fn collect_items(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Item>> {
+fn collect_items(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Item>> {
     obj.try_iter()?
         .map(|r| r.and_then(|v| v.extract::<Item>()))
         .collect()
+}
+
+/// A source of elements ready to be appended to an array-like destination,
+/// prepared *before* any write lock is held.
+///
+/// * `ArrayLike`: `obj` was an array-like proxy; its item was cloned once
+///   under its own read lock so that the destination's write lock can then
+///   cover the entire mutation without re-entering Python iteration.
+/// * `Items`: `obj` was a plain iterable; it was drained to a `Vec<Item>`
+///   with no locks held.
+enum Source {
+    ArrayLike(list_ops::ArrayLikeOwned),
+    Items(Vec<Item>),
+}
+
+/// Resolve `obj` to a `Source`.  Must be called with no locks on the
+/// destination document, since it may invoke Python iteration (slow path)
+/// or take the source proxy's read lock (fast path).
+///
+/// Non-array-like proxies (DictProxy, ScalarProxy) fall through to
+/// `Items`, matching Python's `list.extend(dict)` semantics (yielding
+/// the dict's keys).
+fn prepare_source(obj: &Bound<'_, PyAny>) -> PyResult<Source> {
+    if let Some(source) = with_proxy_item(obj, list_ops::ArrayLikeOwned::from_item)?.flatten() {
+        Ok(Source::ArrayLike(source))
+    } else {
+        Ok(Source::Items(collect_items(obj)?))
+    }
+}
+
+/// Append a source to `dest`, preserving formatting when source and dest
+/// have compatible kinds (same-kind array-like), falling back to
+/// per-element `item_extend` on kind mismatch or a plain iterable.
+fn append_source(dest: &mut toml_edit::Item, source: Source, op: &str) -> PyResult<()> {
+    let items = match source {
+        Source::ArrayLike(source) => {
+            if list_ops::clone_elements_into(dest, source.as_ref(), 1) {
+                return Ok(());
+            }
+            source.into_items()
+        }
+        Source::Items(items) => items,
+    };
+    let target = list_ops::as_array_like_mut(dest, op)?;
+    list_ops::item_extend(target, items)
 }
 
 #[pymethods]
@@ -263,19 +267,10 @@ impl ListProxy {
             return Ok(py.NotImplemented());
         }
         let base = slf.as_super().get();
+        let source = prepare_source(other)?;
         let mut new_doc = DocumentRs::new();
         new_doc["_"] = clone_self_item(base, py)?;
-        let fast = if let Ok(proxy) = other.cast::<ItemProxy>() {
-            let other_item = clone_self_item(proxy.get(), py)?;
-            clone_elements_into(&mut new_doc["_"], &other_item, 1)
-        } else {
-            false
-        };
-        if !fast {
-            let items = collect_items(other)?;
-            let target = list_ops::as_array_like_mut(&mut new_doc["_"], "__add__()")?;
-            list_ops::item_extend(target, items)?;
-        }
+        append_source(&mut new_doc["_"], source, "__add__()")?;
         Self::wrap_in_doc(py, new_doc)
     }
 
@@ -288,13 +283,13 @@ impl ListProxy {
             return Ok(py.NotImplemented());
         }
         let base = slf.as_super().get();
-        let items = collect_items(other)?;
+        let other_source = prepare_source(other)?;
         let self_item = clone_self_item(base, py)?;
+        let self_ref = list_ops::as_array_like(&self_item, "__radd__()")?;
         let mut new_doc = DocumentRs::new();
-        new_doc["_"] = empty_array_like(list_ops::as_array_like(&self_item, "__radd__()")?);
-        let target = list_ops::as_array_like_mut(&mut new_doc["_"], "__radd__()")?;
-        list_ops::item_extend(target, items)?;
-        clone_elements_into(&mut new_doc["_"], &self_item, 1);
+        new_doc["_"] = empty_array_like(self_ref);
+        append_source(&mut new_doc["_"], other_source, "__radd__()")?;
+        list_ops::clone_elements_into(&mut new_doc["_"], self_ref, 1);
         Self::wrap_in_doc(py, new_doc)
     }
 
@@ -305,8 +300,7 @@ impl ListProxy {
         if n <= 0 {
             item_ops::item_clear(&mut new_doc["_"])?;
         } else if n > 1 {
-            let source = new_doc["_"].clone();
-            clone_elements_into(&mut new_doc["_"], &source, n as usize - 1);
+            list_ops::item_repeat(&mut new_doc["_"], n as usize - 1, "__mul__()")?;
         }
         Self::wrap_in_doc(py, new_doc)
     }
@@ -317,18 +311,17 @@ impl ListProxy {
 
     pub fn __imul__(slf: &Bound<'_, Self>, py: Python<'_>, n: isize) -> PyResult<()> {
         let base = slf.as_super().get();
-        if n > 1 {
-            let source = clone_self_item(base, py)?;
-            let doc = base.checked_doc(py)?;
-            let mut inner = doc.inner.write();
-            let item = base.navigate_mut(&mut inner)?;
-            clone_elements_into(item, &source, n as usize - 1);
-        } else if n <= 0 {
-            let doc = base.checked_doc(py)?;
-            let mut inner = doc.inner.write();
-            let item = base.navigate_mut(&mut inner)?;
+        if n == 1 {
+            return Ok(());
+        }
+        let doc = base.checked_doc(py)?;
+        let mut inner = doc.inner.write();
+        let item = base.navigate_mut(&mut inner)?;
+        if n <= 0 {
             item_ops::item_clear(item)?;
             base.bump_self(doc);
+        } else {
+            list_ops::item_repeat(item, n as usize - 1, "__imul__()")?;
         }
         Ok(())
     }
@@ -429,16 +422,12 @@ impl ListProxy {
         py: Python<'_>,
         values: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        // Collect items before write lock — values may be the same proxy, and collect_items
-        // invokes __iter__.
-        let items = collect_items(values)?;
         let base = slf.as_super().get();
+        let source = prepare_source(values)?;
         let doc = base.checked_doc(py)?;
         let mut inner = doc.inner.write();
         let item = base.navigate_mut(&mut inner)?;
-        let target = list_ops::as_array_like_mut(item, "extend()")?;
-        list_ops::item_extend(target, items)?;
-        Ok(())
+        append_source(item, source, "extend()")
     }
 
     #[pyo3(signature = (value, /))]

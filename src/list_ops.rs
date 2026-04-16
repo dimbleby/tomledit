@@ -30,6 +30,7 @@ impl ArrayLikeMut<'_> {
 }
 
 /// Shared reference to an array-like TOML item.
+#[derive(Clone, Copy)]
 pub(crate) enum ArrayLikeRef<'a> {
     Array(&'a toml_edit::Array),
     Aot(&'a toml_edit::ArrayOfTables),
@@ -40,6 +41,42 @@ impl ArrayLikeRef<'_> {
         match self {
             Self::Array(arr) => arr.len(),
             Self::Aot(aot) => aot.len(),
+        }
+    }
+}
+
+/// Owned array-like item — the owned counterpart to `ArrayLikeRef`.
+///
+/// Used by proxy fast paths that need to hold the source data across a
+/// destination write lock (so that per-element handling on kind mismatch
+/// doesn't require re-entering Python iteration).
+pub(crate) enum ArrayLikeOwned {
+    Array(toml_edit::Array),
+    Aot(toml_edit::ArrayOfTables),
+}
+
+impl ArrayLikeOwned {
+    /// Clone `item` into an `ArrayLikeOwned` if it's array-like.
+    pub(crate) fn from_item(item: &ItemRs) -> Option<Self> {
+        match item {
+            ItemRs::Value(ValueRs::Array(arr)) => Some(Self::Array(arr.clone())),
+            ItemRs::ArrayOfTables(aot) => Some(Self::Aot(aot.clone())),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_ref(&self) -> ArrayLikeRef<'_> {
+        match self {
+            Self::Array(arr) => ArrayLikeRef::Array(arr),
+            Self::Aot(aot) => ArrayLikeRef::Aot(aot),
+        }
+    }
+
+    /// Decompose into elements as `Item`s.
+    pub(crate) fn into_items(self) -> Vec<Item> {
+        match self {
+            Self::Array(arr) => arr.into_iter().map(|v| Item(ItemRs::Value(v))).collect(),
+            Self::Aot(aot) => aot.into_iter().map(|t| Item(ItemRs::Table(t))).collect(),
         }
     }
 }
@@ -103,7 +140,7 @@ fn multiline_prefix(arr: &toml_edit::Array) -> Option<String> {
 /// For a single-line array, return the prefix a newly inserted element
 /// should have, matching the array's inter-element separator.  Returns
 /// `None` for multiline or empty arrays.
-pub(crate) fn single_line_separator(arr: &toml_edit::Array) -> Option<String> {
+fn single_line_separator(arr: &toml_edit::Array) -> Option<String> {
     if multiline_prefix(arr).is_some() {
         return None;
     }
@@ -165,6 +202,25 @@ fn apply_last_suffix(arr: &mut toml_edit::Array, suffix: Option<String>) {
     {
         last.decor_mut().set_suffix(&s);
     }
+}
+
+/// Run `body` on `arr` with the last-element seam preserved across the
+/// operation.  The inline comment attached to the current last element
+/// (stored in the array's trailing slot) and the last element's suffix
+/// are both saved beforehand and re-applied afterwards.
+///
+/// `body` receives the inline-comment vector and must push one entry per
+/// element it appends so `restore_inline_comments` lands each comment in
+/// the right slot.
+fn with_preserved_seam(
+    arr: &mut toml_edit::Array,
+    body: impl FnOnce(&mut toml_edit::Array, &mut Vec<String>),
+) {
+    let saved_suffix = strip_last_suffix(arr);
+    let mut inlines = arr.save_inline_comments();
+    body(arr, &mut inlines);
+    arr.restore_inline_comments(&inlines);
+    apply_last_suffix(arr, saved_suffix);
 }
 
 /// Save the first element's leading prefix (whitespace after `[`).
@@ -620,15 +676,13 @@ fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDecor) {
 pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()> {
     match target {
         ArrayLikeMut::Array(arr) => {
-            let saved_suffix = strip_last_suffix(arr);
-            let mut ic = arr.save_inline_comments();
             let mut v = into_value(value)?;
             let inline = comments::take_value_inline_comment(&mut v);
-            apply_element_decor(arr, &mut v);
-            arr.push(v);
-            ic.push(inline);
-            arr.restore_inline_comments(&ic);
-            apply_last_suffix(arr, saved_suffix);
+            with_preserved_seam(arr, |arr, ic| {
+                apply_element_decor(arr, &mut v);
+                arr.push(v);
+                ic.push(inline);
+            });
             Ok(())
         }
         ArrayLikeMut::Aot(aot) => {
@@ -719,16 +773,13 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
             // Validate all values up front.
             let converted: Vec<ValueRs> =
                 items.into_iter().map(into_value).collect::<PyResult<_>>()?;
-            let saved_suffix = strip_last_suffix(arr);
-            let mut ic = arr.save_inline_comments();
-            for mut v in converted {
-                let inline = comments::take_value_inline_comment(&mut v);
-                apply_element_decor(arr, &mut v);
-                arr.push(v);
-                ic.push(inline);
-            }
-            arr.restore_inline_comments(&ic);
-            apply_last_suffix(arr, saved_suffix);
+            with_preserved_seam(arr, |arr, ic| {
+                for mut v in converted {
+                    ic.push(comments::take_value_inline_comment(&mut v));
+                    apply_element_decor(arr, &mut v);
+                    arr.push(v);
+                }
+            });
             Ok(())
         }
         ArrayLikeMut::Aot(aot) => {
@@ -756,6 +807,62 @@ fn structural_element_eq(target: &ArrayLikeRef<'_>, index: usize, needle: &ItemR
             .get(index)
             .is_some_and(|t| equality::item_table_eq(needle, t)),
     }
+}
+
+/// Append `n` copies of `source`'s elements to `dest`, preserving the
+/// formatting (indentation, block and inline comments) of every cloned
+/// element including the source's last-element inline comment — which
+/// lives in the array's trailing slot and would otherwise be lost.
+///
+/// Returns `false` if `dest` and `source` are of different kinds (array
+/// vs array-of-tables), leaving `dest` unchanged.
+pub(crate) fn clone_elements_into(dest: &mut ItemRs, source: ArrayLikeRef<'_>, n: usize) -> bool {
+    match (dest, source) {
+        (ItemRs::Value(ValueRs::Array(dest_arr)), ArrayLikeRef::Array(src_arr)) => {
+            clone_array_elements(dest_arr, src_arr, n);
+            true
+        }
+        (ItemRs::ArrayOfTables(dest_aot), ArrayLikeRef::Aot(src_aot)) => {
+            for _ in 0..n {
+                for t in src_aot.iter() {
+                    dest_aot.push(t.clone());
+                }
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+fn clone_array_elements(dest_arr: &mut toml_edit::Array, src_arr: &toml_edit::Array, n: usize) {
+    let src_inlines = src_arr.save_inline_comments();
+    with_preserved_seam(dest_arr, |dest_arr, ic| {
+        for _ in 0..n {
+            for (src_i, v) in src_arr.iter().enumerate() {
+                let mut v = v.clone();
+                // At a single-line seam, inject the destination's inter-element
+                // separator — source element 0 has no leading separator of its own.
+                if src_i == 0
+                    && let Some(sep) = single_line_separator(dest_arr)
+                {
+                    v.decor_mut().set_prefix(sep);
+                }
+                dest_arr.push_formatted(v);
+                ic.push(src_inlines[src_i].clone());
+            }
+        }
+    });
+}
+
+/// Append `extra` additional copies of `item`'s own elements to itself.
+///
+/// Used by `__mul__` and `__imul__`; callers should skip the call when
+/// `extra == 0` rather than relying on an internal short-circuit.
+pub(crate) fn item_repeat(item: &mut ItemRs, extra: usize, op: &str) -> PyResult<()> {
+    let source = item.clone();
+    let src_ref = as_array_like(&source, op)?;
+    clone_elements_into(item, src_ref, extra);
+    Ok(())
 }
 
 /// Check if any element structurally equals `needle`.

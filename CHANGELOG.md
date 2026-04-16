@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0 (16 April 2026)
+
 - Use frozen pyclasses with `RwLock` internally, allowing concurrent reads
   in free-threaded Python builds instead of serializing all access.
 

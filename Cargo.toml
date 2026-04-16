@@ -1,19 +1,19 @@
 [package]
 name = "tomledit"
 license = "Apache-2.0 OR MIT"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 
 [lib]
 name = "tomledit"
 crate-type = ["cdylib"]
 
+[features]
+abi3 = ["pyo3/abi3-py310"]
+
 [dependencies]
 parking_lot = "0.12"
 toml_edit = "0.25.9"
-
-[features]
-abi3 = ["pyo3/abi3-py310"]
 
 [dependencies.pyo3]
 version = "0.28"

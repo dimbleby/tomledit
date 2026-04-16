@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.1.1 (16 April 2026)
+
 - Fix `ListItem` concatenation (`+`, `+=`) losing inline comments at the
   seam when the left array was multi-line.
 - Fix `arr += other` dropping formatting when `other` is a `ListItem` from
@@ -22,7 +24,7 @@
   under free-threading.  All proxy methods now take the lock first, then
   verify freshness under the lock.
 
-## 1.0.0 (16 April 2026)
+## 1.1.0 (16 April 2026)
 
 - Use frozen pyclasses with `RwLock` internally, allowing concurrent reads
   in free-threaded Python builds instead of serializing all access.

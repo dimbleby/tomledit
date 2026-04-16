@@ -826,6 +826,7 @@ pub(crate) fn clone_elements_into(dest: &mut ItemRs, source: ArrayLikeRef<'_>, n
             for _ in 0..n {
                 for t in src_aot.iter() {
                     dest_aot.push(t.clone());
+                    fix_inserted_aot_spacing(dest_aot, dest_aot.len() - 1);
                 }
             }
             true

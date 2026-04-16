@@ -541,6 +541,48 @@ class TestIadd:
         assert doc["items"][1] == {"name": "b"}
         assert doc["items"][2] == {"name": "c"}
 
+    def test_iadd_proxy_preserves_inline_comments(self) -> None:
+        """`a += b` must preserve b's formatting when b is a proxy, matching `a + b`."""
+        doc = Document.parse(
+            toml_literal("""
+            a = [
+                1,  # one
+                2,  # two
+            ]
+            b = [
+                3,  # three
+                4,  # four
+            ]
+        """)
+        )
+        doc["a"] += doc["b"]
+        assert doc["a"].as_toml() + "\n" == toml_literal("""
+            [
+                1,  # one
+                2,  # two
+                3,  # three
+                4,  # four
+            ]
+        """)
+
+    def test_iadd_dict_proxy_yields_keys(self) -> None:
+        """`array += dict_proxy` yields table keys, matching `list += dict`."""
+        doc = Document.parse("a = []\n[t]\nx = 1\ny = 2\n")
+        doc["a"] += doc["t"]
+        assert list(doc["a"]) == ["x", "y"]
+
+    def test_extend_aot_proxy_converts_to_inline_tables(self) -> None:
+        """`array.extend(aot_proxy)` falls back to per-element conversion."""
+        doc = Document.parse("a = []\n[[t]]\nx = 1\n[[t]]\nx = 2\n")
+        doc["a"].extend(doc["t"])
+        assert doc["a"] == [{"x": 1}, {"x": 2}]
+
+    def test_extend_array_proxy_into_aot_raises(self) -> None:
+        """`aot.extend(array_proxy)` raises TypeError — scalars can't be AoT tables."""
+        doc = Document.parse("b = [1, 2, 3]\n[[a]]\nx = 1\n")
+        with pytest.raises(TypeError):
+            doc["a"].extend(doc["b"])
+
 
 class TestAdd:
     """list + list returns a new ListItem (non-mutating, format-preserving)."""
@@ -717,6 +759,10 @@ class TestMul:
         doc = Document({"a": [1, 2]})
         assert doc["a"] * 0 == []
 
+    def test_mul_one(self) -> None:
+        doc = Document({"a": [1, 2]})
+        assert doc["a"] * 1 == [1, 2]
+
     def test_mul_does_not_mutate_document(self) -> None:
         doc = Document({"a": [1, 2]})
         _ = doc["a"] * 3
@@ -784,6 +830,50 @@ class TestMul:
                 1,
                 # second
                 2,
+            ]
+        """)
+
+    def test_mul_preserves_inline_comments(self) -> None:
+        """Inline comments on every element survive __mul__ at the seam."""
+        doc = Document.parse(
+            toml_literal("""
+            arr = [
+                1,  # one
+                2,  # two
+            ]
+        """)
+        )
+        result = doc["arr"] * 2
+        assert result.as_toml() + "\n" == toml_literal("""
+            [
+                1,  # one
+                2,  # two
+                1,  # one
+                2,  # two
+            ]
+        """)
+
+    def test_add_preserves_inline_comments(self) -> None:
+        """Inline comments on every element survive __add__ at the seam."""
+        doc = Document.parse(
+            toml_literal("""
+            a = [
+                1,  # one
+                2,  # two
+            ]
+            b = [
+                3,  # three
+                4,  # four
+            ]
+        """)
+        )
+        result = doc["a"] + doc["b"]
+        assert result.as_toml() + "\n" == toml_literal("""
+            [
+                1,  # one
+                2,  # two
+                3,  # three
+                4,  # four
             ]
         """)
 

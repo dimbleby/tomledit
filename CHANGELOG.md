@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix `ListItem` concatenation (`+`, `+=`) losing inline comments at the
+  seam when the left array was multi-line.
+- Fix `arr += other` dropping formatting when `other` is a `ListItem` from
+  the same document.
+
 ## 1.0.0 (16 April 2026)
 
 - Use frozen pyclasses with `RwLock` internally, allowing concurrent reads

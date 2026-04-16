@@ -12,6 +12,11 @@
   entries by source span when the source tables came from another parsed
   document.  Cloned table positions are now cleared so rendering follows
   push order.
+- Fix `KeysView` missing reflected set operators: `set | keys`, `set & keys`,
+  `set - keys`, `set ^ keys` now work, matching `dict.keys()`.
+- Fix `ItemsView` missing set operators entirely: `|`, `&`, `-`, `^` and
+  their reflected forms now work, matching `dict.items()`.  Unhashable
+  values raise `TypeError`, as they do with `dict_items`.
 
 ## 1.0.0 (16 April 2026)
 

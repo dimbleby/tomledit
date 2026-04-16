@@ -805,6 +805,14 @@ class TestViews:
         doc = Document.parse("a = 1\nb = 2\n")
         assert doc.keys() ^ ["b", "c"] == {"a", "c"}
 
+    def test_keys_view_reflected_set_ops(self) -> None:
+        """Python's dict_keys supports reflected set operators; so must ours."""
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert {"b", "c"} | doc.keys() == {"a", "b", "c"}
+        assert {"a", "c"} & doc.keys() == {"a"}
+        assert {"a", "c"} - doc.keys() == {"c"}
+        assert {"b", "c"} ^ doc.keys() == {"a", "c"}
+
     def test_keys_view_eq(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -951,6 +959,48 @@ class TestItemsViewSetEquality:
         """Items view should NOT equal a list (just like Python's dict_items)."""
         doc = Document.parse("a = 1\nb = 2\n")
         assert doc.items() != [("a", 1), ("b", 2)]
+
+
+class TestItemsViewSetOps:
+    """ItemsView should support set operators like dict_items does."""
+
+    def test_or(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.items() | {("c", 3)} == {("a", 1), ("b", 2), ("c", 3)}
+
+    def test_and(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.items() & {("a", 1), ("c", 3)} == {("a", 1)}  # type: ignore[comparison-overlap]
+
+    def test_sub(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.items() - {("a", 1)} == {("b", 2)}  # type: ignore[comparison-overlap]
+
+    def test_xor(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert doc.items() ^ {("b", 2), ("c", 3)} == {("a", 1), ("c", 3)}
+
+    def test_reflected_or(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert {("c", 3)} | doc.items() == {("a", 1), ("b", 2), ("c", 3)}
+
+    def test_reflected_and(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert {("a", 1), ("c", 3)} & doc.items() == {("a", 1)}
+
+    def test_reflected_sub(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert {("a", 1), ("c", 3)} - doc.items() == {("c", 3)}
+
+    def test_reflected_xor(self) -> None:
+        doc = Document.parse("a = 1\nb = 2\n")
+        assert {("b", 2), ("c", 3)} ^ doc.items() == {("a", 1), ("c", 3)}
+
+    def test_unhashable_value_raises(self) -> None:
+        """Like dict_items, unhashable values raise TypeError on set ops."""
+        doc = Document.parse("a = [1, 2, 3]\n")
+        with pytest.raises(TypeError):
+            _ = doc.items() | set()
 
 
 class TestKeysViewContainsNonString:

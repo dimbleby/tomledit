@@ -783,6 +783,54 @@ class TestMul:
         doc["a"] *= 1
         assert doc["a"] == [1, 2]
 
+    def test_imul_aot_preserves_blank_line_spacing(self) -> None:
+        """Repeating a blank-line-style AoT keeps blank lines at the seam."""
+        doc = Document.parse(
+            toml_literal("""
+            [[a]]
+            x = 1
+
+            [[a]]
+            x = 2
+            """)
+        )
+        doc["a"] *= 2
+        assert doc.as_toml() == toml_literal("""
+            [[a]]
+            x = 1
+
+            [[a]]
+            x = 2
+
+            [[a]]
+            x = 1
+
+            [[a]]
+            x = 2
+        """)
+
+    def test_imul_aot_preserves_compact_style(self) -> None:
+        """Repeating a compact-style AoT stays compact."""
+        doc = Document.parse(
+            toml_literal("""
+            [[a]]
+            x = 1
+            [[a]]
+            x = 2
+            """)
+        )
+        doc["a"] *= 2
+        assert doc.as_toml() == toml_literal("""
+            [[a]]
+            x = 1
+            [[a]]
+            x = 2
+            [[a]]
+            x = 1
+            [[a]]
+            x = 2
+        """)
+
     def test_imul_preserves_formatting(self) -> None:
         doc = Document.parse(
             toml_literal("""

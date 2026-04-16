@@ -6,6 +6,8 @@
   seam when the left array was multi-line.
 - Fix `arr += other` dropping formatting when `other` is a `ListItem` from
   the same document.
+- Fix `aot *= n` losing blank-line spacing at the seam between the original
+  entries and the repeated copies.
 
 ## 1.0.0 (16 April 2026)
 

@@ -395,9 +395,7 @@ pub(crate) fn resolve_update(other: &Bound<'_, PyAny>) -> PyResult<ResolvedUpdat
 fn resolve_toml_item(other: &Bound<'_, PyAny>) -> PyResult<Option<ItemRs>> {
     if let Ok(proxy) = other.cast::<ItemProxy>() {
         let proxy_ref = proxy.get();
-        let doc = proxy_ref.document.bind(other.py()).get();
-        proxy_ref.check_fresh(doc)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = proxy_ref.read_checked(other.py())?;
         let item = proxy_ref.navigate(&inner)?.clone();
         return Ok(Some(item));
     }

@@ -19,6 +19,24 @@ use crate::item_proxy::{ItemProxy, with_resolved_item};
 
 use toml_edit::DocumentMut as DocumentRs;
 
+/// Adds `read_checked` to a view type with `document`, `path`, `revision`
+/// fields.  Locks `inner.read()` first, then verifies freshness.  Closes
+/// the TOCTOU window between the check and the read.
+macro_rules! impl_view_read_checked {
+    ($ty:ty) => {
+        impl $ty {
+            pub(crate) fn read_checked<'py>(
+                &'py self,
+                py: Python<'py>,
+            ) -> PyResult<(&'py Document, parking_lot::RwLockReadGuard<'py, DocumentRs>)> {
+                let doc = self.document.bind(py).get();
+                let guard = doc.read_checked(&self.path, self.revision)?;
+                Ok((doc, guard))
+            }
+        }
+    };
+}
+
 fn get_key_set(doc: &DocumentRs, path: &[Key]) -> PyResult<HashSet<String>> {
     Ok(get_keys(doc, path)?.into_iter().collect())
 }
@@ -135,15 +153,15 @@ fn with_child_proxies(
     mut f: impl FnMut(&str, Py<PyAny>) -> PyResult<()>,
 ) -> PyResult<()> {
     let doc = document.bind(py).get();
-    doc.check_fresh(path, view_revision)?;
-    let keys = {
+    let (keys, revision) = {
         let inner = doc.inner.read();
+        doc.check_fresh(path, view_revision)?;
+        let revision = doc.revision();
         let item = item_ops::navigate_path(&inner, path)?;
-        dict_ops::item_keys(item)?
+        (dict_ops::item_keys(item)?, revision)
     };
     for k in &keys {
-        let proxy =
-            ItemProxy::make_child_typed(document, path, doc.revision(), py, Key::Str(k.clone()))?;
+        let proxy = ItemProxy::make_child_typed(document, path, revision, py, Key::Str(k.clone()))?;
         f(k, proxy)?;
     }
     Ok(())
@@ -171,19 +189,17 @@ impl KeysView {
     }
 }
 
+impl_view_read_checked!(KeysView);
+
 #[pymethods]
 impl KeysView {
     fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         get_len(&inner, &self.path)
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let list = keys_to_pylist(&inner, &self.path, py)?;
         Ok(list.try_iter()?.unbind())
     }
@@ -192,25 +208,19 @@ impl KeysView {
         let Some(key) = crate::item_ops::extract_key_str(key)? else {
             return Ok(false);
         };
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         contains_key(&inner, &self.path, &key)
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let keys = get_keys(&inner, &self.path)?;
         let inner_str: Vec<String> = keys.iter().map(|k| format!("'{k}'")).collect();
         Ok(format!("KeysView([{}])", inner_str.join(", ")))
     }
 
     fn __reversed__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let mut keys = get_keys(&inner, &self.path)?;
         keys.reverse();
         let list = keys.into_pyobject(py)?;
@@ -227,10 +237,8 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PySet>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let theirs = other_to_string_set(other)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let ours = get_key_set(&inner, &self.path)?;
         let result = &ours & &theirs;
         PySet::new(py, result.iter())
@@ -241,11 +249,9 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let theirs = iterable_to_pyset(py, other)?;
         let ours = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = self.read_checked(py)?;
             keys_to_pyset(&inner, &self.path, py)?
         };
         ours.call_method1("__or__", (theirs,))
@@ -256,10 +262,8 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PySet>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let theirs = other_to_string_set(other)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let ours = get_key_set(&inner, &self.path)?;
         let result = &ours - &theirs;
         PySet::new(py, result.iter())
@@ -270,11 +274,9 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let theirs = iterable_to_pyset(py, other)?;
         let ours = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = self.read_checked(py)?;
             keys_to_pyset(&inner, &self.path, py)?
         };
         ours.call_method1("__xor__", (theirs,))
@@ -314,21 +316,17 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let theirs = iterable_to_pyset(py, other)?;
         let ours = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = self.read_checked(py)?;
             keys_to_pyset(&inner, &self.path, py)?
         };
         theirs.call_method1("__sub__", (ours,))
     }
 
     fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let ours = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = self.read_checked(py)?;
             keys_to_pyset(&inner, &self.path, py)?
         };
         ours.eq(other)
@@ -357,12 +355,12 @@ impl ValuesView {
     }
 }
 
+impl_view_read_checked!(ValuesView);
+
 #[pymethods]
 impl ValuesView {
     fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         get_len(&inner, &self.path)
     }
 
@@ -376,21 +374,23 @@ impl ValuesView {
 
     fn __contains__(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        Ok(with_resolved_item(value, doc, |inner, needle| {
-            let parent = item_ops::navigate_path(inner, &self.path)?;
-            let tbl = dict_ops::as_dict_like(parent, "__contains__")?;
-            Ok(tbl
-                .iter()
-                .any(|(_, item)| equality::items_structural_eq(item, needle)))
-        })?
+        Ok(with_resolved_item(
+            value,
+            doc,
+            |d| d.check_fresh(&self.path, self.revision),
+            |inner, needle| {
+                let parent = item_ops::navigate_path(inner, &self.path)?;
+                let tbl = dict_ops::as_dict_like(parent, "__contains__")?;
+                Ok(tbl
+                    .iter()
+                    .any(|(_, item)| equality::items_structural_eq(item, needle)))
+            },
+        )?
         .unwrap_or(false))
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let len = get_len(&inner, &self.path)?;
         Ok(format!("ValuesView(<{len} values>)"))
     }
@@ -436,12 +436,12 @@ impl ItemsView {
     }
 }
 
+impl_view_read_checked!(ItemsView);
+
 #[pymethods]
 impl ItemsView {
     fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         get_len(&inner, &self.path)
     }
 
@@ -470,18 +470,20 @@ impl ItemsView {
         let value = tuple.get_item(1)?;
 
         let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        Ok(with_resolved_item(&value, doc, |inner, needle| {
-            let target = item_ops::navigate_path(inner, &self.path)?.get(&key);
-            Ok(target.is_some_and(|item_rs| equality::items_structural_eq(item_rs, needle)))
-        })?
+        Ok(with_resolved_item(
+            &value,
+            doc,
+            |d| d.check_fresh(&self.path, self.revision),
+            |inner, needle| {
+                let target = item_ops::navigate_path(inner, &self.path)?.get(&key);
+                Ok(target.is_some_and(|item_rs| equality::items_structural_eq(item_rs, needle)))
+            },
+        )?
         .unwrap_or(false))
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let len = get_len(&inner, &self.path)?;
         Ok(format!("ItemsView(<{len} items>)"))
     }
@@ -509,14 +511,12 @@ impl ItemsView {
         }
 
         let other_len = other.len()?;
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
 
         // Build plain Python (key, value) tuples under the read lock, then
         // release it before calling into Python's __contains__ (which could
         // re-enter our code if `other` is a view from the same document).
         let pairs = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = self.read_checked(py)?;
             let our_len = get_len(&inner, &self.path)?;
             if our_len != other_len {
                 return Ok(false);
@@ -547,11 +547,9 @@ impl ItemsView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let theirs = iterable_to_pyset(py, other)?;
         let ours = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = self.read_checked(py)?;
             items_to_pyset(&inner, &self.path, py)?
         };
         ours.call_method1("__or__", (theirs,))
@@ -562,11 +560,9 @@ impl ItemsView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let theirs = iterable_to_pyset(py, other)?;
         let ours = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = self.read_checked(py)?;
             items_to_pyset(&inner, &self.path, py)?
         };
         ours.call_method1("__and__", (theirs,))
@@ -577,11 +573,9 @@ impl ItemsView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let theirs = iterable_to_pyset(py, other)?;
         let ours = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = self.read_checked(py)?;
             items_to_pyset(&inner, &self.path, py)?
         };
         ours.call_method1("__sub__", (theirs,))
@@ -592,11 +586,9 @@ impl ItemsView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let theirs = iterable_to_pyset(py, other)?;
         let ours = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = self.read_checked(py)?;
             items_to_pyset(&inner, &self.path, py)?
         };
         ours.call_method1("__xor__", (theirs,))
@@ -633,11 +625,9 @@ impl ItemsView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let doc = self.document.bind(py).get();
-        doc.check_fresh(&self.path, self.revision)?;
         let theirs = iterable_to_pyset(py, other)?;
         let ours = {
-            let inner = doc.inner.read();
+            let (_doc, inner) = self.read_checked(py)?;
             items_to_pyset(&inner, &self.path, py)?
         };
         theirs.call_method1("__sub__", (ours,))

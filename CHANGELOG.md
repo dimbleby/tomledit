@@ -17,6 +17,10 @@
 - Fix `ItemsView` missing set operators entirely: `|`, `&`, `-`, `^` and
   their reflected forms now work, matching `dict.items()`.  Unhashable
   values raise `TypeError`, as they do with `dict_items`.
+- Fix a TOCTOU window between proxy freshness check and document lock
+  acquisition that could let a stale proxy observe post-mutation state
+  under free-threading.  All proxy methods now take the lock first, then
+  verify freshness under the lock.
 
 ## 1.0.0 (16 April 2026)
 

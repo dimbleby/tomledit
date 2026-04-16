@@ -72,6 +72,33 @@ impl Document {
             ))
         }
     }
+
+    /// Acquire `inner.read()` and then verify the proxy is still fresh.
+    ///
+    /// Locking first closes the TOCTOU window between the freshness check
+    /// and the read: mutations take `inner.write()` while they stamp the
+    /// trie, so once we hold `inner.read()` the trie has already recorded
+    /// any invalidating mutation that could affect us.
+    pub(crate) fn read_checked(
+        &self,
+        path: &[Key],
+        revision: u64,
+    ) -> PyResult<parking_lot::RwLockReadGuard<'_, DocumentRs>> {
+        let guard = self.inner.read();
+        self.check_fresh(path, revision)?;
+        Ok(guard)
+    }
+
+    /// Acquire `inner.write()` and then verify the proxy is still fresh.
+    pub(crate) fn write_checked(
+        &self,
+        path: &[Key],
+        revision: u64,
+    ) -> PyResult<parking_lot::RwLockWriteGuard<'_, DocumentRs>> {
+        let guard = self.inner.write();
+        self.check_fresh(path, revision)?;
+        Ok(guard)
+    }
 }
 
 #[pymethods]
@@ -357,9 +384,12 @@ impl Document {
                 other_inner.as_item(),
             ))
         } else {
-            Ok(with_resolved_item(other, self, |inner, needle| {
-                Ok(equality::items_structural_eq(inner.as_item(), needle))
-            })?
+            Ok(with_resolved_item(
+                other,
+                self,
+                |_| Ok(()),
+                |inner, needle| Ok(equality::items_structural_eq(inner.as_item(), needle)),
+            )?
             .unwrap_or(false))
         }
     }

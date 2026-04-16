@@ -104,12 +104,16 @@ fn resolve_proxy_item<R>(
     };
     let proxy = proxy.get();
     let doc = proxy.document.bind(other.py()).get();
-    proxy.check_fresh(doc)?;
     if let Some(ctx) = ctx.filter(|c| std::ptr::eq(c.doc, doc)) {
+        // Reuse the caller's guard: any invalidating mutation was stamped
+        // into the trie before the guard was taken, so `check_fresh` is
+        // coherent.  Also avoids a nested read that would deadlock if the
+        // caller holds a write guard.
+        proxy.check_fresh(doc)?;
         let item = proxy.navigate(ctx.inner)?;
         return Ok(Some(f(item)));
     }
-    let inner = doc.inner.read();
+    let (_doc, inner) = proxy.read_checked(other.py())?;
     let item = proxy.navigate(&inner)?;
     Ok(Some(f(item)))
 }
@@ -136,15 +140,20 @@ fn extract_for_eq(other: &Bound<'_, PyAny>) -> PyResult<Option<Item>> {
 /// existing read lock — zero cloning.  Slow path: the value is extracted
 /// to an owned `Item` (no lock held), then `f` runs under a fresh lock.
 ///
+/// The `proxy` freshness check is performed **under** each read lock this
+/// function takes, closing the TOCTOU window between check and read.
+///
 /// Returns `None` when the value is not representable as a TOML item
 /// (the caller should treat this as "not found" / "not equal").
 pub(crate) fn with_resolved_item<R>(
     value: &Bound<'_, PyAny>,
     doc: &Document,
+    check_fresh: impl Fn(&Document) -> PyResult<()>,
     f: impl Fn(&DocumentRs, &ItemRs) -> PyResult<R>,
 ) -> PyResult<Option<R>> {
     {
         let inner = doc.inner.read();
+        check_fresh(doc)?;
         let ctx = ReadCtx::new(doc, &inner);
         if let Some(result) = resolve_other_item(value, &ctx, |item| f(&inner, item))? {
             return result.map(Some);
@@ -154,6 +163,7 @@ pub(crate) fn with_resolved_item<R>(
         return Ok(None);
     };
     let inner = doc.inner.read();
+    check_fresh(doc)?;
     f(&inner, &extracted.0).map(Some)
 }
 
@@ -195,14 +205,40 @@ impl ItemProxy {
         doc.check_fresh(&self.path, self.revision.load(Ordering::Relaxed))
     }
 
-    /// Bind the owning document and verify this proxy is still fresh.
+    /// Bind the owning document.  Prefer [`read_checked`] / [`write_checked`]
+    /// when a lock is about to be taken — they perform the freshness check
+    /// **after** acquiring the lock, eliminating a TOCTOU window between
+    /// check and read.
     ///
-    /// Convenience shorthand for the two-step pattern
-    /// `let doc = base.document.bind(py).get(); base.check_fresh(doc)?;`
-    pub(crate) fn checked_doc<'py>(&'py self, py: Python<'py>) -> PyResult<&'py Document> {
-        let doc = self.document.bind(py).get();
-        self.check_fresh(doc)?;
-        Ok(doc)
+    /// [`read_checked`]: Self::read_checked
+    /// [`write_checked`]: Self::write_checked
+    pub(crate) fn doc<'py>(&'py self, py: Python<'py>) -> &'py Document {
+        self.document.bind(py).get()
+    }
+
+    /// Acquire `inner.read()` on the owning document, then verify this
+    /// proxy is still fresh.  Returns both for use under the guard.
+    pub(crate) fn read_checked<'py>(
+        &'py self,
+        py: Python<'py>,
+    ) -> PyResult<(&'py Document, parking_lot::RwLockReadGuard<'py, DocumentRs>)> {
+        let doc = self.doc(py);
+        let guard = doc.read_checked(&self.path, self.revision.load(Ordering::Relaxed))?;
+        Ok((doc, guard))
+    }
+
+    /// Acquire `inner.write()` on the owning document, then verify this
+    /// proxy is still fresh.
+    pub(crate) fn write_checked<'py>(
+        &'py self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        &'py Document,
+        parking_lot::RwLockWriteGuard<'py, DocumentRs>,
+    )> {
+        let doc = self.doc(py);
+        let guard = doc.write_checked(&self.path, self.revision.load(Ordering::Relaxed))?;
+        Ok((doc, guard))
     }
 
     /// Record a mutation at a child key under this proxy's path.
@@ -240,8 +276,7 @@ impl ItemProxy {
     /// externally (in the next element's prefix).  It is embedded into the
     /// cloned value's decor suffix so that it travels with the value.
     pub(crate) fn clone_item(&self, py: Python<'_>) -> PyResult<ItemRs> {
-        let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let item = self.navigate(&inner)?;
         let mut cloned = item.clone();
         if let Some(comment) = self.element_inline_comment(&inner)?
@@ -263,13 +298,26 @@ impl ItemProxy {
     /// Build a child proxy as the correct Python subclass (DictItem,
     /// ListItem, or ScalarItem) by inspecting the TOML node type.
     /// Returns `Py<PyAny>` since the concrete type varies.
+    ///
+    /// Takes `inner.read()` once and performs the parent freshness check,
+    /// the revision sample and the kind lookup under that single guard —
+    /// so child-proxy minting is atomic w.r.t. mutations.
     pub(crate) fn child_proxy_typed(&self, py: Python<'_>, key: Key) -> PyResult<Py<PyAny>> {
-        let doc = self.document.bind(py).get();
-        let revision = doc.revision();
-        Self::make_child_typed(&self.document, &self.path, revision, py, key)
+        let mut child_path = self.path.clone();
+        child_path.push(key);
+        let (revision, kind) = {
+            let (doc, inner) = self.read_checked(py)?;
+            let kind = item_kind(item_ops::navigate_path(&inner, &child_path)?);
+            (doc.revision(), kind)
+        };
+        let base = ItemProxy::new(self.document.clone_ref(py), child_path, revision);
+        into_typed_proxy(py, base, kind)
     }
 
-    /// Build a typed child proxy from constituent parts.
+    /// Build a typed child proxy from constituent parts, without a freshness
+    /// check on the parent (caller must have verified the context is safe).
+    /// Used by views that have already taken `inner.read()` and sampled a
+    /// coherent revision.
     pub(crate) fn make_child_typed(
         document: &Py<Document>,
         path: &[Key],
@@ -402,49 +450,48 @@ impl ItemProxy {
     // ---- core protocol ----
 
     pub fn __bool__(&self, py: Python<'_>) -> PyResult<bool> {
-        let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let item = self.navigate(&inner)?;
         Ok(item_ops::item_bool(item))
     }
 
     pub fn __str__(&self, py: Python<'_>) -> PyResult<String> {
-        let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let item = self.navigate(&inner)?;
         item_ops::item_str(item, py)
     }
 
     pub fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
-        let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let item = self.navigate(&inner)?;
         Ok(item_ops::item_repr(item))
     }
 
     /// Return the TOML representation of this item.
     pub fn as_toml(&self, py: Python<'_>) -> PyResult<String> {
-        let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let item = self.navigate(&inner)?;
         Ok(item.to_string().trim().to_owned())
     }
 
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let py = other.py();
-        let doc = self.checked_doc(py)?;
-        Ok(with_resolved_item(other, doc, |inner, needle| {
-            let item = self.navigate(inner)?;
-            Ok(equality::items_structural_eq(item, needle))
-        })?
+        let doc = self.doc(other.py());
+        Ok(with_resolved_item(
+            other,
+            doc,
+            |d| self.check_fresh(d),
+            |inner, needle| {
+                let item = self.navigate(inner)?;
+                Ok(equality::items_structural_eq(item, needle))
+            },
+        )?
         .unwrap_or(false))
     }
 
     /// The underlying data as a native Python object (int, str, list, dict, etc).
     #[getter]
     pub fn value(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         let item = self.navigate(&inner)?;
         item_ops::item_to_py(item, py)
     }
@@ -457,8 +504,7 @@ impl ItemProxy {
         if self.path.is_empty() {
             return Ok(None);
         }
-        let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         if let Some((ancestor_path, key)) = self.block_comment_target(&inner)? {
             let ancestor = item_ops::navigate_path(&inner, ancestor_path)?;
             Ok(comments::get_block_comment(ancestor, key))
@@ -482,8 +528,7 @@ impl ItemProxy {
         if self.path.is_empty() {
             return Err(PyTypeError::new_err("cannot set comment on root"));
         }
-        let doc = self.checked_doc(py)?;
-        let mut inner = doc.inner.write();
+        let (_doc, mut inner) = self.write_checked(py)?;
         if let Some((ancestor_path, key)) = self.block_comment_target(&inner)? {
             let key = key.to_owned();
             let ancestor = item_ops::navigate_path_mut(&mut inner, ancestor_path)?;
@@ -503,8 +548,7 @@ impl ItemProxy {
     /// The inline comment after this value (e.g. `key = 1 # this part`), or None.
     #[getter]
     pub fn inline_comment(&self, py: Python<'_>) -> PyResult<Option<String>> {
-        let doc = self.checked_doc(py)?;
-        let inner = doc.inner.read();
+        let (_doc, inner) = self.read_checked(py)?;
         if let Some(comment) = self.element_inline_comment(&inner)? {
             return Ok(Some(comment));
         }
@@ -518,8 +562,7 @@ impl ItemProxy {
     /// Pass ``None`` to remove the comment.
     #[setter]
     pub fn set_inline_comment(&self, py: Python<'_>, value: Option<&str>) -> PyResult<()> {
-        let doc = self.checked_doc(py)?;
-        let mut inner = doc.inner.write();
+        let (_doc, mut inner) = self.write_checked(py)?;
         let raw = match value {
             Some(text) => comments::validate_inline_comment(text)?,
             None => String::new(),
@@ -548,8 +591,7 @@ impl ItemProxy {
     // ---- shared methods ----
 
     pub fn clear(&self, py: Python<'_>) -> PyResult<()> {
-        let doc = self.checked_doc(py)?;
-        let mut inner = doc.inner.write();
+        let (doc, mut inner) = self.write_checked(py)?;
         let item = self.navigate_mut(&mut inner)?;
         item_ops::item_clear(item)?;
         self.bump_self(doc);
@@ -562,8 +604,7 @@ impl ItemProxy {
     /// This is shallow - it formats the item itself, not nested sub-tables.
     /// Note: any comments on the formatted item will be removed.
     pub fn fmt(&self, py: Python<'_>) -> PyResult<()> {
-        let doc = self.checked_doc(py)?;
-        let mut inner = doc.inner.write();
+        let (_doc, mut inner) = self.write_checked(py)?;
         let item = self.navigate_mut(&mut inner)?;
         item_ops::item_fmt(item);
         Ok(())

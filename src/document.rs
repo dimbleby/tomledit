@@ -239,12 +239,7 @@ impl Document {
                     doc.bump_at(&[Key::Str(key)]);
                     item
                 }
-                None => {
-                    return match default {
-                        Some(d) => Ok(d),
-                        None => Err(PyKeyError::new_err(key)),
-                    };
-                }
+                None => return default.ok_or_else(|| PyKeyError::new_err(key)),
             }
         };
         item_ops::item_to_py(&removed, py)

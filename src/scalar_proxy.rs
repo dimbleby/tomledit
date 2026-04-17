@@ -45,7 +45,7 @@ impl ScalarProxy {
     fn __getattr__(slf: &Bound<'_, Self>, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
         let py_value = resolve(slf, py)?;
         let bound = py_value.bind(py);
-        bound.getattr(name).map(|a| a.unbind()).map_err(|_| {
+        bound.getattr(name).map(Bound::unbind).map_err(|_| {
             let type_name = bound
                 .get_type()
                 .name()
@@ -279,6 +279,6 @@ impl ScalarProxy {
         let val = resolve(slf, py)?;
         val.bind(py)
             .call_method1("__format__", (spec,))
-            .map(|a| a.unbind())
+            .map(Bound::unbind)
     }
 }

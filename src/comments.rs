@@ -146,9 +146,7 @@ pub(crate) fn get_block_comment(parent: &ItemRs, key: &str) -> Option<String> {
             let raw = match table.get(key)? {
                 ItemRs::Table(child) => child.decor().prefix()?.as_str()?,
                 ItemRs::ArrayOfTables(aot) => aot.iter().next()?.decor().prefix()?.as_str()?,
-                _ => {
-                    return extract_block_comment(table.key(key)?.leaf_decor().prefix()?.as_str()?);
-                }
+                _ => table.key(key)?.leaf_decor().prefix()?.as_str()?,
             };
             extract_block_comment(raw)
         }
@@ -172,7 +170,9 @@ pub(crate) fn set_block_comment(
         ItemRs::Table(table) => {
             let decor = match table.get_mut(key) {
                 Some(ItemRs::Table(child)) => Some(child.decor_mut()),
-                Some(ItemRs::ArrayOfTables(aot)) => aot.iter_mut().next().map(|t| t.decor_mut()),
+                Some(ItemRs::ArrayOfTables(aot)) => {
+                    aot.iter_mut().next().map(toml_edit::Table::decor_mut)
+                }
                 _ => None,
             };
             if let Some(d) = decor {

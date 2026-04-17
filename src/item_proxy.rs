@@ -549,8 +549,8 @@ impl ItemProxy {
             let item = self.navigate(&inner)?;
             let decor = item
                 .as_value()
-                .map(|v| v.decor())
-                .or(item.as_table().map(|t| t.decor()));
+                .map(ValueRs::decor)
+                .or_else(|| item.as_table().map(toml_edit::Table::decor));
             Ok(decor.and_then(comments::get_element_block_comment))
         }
     }

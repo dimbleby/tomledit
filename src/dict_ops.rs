@@ -281,10 +281,7 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
 
 /// Extract key-value pairs from `**kwargs`.
 pub(crate) fn extract_kwargs(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Vec<(String, Item)>> {
-    match kwargs {
-        Some(kw) => dict_to_pairs(kw),
-        None => Ok(Vec::new()),
-    }
+    kwargs.map_or_else(|| Ok(Vec::new()), dict_to_pairs)
 }
 
 /// Apply pre-extracted update pairs to an item.
@@ -452,14 +449,13 @@ fn normalize_plain_dict_key<'py>(key: &Bound<'py, PyAny>, py: Python<'py>) -> Py
 /// Remove a key from a table-like item, returning the removed item and key.
 pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
     match item {
-        ItemRs::Table(table) => match table.remove(key) {
-            Some(v) => Ok((Item(v), Key::Str(key.into()))),
-            None => Err(PyKeyError::new_err(key.to_owned())),
-        },
-        ItemRs::Value(ValueRs::InlineTable(it)) => match inline_table_remove(it, key) {
-            Some(v) => Ok((Item(ItemRs::Value(v)), Key::Str(key.into()))),
-            None => Err(PyKeyError::new_err(key.to_owned())),
-        },
+        ItemRs::Table(table) => table
+            .remove(key)
+            .map(|v| (Item(v), Key::Str(key.into())))
+            .ok_or_else(|| PyKeyError::new_err(key.to_owned())),
+        ItemRs::Value(ValueRs::InlineTable(it)) => inline_table_remove(it, key)
+            .map(|v| (Item(ItemRs::Value(v)), Key::Str(key.into())))
+            .ok_or_else(|| PyKeyError::new_err(key.to_owned())),
         _ => Err(unsupported_op(item, "pop()")),
     }
 }

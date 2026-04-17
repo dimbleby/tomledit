@@ -168,6 +168,16 @@ class TestProxyListMethods:
         with pytest.raises(ValueError, match="not in array"):
             doc["items"].remove("not a dict")
 
+    def test_remove_non_toml_object(self) -> None:
+        """remove() raises ValueError for objects that aren't TOML-convertible."""
+
+        class NotToml:
+            pass
+
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        with pytest.raises(ValueError, match="not in array"):
+            doc["arr"].remove(NotToml())
+
     # -- cross-type numeric equality in remove ----------------------------------
 
     def test_remove_float_finds_integer(self) -> None:
@@ -1176,6 +1186,16 @@ class TestIndex:
         with pytest.raises(ValueError, match="not in array"):
             doc["items"].index("not a dict")
 
+    def test_index_non_toml_object(self) -> None:
+        """index() raises ValueError for objects that aren't TOML-convertible."""
+
+        class NotToml:
+            pass
+
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        with pytest.raises(ValueError, match="not in array"):
+            doc["arr"].index(NotToml())
+
 
 # ---------------------------------------------------------------------------
 # Proxy arguments (ItemProxy passed to remove / __contains__ / count / index)
@@ -1889,27 +1909,6 @@ class TestWriteLockDeadlocks:
     """Python callbacks (__eq__, __index__) that read the document must not
     deadlock when called from list operations that hold a write lock.
     """
-
-    def test_remove_custom_eq_reads_document(self) -> None:
-        """remove() must not deadlock when __eq__ reads the same document.
-
-        Non-TOML objects are not found in the array, so remove() raises
-        ValueError rather than searching via Python __eq__.
-        """
-
-        class Tricky:
-            def __init__(self, doc: Document) -> None:
-                self.doc = doc
-
-            def __eq__(self, other: object) -> bool:  # type: ignore[explicit-override]
-                return len(self.doc) > 0
-
-            __hash__ = None  # type: ignore[assignment]
-
-        doc = Document.parse("arr = [1, 2, 3]\n")
-        tricky = Tricky(doc)
-        with pytest.raises(ValueError, match="not in array"):
-            doc["arr"].remove(tricky)
 
     def test_pop_custom_index_reads_document(self) -> None:
         """pop() must not deadlock when __index__ reads the same document."""

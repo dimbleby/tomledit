@@ -44,14 +44,12 @@ impl DictProxy {
 
     pub fn __setitem__(
         slf: &Bound<'_, Self>,
+        py: Python<'_>,
         key: &Bound<'_, PyAny>,
-        value: &Bound<'_, PyAny>,
+        value: Item,
     ) -> PyResult<()> {
-        let py = key.py();
         let key_str = item_ops::extract_key_str(key)?
             .ok_or_else(|| PyTypeError::new_err("TOML table keys must be strings"))?;
-        // Extract before write lock — value may be a proxy from the same document.
-        let value: Item = value.extract()?;
         let base = slf.as_super().get();
         let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;

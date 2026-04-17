@@ -50,7 +50,7 @@ class TestDocumentConstructor:
         assert doc["version"] == "1.0"
 
     def test_non_mapping_raises(self) -> None:
-        with pytest.raises(TypeError, match="must be a mapping"):
+        with pytest.raises(TypeError, match="not an instance of 'Mapping'"):
             Document(42)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
     def test_from_mapping_proxy(self) -> None:

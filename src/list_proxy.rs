@@ -7,7 +7,7 @@ use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
 use crate::item_proxy::{
-    ItemProxy, ReadCtx, resolve_other_item, resolve_proxy, with_proxy_item, with_resolved_item,
+    ItemProxy, extract_owned_item, resolve_proxy, with_proxy_item, with_resolved_item,
 };
 use crate::list_ops;
 
@@ -380,31 +380,14 @@ impl ListProxy {
     pub fn remove(slf: &Bound<'_, Self>, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
         let base = slf.as_super().get();
 
-        // Try to resolve as a proxy or Document under a write lock, comparing in-place without
-        // cloning. ReadCtx handles same-document guard reuse.
-        {
-            let (doc, mut inner) = base.write_checked(py)?;
-            let resolved = {
-                let ctx = ReadCtx::new(doc, &inner);
-                resolve_other_item(value, &ctx, |needle| needle.clone())?
-            };
-            if let Some(needle) = resolved {
-                let item = base.navigate_mut(&mut inner)?;
-                let affected = list_ops::find_and_remove(item, &needle)?;
-                base.bump_affected(doc, affected);
-                return Ok(());
-            }
-        }
+        // Resolve the needle to an owned `toml_edit::Item` with no destination
+        // lock held, then take the write lock for the actual removal.
+        let needle = extract_owned_item(value)?
+            .ok_or_else(|| PyValueError::new_err("value not in array"))?;
 
-        // Plain Python value — extract before locking since extract may read the document for
-        // nested proxies or Documents.
-        let needle: Item = match value.extract() {
-            Ok(item) => item,
-            Err(_) => return Err(PyValueError::new_err("value not in array")),
-        };
         let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
-        let affected = list_ops::find_and_remove(item, &needle.0)?;
+        let affected = list_ops::find_and_remove(item, &needle)?;
         base.bump_affected(doc, affected);
         Ok(())
     }

@@ -15,10 +15,50 @@ use crate::item_ops::{self, Affected, Key};
 use crate::list_proxy::ListProxy;
 use crate::scalar_proxy::ScalarProxy;
 
-/// If `value` is an [`ItemProxy`] (or subclass such as `ScalarItem`), resolve
-/// it to its underlying Python value so that subsequent operations can compare
-/// plain Python objects without locking the document through dunder methods.
-/// Returns `None` when `value` is not a proxy.
+// ---------------------------------------------------------------------------
+// Resolving a Python value to a `toml_edit::Item`
+//
+// Five public shapes, distinguished by what the caller needs and what locks
+// it already holds.  They share a few private pieces below.
+//
+// * `resolve_proxy`           — flatten an `ItemProxy` to its underlying
+//                               Python value.  Used when we need a Python
+//                               object (e.g. to call `__index__` on it).
+// * `with_proxy_item`         — borrow the `Item` behind an `ItemProxy`
+//                               under a brief read lock on the proxy's
+//                               document.  Proxy only; doesn't handle
+//                               `Document` or arbitrary Python values.
+// * `with_proxy_or_doc_item`  — borrow the `Item` behind an `ItemProxy` or
+//                               a `Document` under a brief read lock on
+//                               its owning document.  Returns `None` for
+//                               plain Python values.
+// * `extract_owned_item`      — own an `Item` from a proxy, a `Document`,
+//                               or any TOML-convertible Python value.  No
+//                               source lock is retained, so the caller can
+//                               then take a write lock on the same document.
+// * `with_resolved_item`      — borrow the `Item` behind a value while a
+//                               destination read guard is held.  Reuses
+//                               the destination guard for same-document
+//                               proxies/Documents — this is a correctness
+//                               requirement, not just an optimisation:
+//                               `parking_lot::RwLock` reads are not
+//                               reentrant, and under free-threaded Python
+//                               a writer queued between the two reads
+//                               would deadlock.
+//
+// The four "no dest lock" helpers above (`with_proxy_item`,
+// `with_proxy_or_doc_item`, `extract_owned_item`, and the proxy arm of
+// `resolve_proxy`) all briefly take a read lock on the *source* document
+// and so **must not be called while the caller holds a lock on any
+// document** — same reentrancy concern.
+//
+// All return `None` (or `Ok(None)`) when the value is not representable
+// in the requested form, so callers can treat the absence as "not a proxy",
+// "not a TOML value", "not in the array", etc.
+// ---------------------------------------------------------------------------
+
+/// Flatten an `ItemProxy` to its underlying Python value.  Returns `None`
+/// when `value` is not a proxy.
 pub(crate) fn resolve_proxy(value: &Bound<'_, PyAny>) -> PyResult<Option<Py<PyAny>>> {
     if let Ok(proxy) = value.cast::<ItemProxy>() {
         Ok(Some(proxy.get().value(value.py())?))
@@ -27,124 +67,65 @@ pub(crate) fn resolve_proxy(value: &Bound<'_, PyAny>) -> PyResult<Option<Py<PyAn
     }
 }
 
-/// If `other` is an [`ItemProxy`], resolve it to the underlying `toml_edit::Item`
-/// and call `f` with a reference to it.  Returns `None` when `other` is not a
-/// proxy.  This avoids repeating the cast → get → check_fresh → read → navigate
-/// sequence at every call site.
+/// Borrow the `Item` behind an `ItemProxy` under its own brief read lock,
+/// calling `f` with the borrow.  Returns `None` for non-proxies.
 pub(crate) fn with_proxy_item<R>(
-    other: &Bound<'_, PyAny>,
-    f: impl FnOnce(&toml_edit::Item) -> R,
+    value: &Bound<'_, PyAny>,
+    f: impl FnOnce(&ItemRs) -> R,
 ) -> PyResult<Option<R>> {
-    resolve_proxy_item(other, None, f)
-}
-
-/// Read context that carries an existing `inner` read guard reference.
-///
-/// When a method holds `doc.inner.read()` (or `.write()`) and needs to compare
-/// against a value that may be a proxy or `Document` from the same document,
-/// this context allows [`resolve_other_item`] to reuse the guard instead of
-/// acquiring a nested read lock (which would deadlock under a write guard).
-pub(crate) struct ReadCtx<'a> {
-    doc: &'a Document,
-    inner: &'a DocumentRs,
-}
-
-impl<'a> ReadCtx<'a> {
-    pub(crate) fn new(doc: &'a Document, inner: &'a DocumentRs) -> Self {
-        Self { doc, inner }
-    }
-}
-
-/// Resolve `other` as either an [`ItemProxy`] or a [`Document`], calling `f`
-/// with the underlying `toml_edit::Item`.  Returns `None` when `other` is
-/// neither.
-///
-/// Same-document guards are reused via `ctx` to avoid nested locking.
-pub(crate) fn resolve_other_item<R>(
-    other: &Bound<'_, PyAny>,
-    ctx: &ReadCtx<'_>,
-    f: impl Fn(&toml_edit::Item) -> R,
-) -> PyResult<Option<R>> {
-    if let Some(r) = resolve_proxy_item(other, Some(ctx), &f)? {
-        return Ok(Some(r));
-    }
-    resolve_doc_item(other, ctx, f)
-}
-
-/// Resolve a [`Document`] to its root item, reusing the guard from `ctx`
-/// when it is the same document.
-fn resolve_doc_item<R>(
-    other: &Bound<'_, PyAny>,
-    ctx: &ReadCtx<'_>,
-    f: impl FnOnce(&toml_edit::Item) -> R,
-) -> PyResult<Option<R>> {
-    let Ok(doc_bound) = other.cast::<Document>() else {
-        return Ok(None);
-    };
-    let doc = doc_bound.get();
-    if std::ptr::eq(ctx.doc, doc) {
-        Ok(Some(f(ctx.inner.as_item())))
-    } else {
-        let inner = doc.inner.read();
-        Ok(Some(f(inner.as_item())))
-    }
-}
-
-/// Shared implementation for [`with_proxy_item`] and [`resolve_other_item`].
-///
-/// When `ctx` is `Some` and the proxy targets the same document, the existing
-/// guard is reused.  Otherwise a fresh read lock is acquired.
-fn resolve_proxy_item<R>(
-    other: &Bound<'_, PyAny>,
-    ctx: Option<&ReadCtx<'_>>,
-    f: impl FnOnce(&toml_edit::Item) -> R,
-) -> PyResult<Option<R>> {
-    let Ok(proxy) = other.cast::<ItemProxy>() else {
+    let Ok(proxy) = value.cast::<ItemProxy>() else {
         return Ok(None);
     };
     let proxy = proxy.get();
-    let doc = proxy.document.bind(other.py()).get();
-    if let Some(ctx) = ctx.filter(|c| std::ptr::eq(c.doc, doc)) {
-        // Reuse the caller's guard: any invalidating mutation was stamped
-        // into the trie before the guard was taken, so `check_fresh` is
-        // coherent.  Also avoids a nested read that would deadlock if the
-        // caller holds a write guard.
-        proxy.check_fresh(doc)?;
-        let item = proxy.navigate(ctx.inner)?;
-        return Ok(Some(f(item)));
-    }
-    let (_doc, inner) = proxy.read_checked(other.py())?;
+    let (_doc, inner) = proxy.read_checked(value.py())?;
     let item = proxy.navigate(&inner)?;
     Ok(Some(f(item)))
 }
 
-/// Try to extract a Python object as a `toml_edit::Item` for equality
-/// comparison.
-///
-/// Returns `None` for objects that are not representable as TOML values
-/// (the caller should treat this as "not equal").
-///
-/// Only `TypeError` is caught — other exceptions from the extraction
-/// (e.g. a mapping whose `items()` raises) propagate to the caller.
-fn extract_for_eq(other: &Bound<'_, PyAny>) -> PyResult<Option<Item>> {
-    match other.extract::<Item>() {
-        Ok(item) => Ok(Some(item)),
-        Err(e) if e.is_instance_of::<PyTypeError>(other.py()) => Ok(None),
-        Err(e) => Err(e),
+/// Borrow the `Item` behind an `ItemProxy` or a `Document` under a brief
+/// read lock on its owning document, calling `f` with the borrow.  Returns
+/// `None` for plain Python values.
+pub(crate) fn with_proxy_or_doc_item<R>(
+    value: &Bound<'_, PyAny>,
+    f: impl FnOnce(&ItemRs) -> R,
+) -> PyResult<Option<R>> {
+    if let Ok(proxy) = value.cast::<ItemProxy>() {
+        let proxy = proxy.get();
+        let (_doc, inner) = proxy.read_checked(value.py())?;
+        let item = proxy.navigate(&inner)?;
+        return Ok(Some(f(item)));
     }
+    if let Ok(doc_bound) = value.cast::<Document>() {
+        let inner = doc_bound.get().inner.read();
+        return Ok(Some(f(inner.as_item())));
+    }
+    Ok(None)
 }
 
-/// Resolve a Python value to a `toml_edit::Item` and call `f` with it.
+/// Produce an owned `Item` from `value`, handling proxies, `Document`s, and
+/// arbitrary TOML-convertible Python values.  Returns `None` for objects
+/// with no TOML representation (caller typically treats as "not found").
+pub(crate) fn extract_owned_item(value: &Bound<'_, PyAny>) -> PyResult<Option<ItemRs>> {
+    if let Some(item) = with_proxy_or_doc_item(value, ItemRs::clone)? {
+        return Ok(Some(item));
+    }
+    Ok(try_extract_item(value)?.map(|item| item.0))
+}
+
+/// Borrow the `Item` behind `value` while a destination read guard is held,
+/// reusing the guard for same-document proxies/Documents.
 ///
-/// Fast path: if `value` is a proxy or `Document`, `f` runs under the
-/// existing read lock — zero cloning.  Slow path: the value is extracted
-/// to an owned `Item` (no lock held), then `f` runs under a fresh lock.
+/// Fast path: if `value` is a proxy or `Document`, `f` runs without cloning.
+/// For same-document needles the destination's existing guard is reused
+/// (avoiding a recursive read that could deadlock under a queued writer).
+/// Slow path: the value is extracted to an owned `Item` (no lock held), then
+/// `f` runs under a fresh destination read lock.
 ///
-/// The `proxy` freshness check is performed **under** each read lock this
-/// function takes, closing the TOCTOU window between check and read.
+/// `check_fresh` is invoked **under** every destination read lock taken,
+/// closing the TOCTOU window between freshness check and read.
 ///
-/// Returns `None` when the value is not representable as a TOML item
-/// (the caller should treat this as "not found" / "not equal").
+/// Returns `None` when `value` has no TOML representation (caller treats as
+/// "not found" / "not equal").
 pub(crate) fn with_resolved_item<R>(
     value: &Bound<'_, PyAny>,
     doc: &Document,
@@ -154,17 +135,73 @@ pub(crate) fn with_resolved_item<R>(
     {
         let inner = doc.inner.read();
         check_fresh(doc)?;
-        let ctx = ReadCtx::new(doc, &inner);
+        let ctx = ReadCtx { doc, inner: &inner };
         if let Some(result) = resolve_other_item(value, &ctx, |item| f(&inner, item))? {
             return result.map(Some);
         }
     }
-    let Some(extracted) = extract_for_eq(value)? else {
+    let Some(extracted) = try_extract_item(value)? else {
         return Ok(None);
     };
     let inner = doc.inner.read();
     check_fresh(doc)?;
     f(&inner, &extracted.0).map(Some)
+}
+
+// ---------------------------------------------------------------------------
+// Private pieces shared by `with_resolved_item`'s same-doc-reuse path.
+// ---------------------------------------------------------------------------
+
+/// Carries an existing destination guard so that same-document proxy/Document
+/// resolution can reuse it instead of acquiring a (non-reentrant) nested read.
+struct ReadCtx<'a> {
+    doc: &'a Document,
+    inner: &'a DocumentRs,
+}
+
+/// Resolve `value` as an `ItemProxy` or `Document` under the destination
+/// guard `ctx`, calling `f` with the borrow.  Returns `None` when `value` is
+/// neither.  Same-document needles reuse `ctx`'s guard.
+fn resolve_other_item<R>(
+    value: &Bound<'_, PyAny>,
+    ctx: &ReadCtx<'_>,
+    f: impl Fn(&ItemRs) -> R,
+) -> PyResult<Option<R>> {
+    if let Ok(proxy) = value.cast::<ItemProxy>() {
+        let proxy = proxy.get();
+        let doc = proxy.document.bind(value.py()).get();
+        if std::ptr::eq(ctx.doc, doc) {
+            // Same document: reuse the caller's guard.  `check_fresh` is
+            // coherent because any invalidating mutation would have been
+            // stamped into the trie before the guard was taken.
+            proxy.check_fresh(doc)?;
+            let item = proxy.navigate(ctx.inner)?;
+            return Ok(Some(f(item)));
+        }
+        let (_doc, inner) = proxy.read_checked(value.py())?;
+        let item = proxy.navigate(&inner)?;
+        return Ok(Some(f(item)));
+    }
+    if let Ok(doc_bound) = value.cast::<Document>() {
+        let doc = doc_bound.get();
+        if std::ptr::eq(ctx.doc, doc) {
+            return Ok(Some(f(ctx.inner.as_item())));
+        }
+        let inner = doc.inner.read();
+        return Ok(Some(f(inner.as_item())));
+    }
+    Ok(None)
+}
+
+/// Try to extract a Python object as a `toml_edit::Item`.  Returns `None`
+/// for objects that have no TOML representation (caller treats as "not found"
+/// / "not equal").
+fn try_extract_item(value: &Bound<'_, PyAny>) -> PyResult<Option<Item>> {
+    match value.extract::<Item>() {
+        Ok(item) => Ok(Some(item)),
+        Err(e) if e.is_instance_of::<PyTypeError>(value.py()) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// A live reference to a TOML value inside a Document.

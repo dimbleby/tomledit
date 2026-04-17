@@ -105,15 +105,10 @@ impl Document {
 impl Document {
     #[new]
     #[pyo3(signature = (data=None))]
-    fn new(data: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+    fn new(data: Option<Table>) -> Self {
         match data {
-            None => Ok(Self::from_inner(DocumentRs::new())),
-            Some(obj) => {
-                let table: Table = obj.extract().map_err(|_| {
-                    PyTypeError::new_err("Document() argument must be a mapping or None")
-                })?;
-                Ok(Self::from_inner(DocumentRs::from(table.0)))
-            }
+            None => Self::from_inner(DocumentRs::new()),
+            Some(table) => Self::from_inner(DocumentRs::from(table.0)),
         }
     }
 

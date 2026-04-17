@@ -367,26 +367,13 @@ impl Document {
     }
 
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        if let Ok(other_doc) = other.cast::<Self>() {
-            let other_doc = other_doc.get();
-            if std::ptr::eq(self, other_doc) {
-                return Ok(true);
-            }
-            let self_inner = self.inner.read();
-            let other_inner = other_doc.inner.read();
-            Ok(equality::items_structural_eq(
-                self_inner.as_item(),
-                other_inner.as_item(),
-            ))
-        } else {
-            Ok(with_resolved_item(
-                other,
-                self,
-                |_| Ok(()),
-                |inner, needle| Ok(equality::items_structural_eq(inner.as_item(), needle)),
-            )?
-            .unwrap_or(false))
-        }
+        Ok(with_resolved_item(
+            other,
+            self,
+            |_| Ok(()),
+            |inner, needle| Ok(equality::items_structural_eq(inner.as_item(), needle)),
+        )?
+        .unwrap_or(false))
     }
 
     pub fn __copy__(&self) -> Self {

@@ -348,7 +348,7 @@ impl CommentPreservation for toml_edit::InlineTable {
         debug_assert_eq!(comments.len(), self.len());
         let keys: Vec<String> = self.iter().map(|(k, _)| k.to_owned()).collect();
         for (i, inline) in comments.iter().enumerate() {
-            let next_key = keys.get(i + 1).map(|s| s.as_str());
+            let next_key = keys.get(i + 1).map(String::as_str);
             let raw = it_read_slot(self, next_key);
             if PrefixParts::split(raw).inline != *inline {
                 let new_raw = PrefixParts::with_inline(raw, inline);

@@ -182,7 +182,7 @@ impl Document {
             return Err(PyKeyError::new_err(key.repr()?.to_string()));
         };
         if !slf.get().inner.read().contains_key(&key) {
-            return Err(PyKeyError::new_err(key.clone()));
+            return Err(PyKeyError::new_err(key));
         }
         let proxy = Self::make_proxy(slf, &key);
         ItemProxy::into_typed(slf.py(), proxy)

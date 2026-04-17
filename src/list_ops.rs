@@ -162,7 +162,7 @@ fn inter_element_prefix(arr: &toml_edit::Array) -> Option<String> {
         .and_then(|e| e.decor().prefix())
         .and_then(|r| r.as_str())
         .unwrap_or(" ");
-    Some(sep.to_string())
+    Some(sep.to_owned())
 }
 
 /// Apply decor to a newly created value, matching the array's existing style.
@@ -509,7 +509,6 @@ fn array_setitem_slice(
 
         arr.restore_inline_comments(&ic);
         apply_removal_decor(arr, &decor);
-        Ok(())
     } else {
         // Extended slice: replacement must match the slice length.
         let indices = collect_slice_indices(start, stop, step);
@@ -527,8 +526,8 @@ fn array_setitem_slice(
                 comments::set_array_inline_comment(arr, idx, &inline);
             }
         }
-        Ok(())
     }
+    Ok(())
 }
 
 fn aot_setitem_slice(

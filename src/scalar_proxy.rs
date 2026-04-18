@@ -42,8 +42,7 @@ impl ScalarProxy {
             let type_name = resolved
                 .get_type()
                 .name()
-                .map(|n| n.to_string())
-                .unwrap_or_else(|_| "unknown".to_owned());
+                .map_or_else(|_| "unknown".to_owned(), |n| n.to_string());
             PyAttributeError::new_err(format!(
                 "'ScalarItem' wrapping {type_name} has no attribute '{name}'"
             ))

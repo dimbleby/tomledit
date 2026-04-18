@@ -791,7 +791,7 @@ class TestAdd:
         assert result[1] == {"name": "b"}
 
     def test_radd_aot(self) -> None:
-        """__radd__ on an AoT exercises empty_array_like for AoT kind."""
+        """__radd__ on an AoT builds a fresh empty AoT to receive the elements."""
         doc = Document.parse(
             toml_literal("""
             [[items]]

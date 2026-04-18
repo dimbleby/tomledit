@@ -23,18 +23,6 @@ fn clone_self_item(base: &ItemProxy, py: Python<'_>) -> PyResult<toml_edit::Item
     Ok(base.navigate(&inner)?.clone())
 }
 
-/// Create an empty array-like item matching the kind (array vs AoT) of `source`.
-fn empty_array_like(source: list_ops::ArrayLikeRef<'_>) -> toml_edit::Item {
-    match source {
-        list_ops::ArrayLikeRef::Array(_) => {
-            toml_edit::Item::Value(toml_edit::Value::Array(toml_edit::Array::new()))
-        }
-        list_ops::ArrayLikeRef::Aot(_) => {
-            toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new())
-        }
-    }
-}
-
 /// Extract Python values from an iterable into a `Vec<Item>`.
 fn collect_items(obj: &Bound<'_, PyAny>) -> PyResult<Vec<Item>> {
     obj.try_iter()?
@@ -280,25 +268,37 @@ impl ListProxy {
         if !list_ops::is_list_like(other, py) {
             return Ok(py.NotImplemented());
         }
-        let base = slf.as_super().get();
-        let self_item = clone_self_item(base, py)?;
-        let self_ref = list_ops::as_array_like(&self_item, "__radd__()")?;
-        let mut new_doc = DocumentRs::new();
-        new_doc["_"] = empty_array_like(self_ref);
+        // Resolve `other` before taking self's read lock, so any Python
+        // iteration / proxy-resolve happens lock-free.
         let other_source = prepare_source(other)?;
-        append_source(&mut new_doc["_"], other_source, "__radd__()")?;
-        list_ops::clone_elements_into(&mut new_doc["_"], self_ref, 1);
+        let base = slf.as_super().get();
+        let mut new_doc = DocumentRs::new();
+        {
+            let (_doc, inner) = base.read_checked(py)?;
+            let item = base.navigate(&inner)?;
+            let self_ref = list_ops::as_array_like(item, "__radd__()")?;
+            new_doc["_"] = self_ref.empty();
+            append_source(&mut new_doc["_"], other_source, "__radd__()")?;
+            list_ops::clone_elements_into(&mut new_doc["_"], self_ref, 1);
+        }
         ProxyParts::wrap_fresh(new_doc, py)
     }
 
     pub fn __mul__(slf: &Bound<'_, Self>, py: Python<'_>, n: isize) -> PyResult<Py<PyAny>> {
-        let mut new_doc = DocumentRs::new();
         let base = slf.as_super().get();
-        new_doc["_"] = clone_self_item(base, py)?;
+        let mut new_doc = DocumentRs::new();
         if n <= 0 {
-            item_ops::item_clear(&mut new_doc["_"])?;
-        } else if n > 1 {
-            list_ops::item_repeat(&mut new_doc["_"], n as usize - 1, "__mul__()")?;
+            // Cheap kind-peek under a read lock — no clone of self's contents.
+            let (_doc, inner) = base.read_checked(py)?;
+            let item = base.navigate(&inner)?;
+            let self_ref = list_ops::as_array_like(item, "__mul__()")?;
+            new_doc["_"] = self_ref.empty();
+        } else {
+            // Whole-item clone preserves outer formatting (decor, comments).
+            new_doc["_"] = clone_self_item(base, py)?;
+            if n > 1 {
+                list_ops::item_repeat(&mut new_doc["_"], n as usize - 1, "__mul__()")?;
+            }
         }
         ProxyParts::wrap_fresh(new_doc, py)
     }

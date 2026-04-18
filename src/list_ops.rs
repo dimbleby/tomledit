@@ -43,6 +43,14 @@ impl ArrayLikeRef<'_> {
             Self::Aot(aot) => aot.len(),
         }
     }
+
+    /// Construct a new, empty TOML item of the same kind (array or AoT).
+    pub(crate) fn empty(&self) -> ItemRs {
+        match self {
+            Self::Array(_) => ItemRs::Value(ValueRs::Array(toml_edit::Array::new())),
+            Self::Aot(_) => ItemRs::ArrayOfTables(toml_edit::ArrayOfTables::new()),
+        }
+    }
 }
 
 /// Owned array-like item — the owned counterpart to `ArrayLikeRef`.

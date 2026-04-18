@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fix a TOCTOU window in `DictItem.update()` between proxy freshness check
+  and document write-lock acquisition that could let a stale proxy mutate
+  post-mutation state under free-threading.
+
 ## 1.1.2 (18 April 2026)
 
 - Fix consistency of reads in free-threaded builds

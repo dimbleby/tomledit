@@ -1,5 +1,6 @@
 use pyo3::exceptions::PyAttributeError;
 use pyo3::prelude::*;
+use pyo3::types::{PyFloat, PyInt};
 
 use crate::item_proxy::{ItemProxy, resolve_proxy};
 
@@ -7,30 +8,23 @@ use crate::item_proxy::{ItemProxy, resolve_proxy};
 #[pyclass(frozen, name = "ScalarItem", module = "tomledit", extends = ItemProxy)]
 pub(crate) struct ScalarProxy;
 
-/// Invoke a binary operator from Python's `operator` module (e.g. "add", "sub").
-fn py_binop(
-    py: Python<'_>,
-    op: &str,
-    lhs: &Bound<'_, PyAny>,
-    rhs: &Bound<'_, PyAny>,
-) -> PyResult<Py<PyAny>> {
-    py.import("operator")?
-        .getattr(op)?
-        .call1((lhs, rhs))
-        .map(Bound::unbind)
-}
-
-/// Invoke a unary operator from Python's `operator` module (e.g. "neg", "pos").
-fn py_unop(py: Python<'_>, op: &str, operand: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-    py.import("operator")?
-        .getattr(op)?
-        .call1((operand,))
-        .map(Bound::unbind)
-}
-
 /// Resolve the underlying Python value from the TOML document.
-fn resolve(slf: &Bound<'_, ScalarProxy>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-    slf.as_super().get().value(py)
+fn resolve<'py>(slf: &Bound<'py, ScalarProxy>) -> PyResult<Bound<'py, PyAny>> {
+    let py = slf.py();
+    slf.as_super().get().value(py).map(|v| v.into_bound(py))
+}
+
+/// Resolve a `__pow__` modulo argument, unwrapping a proxy if present.
+/// `None` becomes Python's `None` (which `PyAnyMethods::pow` treats as
+/// "no modulo").
+fn resolve_modulo<'py>(
+    py: Python<'py>,
+    modulo: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    match modulo {
+        None => Ok(py.None().into_bound(py)),
+        Some(m) => Ok(resolve_proxy(m)?.map_or_else(|| m.clone(), |v| v.into_bound(py))),
+    }
 }
 
 #[pymethods]
@@ -42,11 +36,10 @@ impl ScalarProxy {
 
     // ---- attribute forwarding ----
 
-    fn __getattr__(slf: &Bound<'_, Self>, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
-        let py_value = resolve(slf, py)?;
-        let bound = py_value.bind(py);
-        bound.getattr(name).map(Bound::unbind).map_err(|_| {
-            let type_name = bound
+    fn __getattr__<'py>(slf: &Bound<'py, Self>, name: &str) -> PyResult<Bound<'py, PyAny>> {
+        let resolved = resolve(slf)?;
+        resolved.getattr(name).map_err(|_| {
+            let type_name = resolved
                 .get_type()
                 .name()
                 .map(|n| n.to_string())
@@ -59,15 +52,11 @@ impl ScalarProxy {
 
     // ---- containment ----
 
-    fn __contains__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        value: &Bound<'_, PyAny>,
-    ) -> PyResult<bool> {
-        let resolved = resolve(slf, py)?;
+    fn __contains__(slf: &Bound<'_, Self>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let resolved = resolve(slf)?;
         let resolved_value = resolve_proxy(value)?;
-        let value = resolved_value.as_ref().map_or(value, |v| v.bind(py));
-        py_binop(py, "contains", resolved.bind(py), value)?.extract::<bool>(py)
+        let value = resolved_value.as_ref().map_or(value, |v| v.bind(slf.py()));
+        resolved.contains(value)
     }
 
     // ---- comparison ----
@@ -76,209 +65,167 @@ impl ScalarProxy {
         slf.as_super().get().__eq__(other)
     }
 
-    fn __lt__(slf: &Bound<'_, Self>, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        resolve(slf, py)?.bind(py).lt(other)
+    fn __lt__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+        resolve(slf)?.lt(other)
     }
 
-    fn __le__(slf: &Bound<'_, Self>, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        resolve(slf, py)?.bind(py).le(other)
+    fn __le__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+        resolve(slf)?.le(other)
     }
 
-    fn __gt__(slf: &Bound<'_, Self>, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        resolve(slf, py)?.bind(py).gt(other)
+    fn __gt__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+        resolve(slf)?.gt(other)
     }
 
-    fn __ge__(slf: &Bound<'_, Self>, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        resolve(slf, py)?.bind(py).ge(other)
+    fn __ge__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+        resolve(slf)?.ge(other)
     }
 
     // ---- type conversion ----
 
-    fn __int__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let val = resolve(slf, py)?;
-        py.import("builtins")?
-            .getattr("int")?
-            .call1((val.bind(py),))
-            .map(Bound::unbind)
+    fn __int__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let py = slf.py();
+        py.get_type::<PyInt>().call1((resolve(slf)?,))
     }
 
-    fn __float__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let val = resolve(slf, py)?;
-        py.import("builtins")?
-            .getattr("float")?
-            .call1((val.bind(py),))
-            .map(Bound::unbind)
+    fn __float__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let py = slf.py();
+        py.get_type::<PyFloat>().call1((resolve(slf)?,))
     }
 
-    fn __index__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let val = resolve(slf, py)?;
-        py_unop(py, "index", val.bind(py))
+    fn __index__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.call_method0("__index__")
     }
 
-    fn __hash__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<isize> {
-        resolve(slf, py)?.bind(py).hash()
+    fn __hash__(slf: &Bound<'_, Self>) -> PyResult<isize> {
+        resolve(slf)?.hash()
     }
 
     // ---- binary arithmetic ----
 
-    fn __add__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "add", resolve(slf, py)?.bind(py), other)
+    fn __add__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.add(other)
     }
 
-    fn __radd__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "add", other, resolve(slf, py)?.bind(py))
+    fn __radd__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        other.add(resolve(slf)?)
     }
 
-    fn __sub__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "sub", resolve(slf, py)?.bind(py), other)
+    fn __sub__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.sub(other)
     }
 
-    fn __rsub__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "sub", other, resolve(slf, py)?.bind(py))
+    fn __rsub__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        other.sub(resolve(slf)?)
     }
 
-    fn __mul__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "mul", resolve(slf, py)?.bind(py), other)
+    fn __mul__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.mul(other)
     }
 
-    fn __rmul__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "mul", other, resolve(slf, py)?.bind(py))
+    fn __rmul__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        other.mul(resolve(slf)?)
     }
 
-    fn __truediv__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "truediv", resolve(slf, py)?.bind(py), other)
+    fn __truediv__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.div(other)
     }
 
-    fn __rtruediv__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "truediv", other, resolve(slf, py)?.bind(py))
+    fn __rtruediv__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        other.div(resolve(slf)?)
     }
 
-    fn __floordiv__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "floordiv", resolve(slf, py)?.bind(py), other)
+    fn __floordiv__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.floor_div(other)
     }
 
-    fn __rfloordiv__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "floordiv", other, resolve(slf, py)?.bind(py))
+    fn __rfloordiv__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        other.floor_div(resolve(slf)?)
     }
 
-    fn __mod__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "mod", resolve(slf, py)?.bind(py), other)
+    fn __mod__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.rem(other)
     }
 
-    fn __rmod__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        other: &Bound<'_, PyAny>,
-    ) -> PyResult<Py<PyAny>> {
-        py_binop(py, "mod", other, resolve(slf, py)?.bind(py))
+    fn __rmod__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        other.rem(resolve(slf)?)
     }
 
-    fn __pow__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        exp: &Bound<'_, PyAny>,
-        modulo: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Py<PyAny>> {
-        let val = resolve(slf, py)?;
-        let pow_fn = py.import("builtins")?.getattr("pow")?;
-        match modulo {
-            Some(m) => {
-                let resolved_m = resolve_proxy(m)?;
-                let m = resolved_m.as_ref().map_or(m, |v| v.bind(py));
-                pow_fn.call1((val.bind(py), exp, m))
-            }
-            None => pow_fn.call1((val.bind(py), exp)),
-        }
-        .map(Bound::unbind)
+    fn __pow__<'py>(
+        slf: &Bound<'py, Self>,
+        exp: &Bound<'py, PyAny>,
+        modulo: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let modulo = resolve_modulo(slf.py(), modulo)?;
+        resolve(slf)?.pow(exp, &modulo)
     }
 
-    fn __rpow__(
-        slf: &Bound<'_, Self>,
-        py: Python<'_>,
-        base: &Bound<'_, PyAny>,
-        modulo: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Py<PyAny>> {
-        let val = resolve(slf, py)?;
-        let pow_fn = py.import("builtins")?.getattr("pow")?;
-        match modulo {
-            Some(m) => {
-                let resolved_m = resolve_proxy(m)?;
-                let m = resolved_m.as_ref().map_or(m, |v| v.bind(py));
-                pow_fn.call1((base, val.bind(py), m))
-            }
-            None => pow_fn.call1((base, val.bind(py))),
-        }
-        .map(Bound::unbind)
+    fn __rpow__<'py>(
+        slf: &Bound<'py, Self>,
+        base: &Bound<'py, PyAny>,
+        modulo: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let modulo = resolve_modulo(slf.py(), modulo)?;
+        base.pow(resolve(slf)?, &modulo)
     }
 
     // ---- unary operators ----
 
-    fn __neg__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        py_unop(py, "neg", resolve(slf, py)?.bind(py))
+    fn __neg__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.neg()
     }
 
-    fn __pos__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        py_unop(py, "pos", resolve(slf, py)?.bind(py))
+    fn __pos__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.pos()
     }
 
-    fn __abs__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        py_unop(py, "abs", resolve(slf, py)?.bind(py))
+    fn __abs__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.abs()
     }
 
-    fn __invert__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        py_unop(py, "invert", resolve(slf, py)?.bind(py))
+    fn __invert__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.bitnot()
     }
 
     // ---- formatting ----
 
-    fn __format__(slf: &Bound<'_, Self>, py: Python<'_>, spec: &str) -> PyResult<Py<PyAny>> {
-        let val = resolve(slf, py)?;
-        val.bind(py)
-            .call_method1("__format__", (spec,))
-            .map(Bound::unbind)
+    fn __format__<'py>(slf: &Bound<'py, Self>, spec: &str) -> PyResult<Bound<'py, PyAny>> {
+        resolve(slf)?.call_method1("__format__", (spec,))
     }
 }

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.1.2 (18 April 2026)
+
+- Fix consistency of reads in free-threaded builds
+
 ## 1.1.1 (16 April 2026)
 
 - Fix `ListItem` concatenation (`+`, `+=`) losing inline comments at the

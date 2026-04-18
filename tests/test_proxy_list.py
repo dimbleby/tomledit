@@ -1925,3 +1925,26 @@ class TestWriteLockDeadlocks:
         val = doc["arr"].pop(tricky)
         assert val == 3
         assert doc["arr"] == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# Multiply / repeat with edge counts
+# ---------------------------------------------------------------------------
+
+
+class TestListMultiplyEdges:
+    def test_mul_zero_returns_empty(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        result = doc["arr"] * 0
+        assert list(result) == []
+
+    def test_mul_negative_returns_empty(self) -> None:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        result = doc["arr"] * -5
+        assert list(result) == []
+
+    def test_imul_one_is_noop(self) -> None:
+        doc = Document.parse("arr = [1, 2]\n")
+        arr = doc["arr"]
+        arr *= 1
+        assert list(arr) == [1, 2]

@@ -1740,3 +1740,138 @@ class TestImplicitProperty:
         doc = Document.parse("[a.b]\nx = 1\n")
         assert doc["a"].implicit is True
         assert doc["a"]["b"].implicit is False
+
+
+# ---------------------------------------------------------------------------
+# View set ops with non-set iterables
+# ---------------------------------------------------------------------------
+
+
+class TestViewSetOpsWithIterables:
+    """Set ops on views accept any iterable, not just sets."""
+
+    def test_keys_or_with_list(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        result = doc["t"].keys() | ["b", "c"]
+        assert result == {"a", "b", "c"}
+
+    def test_keys_xor_with_list(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        result = doc["t"].keys() ^ ["b", "c"]
+        assert result == {"a", "c"}
+
+    def test_keys_rsub_with_list(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        result = ["a", "b"] - doc["t"].keys()
+        assert result == {"b"}
+
+    def test_items_or_with_list(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        result = doc["t"].items() | [("b", 2)]
+        assert result == {("a", 1), ("b", 2)}
+
+    def test_items_and_with_list(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        result = doc["t"].items() & [("a", 1), ("c", 3)]
+        assert result == {("a", 1)}
+
+    def test_items_sub_with_list(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        result = doc["t"].items() - [("a", 1)]
+        assert result == {("b", 2)}
+
+    def test_items_xor_with_list(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        result = doc["t"].items() ^ [("b", 2)]
+        assert result == {("a", 1), ("b", 2)}
+
+    def test_items_rsub_with_list(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        result = [("a", 1), ("b", 2)] - doc["t"].items()
+        assert result == {("b", 2)}
+
+
+# ---------------------------------------------------------------------------
+# View set-ops with non-string keys in `other` (silently ignored)
+# ---------------------------------------------------------------------------
+
+
+class TestKeysViewNonStringElements:
+    """Non-string elements in `other` should be silently ignored."""
+
+    def test_and_ignores_non_strings(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        result = doc["t"].keys() & ["a", 42, "c"]
+        assert result == {"a"}
+
+    def test_sub_ignores_non_strings(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        result = doc["t"].keys() - [42, "a"]
+        assert result == {"b"}
+
+
+# ---------------------------------------------------------------------------
+# ItemsView.__contains__ / KeysView.__contains__ edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestItemsViewContainsEdges:
+    def test_non_tuple_returns_false(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert "a" not in doc["t"].items()
+        assert 42 not in doc["t"].items()
+
+    def test_wrong_arity_returns_false(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert ("a",) not in doc["t"].items()
+        assert ("a", 1, "extra") not in doc["t"].items()
+
+    def test_non_string_key_returns_false(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert (42, 1) not in doc["t"].items()
+
+    def test_missing_key_returns_false(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert ("missing", 1) not in doc["t"].items()
+
+    def test_eq_with_non_set_returns_false(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert doc["t"].items() != [("a", 1)]
+        assert doc["t"].items() != "not a set"
+
+    def test_eq_different_lengths(self) -> None:
+        doc = Document.parse("[t]\na = 1\nb = 2\n")
+        assert doc["t"].items() != {("a", 1)}
+
+
+class TestKeysViewContainsEdges:
+    def test_non_string_returns_false(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        keys = doc["t"].keys()
+        assert 42 not in keys
+        assert None not in keys
+
+
+# ---------------------------------------------------------------------------
+# DictItem: get/pop/contains with non-string keys
+# ---------------------------------------------------------------------------
+
+
+class TestDictProxyKeyTypes:
+    def test_get_with_non_string_returns_default(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert doc["t"].get(42, "default") == "default"
+        assert doc["t"].get(42) is None
+
+    def test_pop_with_non_string_returns_default(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert doc["t"].pop(42, "default") == "default"
+
+    def test_pop_with_non_string_no_default_raises(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(KeyError):
+            doc["t"].pop(42)
+
+    def test_contains_non_string_returns_false(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        assert 42 not in doc["t"]

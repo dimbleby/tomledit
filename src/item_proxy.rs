@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::sync::RwLockExt;
 use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
@@ -96,7 +97,7 @@ pub(crate) fn with_proxy_or_doc_item<R>(
         return Ok(Some(f(item)));
     }
     if let Ok(doc_bound) = value.cast::<Document>() {
-        let inner = doc_bound.get().inner.read();
+        let inner = doc_bound.get().inner.read_py_attached(value.py());
         return Ok(Some(f(inner.as_item())));
     }
     Ok(None)
@@ -133,7 +134,7 @@ pub(crate) fn with_resolved_item<R>(
     f: impl Fn(&DocumentRs, &ItemRs) -> PyResult<R>,
 ) -> PyResult<Option<R>> {
     {
-        let inner = doc.inner.read();
+        let inner = doc.inner.read_py_attached(value.py());
         check_fresh(doc)?;
         let ctx = ReadCtx { doc, inner: &inner };
         if let Some(result) = resolve_other_item(value, &ctx, |item| f(&inner, item))? {
@@ -143,7 +144,7 @@ pub(crate) fn with_resolved_item<R>(
     let Some(extracted) = try_extract_item(value)? else {
         return Ok(None);
     };
-    let inner = doc.inner.read();
+    let inner = doc.inner.read_py_attached(value.py());
     check_fresh(doc)?;
     f(&inner, &extracted.0).map(Some)
 }
@@ -187,7 +188,7 @@ fn resolve_other_item<R>(
         if std::ptr::eq(ctx.doc, doc) {
             return Ok(Some(f(ctx.inner.as_item())));
         }
-        let inner = doc.inner.read();
+        let inner = doc.inner.read_py_attached(value.py());
         return Ok(Some(f(inner.as_item())));
     }
     Ok(None)
@@ -260,7 +261,7 @@ impl ItemProxy {
         py: Python<'py>,
     ) -> PyResult<(&'py Document, parking_lot::RwLockReadGuard<'py, DocumentRs>)> {
         let doc = self.doc(py);
-        let guard = doc.read_checked(&self.path, self.revision.load(Ordering::Relaxed))?;
+        let guard = doc.read_checked(py, &self.path, self.revision.load(Ordering::Relaxed))?;
         Ok((doc, guard))
     }
 
@@ -274,7 +275,7 @@ impl ItemProxy {
         parking_lot::RwLockWriteGuard<'py, DocumentRs>,
     )> {
         let doc = self.doc(py);
-        let guard = doc.write_checked(&self.path, self.revision.load(Ordering::Relaxed))?;
+        let guard = doc.write_checked(py, &self.path, self.revision.load(Ordering::Relaxed))?;
         Ok((doc, guard))
     }
 

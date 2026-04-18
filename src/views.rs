@@ -30,7 +30,7 @@ macro_rules! impl_view_read_checked {
                 py: Python<'py>,
             ) -> PyResult<(&'py Document, parking_lot::RwLockReadGuard<'py, DocumentRs>)> {
                 let doc = self.document.bind(py).get();
-                let guard = doc.read_checked(&self.path, self.revision)?;
+                let guard = doc.read_checked(py, &self.path, self.revision)?;
                 Ok((doc, guard))
             }
         }
@@ -142,7 +142,7 @@ fn with_child_proxies(
 ) -> PyResult<()> {
     let doc = document.bind(py).get();
     let snapshots: Vec<(String, ProxyParts)> = {
-        let inner = doc.read_checked(path, view_revision)?;
+        let inner = doc.read_checked(py, path, view_revision)?;
         let revision = doc.revision();
         let item = item_ops::navigate_path(&inner, path)?;
         dict_ops::item_keys(item)?

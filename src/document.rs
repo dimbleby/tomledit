@@ -2,6 +2,7 @@ use parking_lot::RwLock;
 
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::sync::RwLockExt;
 use pyo3::types::{PyDict, PyIterator, PyList, PyTuple};
 
 use toml_edit::DocumentMut as DocumentRs;
@@ -84,23 +85,32 @@ impl Document {
     /// and the read: mutations take `inner.write()` while they stamp the
     /// trie, so once we hold `inner.read()` the trie has already recorded
     /// any invalidating mutation that could affect us.
+    ///
+    /// Uses `read_py_attached` so that, on contention, the thread detaches
+    /// from the Python runtime before blocking.  Blocking while attached
+    /// would otherwise prevent Python's global synchronisation events
+    /// (free-threaded GC, critical sections) from making progress.
     pub(crate) fn read_checked(
         &self,
+        py: Python<'_>,
         path: &[Key],
         revision: u64,
     ) -> PyResult<parking_lot::RwLockReadGuard<'_, DocumentRs>> {
-        let guard = self.inner.read();
+        let guard = self.inner.read_py_attached(py);
         self.check_fresh(path, revision)?;
         Ok(guard)
     }
 
     /// Acquire `inner.write()` and then verify the proxy is still fresh.
+    ///
+    /// See `read_checked` for why we use the `_py_attached` variant.
     pub(crate) fn write_checked(
         &self,
+        py: Python<'_>,
         path: &[Key],
         revision: u64,
     ) -> PyResult<parking_lot::RwLockWriteGuard<'_, DocumentRs>> {
-        let guard = self.inner.write();
+        let guard = self.inner.write_py_attached(py);
         self.check_fresh(path, revision)?;
         Ok(guard)
     }
@@ -130,16 +140,16 @@ impl Document {
         Ok(Self::from_inner(document_rs))
     }
 
-    pub fn __contains__(&self, key: &Bound<'_, PyAny>) -> PyResult<bool> {
+    pub fn __contains__(&self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
         let Some(key) = item_ops::extract_key_str(key)? else {
             return Ok(false);
         };
-        Ok(self.inner.read().contains_key(&key))
+        Ok(self.inner.read_py_attached(py).contains_key(&key))
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let keys: Vec<String> = {
-            let inner = self.inner.read();
+            let inner = self.inner.read_py_attached(py);
             inner.iter().map(|(k, _)| k.to_owned()).collect()
         };
         let list = PyList::new(py, keys)?;
@@ -161,8 +171,8 @@ impl Document {
         ValuesView::new(slf.clone().unbind(), vec![], doc.revision())
     }
 
-    pub fn __len__(&self) -> usize {
-        self.inner.read().len()
+    pub fn __len__(&self, py: Python<'_>) -> usize {
+        self.inner.read_py_attached(py).len()
     }
 
     #[pyo3(signature = (key, default=None, /))]
@@ -177,7 +187,7 @@ impl Document {
         };
         let doc = slf.get();
         let parts = {
-            let inner = doc.inner.read();
+            let inner = doc.inner.read_py_attached(py);
             if inner.get(&key).is_none() {
                 return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
             }
@@ -191,14 +201,15 @@ impl Document {
             return Err(PyKeyError::new_err(key.repr()?.to_string()));
         };
         let doc = slf.get();
+        let py = slf.py();
         let parts = {
-            let inner = doc.inner.read();
+            let inner = doc.inner.read_py_attached(py);
             if !inner.contains_key(&key) {
                 return Err(PyKeyError::new_err(key));
             }
             doc.snapshot_child(&inner, key)?
         };
-        parts.build(slf.as_unbound(), slf.py())
+        parts.build(slf.as_unbound(), py)
     }
 
     pub fn __setitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>, value: Item) -> PyResult<()> {
@@ -206,7 +217,7 @@ impl Document {
             return Err(PyTypeError::new_err("keys must be strings"));
         };
         let doc = slf.get();
-        let mut inner = doc.inner.write();
+        let mut inner = doc.inner.write_py_attached(slf.py());
         let replaced = inner.contains_key(&key);
         dict_ops::set_with_decor_preservation(inner.as_item_mut(), &key, value);
         if replaced {
@@ -220,7 +231,7 @@ impl Document {
             return Err(PyKeyError::new_err(key.repr()?.to_string()));
         };
         let doc = slf.get();
-        let mut inner = doc.inner.write();
+        let mut inner = doc.inner.write_py_attached(slf.py());
         if inner.remove(&key).is_none() {
             return Err(PyKeyError::new_err(key));
         }
@@ -246,7 +257,7 @@ impl Document {
 
         let doc = slf.get();
         let removed = {
-            let mut inner = doc.inner.write();
+            let mut inner = doc.inner.write_py_attached(py);
             match inner.remove(&key) {
                 Some(item) => {
                     doc.bump_at(&[Key::Str(key)]);
@@ -261,7 +272,7 @@ impl Document {
     pub fn popitem(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<(String, Py<PyAny>)> {
         let doc = slf.get();
         let (key, removed) = {
-            let mut inner = doc.inner.write();
+            let mut inner = doc.inner.write_py_attached(py);
             let (key, removed) = dict_ops::item_popitem(inner.as_item_mut())?;
             doc.bump_at(&[Key::Str(key.clone())]);
             (key, removed)
@@ -270,24 +281,22 @@ impl Document {
         Ok((key, py_val))
     }
 
-    pub fn __or__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let py = slf.py();
+    pub fn __or__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         if !dict_ops::is_mapping_like(other) {
             return Ok(py.NotImplemented());
         }
-        let mut new_inner = slf.get().inner.read().clone();
+        let mut new_inner = self.inner.read_py_attached(py).clone();
         dict_ops::merge_other_into(new_inner.as_item_mut(), other)?;
         let doc = Self::from_inner(new_inner);
         Ok(Py::new(py, doc)?.into_any())
     }
 
-    pub fn __ror__(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let py = slf.py();
+    pub fn __ror__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         if !dict_ops::is_mapping_like(other) {
             return Ok(py.NotImplemented());
         }
         let dict = dict_ops::copy_mapping_to_pydict(other, py)?;
-        let inner = slf.get().inner.read();
+        let inner = self.inner.read_py_attached(py);
         for (k, v) in inner.iter() {
             dict.set_item(k, item_ops::item_to_py(v, py)?)?;
         }
@@ -308,7 +317,7 @@ impl Document {
         let update = other.map(|obj| dict_ops::resolve_update(obj)).transpose()?;
         let kwarg_pairs = dict_ops::extract_kwargs(kwargs)?;
         let doc = slf.get();
-        let mut inner = doc.inner.write();
+        let mut inner = doc.inner.write_py_attached(slf.py());
         let mut replaced = match update {
             Some(u) => u.apply(inner.as_item_mut())?,
             None => Vec::new(),
@@ -336,7 +345,7 @@ impl Document {
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         let doc = slf.get();
         let parts = {
-            let mut inner = doc.inner.write();
+            let mut inner = doc.inner.write_py_attached(py);
             if !inner.contains_key(&key) {
                 let default = default.ok_or_else(|| {
                     pyo3::exceptions::PyTypeError::new_err(
@@ -350,28 +359,28 @@ impl Document {
         parts.build(slf.as_unbound(), py)
     }
 
-    pub fn clear(&self) {
-        let mut inner = self.inner.write();
+    pub fn clear(&self, py: Python<'_>) {
+        let mut inner = self.inner.write_py_attached(py);
         inner.clear();
         self.bump_at(&[]);
     }
 
     pub fn __str__(&self, py: Python<'_>) -> PyResult<String> {
-        let dict = table_to_pydict(self.inner.read().iter(), py)?;
+        let dict = table_to_pydict(self.inner.read_py_attached(py).iter(), py)?;
         dict.str().map(|s| s.to_string())
     }
 
-    pub fn __repr__(&self) -> String {
-        format!("Document({} keys)", self.inner.read().len())
+    pub fn __repr__(&self, py: Python<'_>) -> String {
+        format!("Document({} keys)", self.inner.read_py_attached(py).len())
     }
 
     /// Return the document serialised as a TOML string.
-    pub fn as_toml(&self) -> String {
-        self.inner.read().to_string()
+    pub fn as_toml(&self, py: Python<'_>) -> String {
+        self.inner.read_py_attached(py).to_string()
     }
 
-    pub fn __bool__(&self) -> bool {
-        !self.inner.read().is_empty()
+    pub fn __bool__(&self, py: Python<'_>) -> bool {
+        !self.inner.read_py_attached(py).is_empty()
     }
 
     pub fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
@@ -384,13 +393,13 @@ impl Document {
         .unwrap_or(false))
     }
 
-    pub fn __copy__(&self) -> Self {
-        Self::from_inner(self.inner.read().clone())
+    pub fn __copy__(&self, py: Python<'_>) -> Self {
+        Self::from_inner(self.inner.read_py_attached(py).clone())
     }
 
     #[pyo3(signature = (_memo=None))]
-    pub fn __deepcopy__(&self, _memo: Option<&Bound<'_, PyAny>>) -> Self {
-        self.__copy__()
+    pub fn __deepcopy__(&self, py: Python<'_>, _memo: Option<&Bound<'_, PyAny>>) -> Self {
+        self.__copy__(py)
     }
 
     /// Normalize formatting of the document's top-level entries.
@@ -400,15 +409,15 @@ impl Document {
     /// want to reformat that value specifically.
     /// Useful after mutations that leave awkward top-level whitespace.
     /// Note: comments on formatted root-level entries are removed.
-    pub fn fmt(&self) {
-        self.inner.write().fmt();
+    pub fn fmt(&self, py: Python<'_>) {
+        self.inner.write_py_attached(py).fmt();
     }
 
     /// The entire document as a native Python dict.
     #[getter]
     pub fn value(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
-        for (k, v) in self.inner.read().iter() {
+        for (k, v) in self.inner.read_py_attached(py).iter() {
             dict.set_item(k, item_ops::item_to_py(v, py)?)?;
         }
         Ok(dict.into_any().unbind())

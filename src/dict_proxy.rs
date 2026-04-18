@@ -4,10 +4,9 @@ use pyo3::types::{PyDict, PyIterator, PyTuple};
 use toml_edit::DocumentMut as DocumentRs;
 
 use crate::dict_ops;
-use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
-use crate::item_proxy::ItemProxy;
+use crate::item_proxy::{ItemProxy, ProxyParts};
 use crate::views::{ItemsView, KeysView, ValuesView};
 
 /// A TOML table or inline table.
@@ -32,14 +31,15 @@ impl DictProxy {
             return Err(PyTypeError::new_err("TOML table keys must be strings"));
         };
         let base = slf.as_super().get();
-        {
-            let (_doc, inner) = base.read_checked(py)?;
+        let parts = {
+            let (doc, inner) = base.read_checked(py)?;
             let item = base.navigate(&inner)?;
             if !dict_ops::item_has_key(item, &key_str)? {
                 return Err(PyKeyError::new_err(key_str));
             }
-        }
-        base.child_proxy_typed(py, Key::Str(key_str))
+            base.snapshot_child(doc, &inner, Key::Str(key_str))?
+        };
+        parts.build(&base.document, py)
     }
 
     pub fn __setitem__(
@@ -153,16 +153,15 @@ impl DictProxy {
             return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
         };
         let base = slf.as_super().get();
-        let has_key = {
-            let (_doc, inner) = base.read_checked(py)?;
+        let parts = {
+            let (doc, inner) = base.read_checked(py)?;
             let item = base.navigate(&inner)?;
-            dict_ops::item_has_key(item, &key)?
+            if !dict_ops::item_has_key(item, &key)? {
+                return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
+            }
+            base.snapshot_child(doc, &inner, Key::Str(key))?
         };
-        if has_key {
-            base.child_proxy_typed(py, Key::Str(key))
-        } else {
-            Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()))
-        }
+        parts.build(&base.document, py)
     }
 
     #[pyo3(signature = (key, /, *default))]
@@ -229,9 +228,7 @@ impl DictProxy {
             nd
         };
         dict_ops::merge_other_into(&mut new_doc["_"], other)?;
-        let doc_py = Py::new(py, Document::from_inner(new_doc))?;
-        let proxy = ItemProxy::new(doc_py, vec![Key::Str("_".to_owned())], 0);
-        ItemProxy::into_typed(py, proxy)
+        ProxyParts::wrap_fresh(new_doc, py)
     }
 
     pub fn __ror__(
@@ -302,8 +299,8 @@ impl DictProxy {
         let key = item_ops::extract_key_str(key)?
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         let base = slf.as_super().get();
-        {
-            let (_doc, mut inner) = base.write_checked(py)?;
+        let parts = {
+            let (doc, mut inner) = base.write_checked(py)?;
             let item = base.navigate_mut(&mut inner)?;
             if !dict_ops::item_has_key(item, &key)? {
                 let default = default.ok_or_else(|| {
@@ -313,8 +310,9 @@ impl DictProxy {
                 })?;
                 dict_ops::set_with_decor_preservation(item, &key, default);
             }
-        }
-        base.child_proxy_typed(py, Key::Str(key))
+            base.snapshot_child(doc, &inner, Key::Str(key))?
+        };
+        parts.build(&base.document, py)
     }
 
     /// Whether this table's header is implicit (suppressed in TOML output).

@@ -155,8 +155,7 @@ fn with_child_proxies(
 ) -> PyResult<()> {
     let doc = document.bind(py).get();
     let snapshots: Vec<(String, ProxyParts)> = {
-        let inner = doc.inner.read();
-        doc.check_fresh(path, view_revision)?;
+        let inner = doc.read_checked(path, view_revision)?;
         let revision = doc.revision();
         let item = item_ops::navigate_path(&inner, path)?;
         dict_ops::item_keys(item)?

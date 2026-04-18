@@ -3,6 +3,7 @@ use crate::item_proxy::ItemProxy;
 use crate::value::{ArrayOfTables, Table, Value};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
+use pyo3::sync::RwLockExt;
 use pyo3::types::{PyList, PyMapping};
 use toml_edit::Item as ItemRs;
 
@@ -19,7 +20,7 @@ impl<'py> FromPyObject<'_, 'py> for Item {
 
         if let Ok(doc) = obj.cast::<Document>() {
             let doc = doc.get();
-            let inner = doc.inner.read();
+            let inner = doc.inner.read_py_attached(obj.py());
             return Ok(Self(inner.as_item().clone()));
         }
 

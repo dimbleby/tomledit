@@ -3,11 +3,10 @@ use pyo3::prelude::*;
 use pyo3::types::PyIterator;
 use toml_edit::DocumentMut as DocumentRs;
 
-use crate::document::Document;
 use crate::item::Item;
 use crate::item_ops::{self, Key};
 use crate::item_proxy::{
-    ItemProxy, extract_owned_item, resolve_proxy, with_proxy_item, with_resolved_item,
+    ItemProxy, ProxyParts, extract_owned_item, resolve_proxy, with_proxy_item, with_resolved_item,
 };
 use crate::list_ops;
 
@@ -17,14 +16,6 @@ use crate::list_ops;
 /// ``isinstance(item, MutableSequence)`` both work.
 #[pyclass(frozen, name = "ListItem", module = "tomledit", sequence, extends = ItemProxy)]
 pub(crate) struct ListProxy;
-
-impl ListProxy {
-    fn wrap_in_doc(py: Python<'_>, new_doc: DocumentRs) -> PyResult<Py<PyAny>> {
-        let doc_py = Py::new(py, Document::from_inner(new_doc))?;
-        let proxy = ItemProxy::new(doc_py, vec![Key::Str("_".to_owned())], 0);
-        ItemProxy::into_typed(py, proxy)
-    }
-}
 
 /// Read a proxy's document and clone the underlying `toml_edit::Item`.
 fn clone_self_item(base: &ItemProxy, py: Python<'_>) -> PyResult<toml_edit::Item> {
@@ -113,26 +104,31 @@ impl ListProxy {
 
         match resolved {
             SubscriptKey::Slice(slice) => {
-                let indices = {
-                    let (_doc, inner) = base.read_checked(py)?;
+                let parts: Vec<ProxyParts> = {
+                    let (doc, inner) = base.read_checked(py)?;
                     let item = base.navigate(&inner)?;
                     let target = list_ops::as_array_like(item, "slicing")?;
                     let si = slice.indices(target.len() as isize)?;
-                    list_ops::collect_slice_indices(si.start, si.stop, si.step)
+                    let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
+                    indices
+                        .into_iter()
+                        .map(|i| base.snapshot_child(doc, &inner, Key::Int(i)))
+                        .collect::<PyResult<_>>()?
                 };
-                let proxies: PyResult<Vec<Py<PyAny>>> = indices
+                let proxies: PyResult<Vec<Py<PyAny>>> = parts
                     .into_iter()
-                    .map(|i| base.child_proxy_typed(py, Key::Int(i)))
+                    .map(|p| p.build(&base.document, py))
                     .collect();
                 Ok(proxies?.into_pyobject(py)?.into_any().unbind())
             }
             SubscriptKey::Int(i) => {
-                let idx = {
-                    let (_doc, inner) = base.read_checked(py)?;
+                let parts = {
+                    let (doc, inner) = base.read_checked(py)?;
                     let item = base.navigate(&inner)?;
-                    list_ops::require_array_index(item, i)?
+                    let idx = list_ops::require_array_index(item, i)?;
+                    base.snapshot_child(doc, &inner, Key::Int(idx))?
                 };
-                base.child_proxy_typed(py, Key::Int(idx))
+                parts.build(&base.document, py)
             }
         }
     }
@@ -221,13 +217,17 @@ impl ListProxy {
 
     pub fn __iter__(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<Py<PyIterator>> {
         let base = slf.as_super().get();
-        let len = {
-            let (_doc, inner) = base.read_checked(py)?;
+        let parts: Vec<ProxyParts> = {
+            let (doc, inner) = base.read_checked(py)?;
             let item = base.navigate(&inner)?;
-            list_ops::as_array_like(item, "__iter__")?.len()
+            let len = list_ops::as_array_like(item, "__iter__")?.len();
+            (0..len)
+                .map(|i| base.snapshot_child(doc, &inner, Key::Int(i)))
+                .collect::<PyResult<_>>()?
         };
-        let proxies: PyResult<Vec<Py<PyAny>>> = (0..len)
-            .map(|i| base.child_proxy_typed(py, Key::Int(i)))
+        let proxies: PyResult<Vec<Py<PyAny>>> = parts
+            .into_iter()
+            .map(|p| p.build(&base.document, py))
             .collect();
         let list = proxies?.into_pyobject(py)?;
         Ok(list.try_iter()?.unbind())
@@ -269,7 +269,7 @@ impl ListProxy {
         let mut new_doc = DocumentRs::new();
         new_doc["_"] = clone_self_item(base, py)?;
         append_source(&mut new_doc["_"], source, "__add__()")?;
-        Self::wrap_in_doc(py, new_doc)
+        ProxyParts::wrap_fresh(new_doc, py)
     }
 
     pub fn __radd__(
@@ -288,7 +288,7 @@ impl ListProxy {
         new_doc["_"] = empty_array_like(self_ref);
         append_source(&mut new_doc["_"], other_source, "__radd__()")?;
         list_ops::clone_elements_into(&mut new_doc["_"], self_ref, 1);
-        Self::wrap_in_doc(py, new_doc)
+        ProxyParts::wrap_fresh(new_doc, py)
     }
 
     pub fn __mul__(slf: &Bound<'_, Self>, py: Python<'_>, n: isize) -> PyResult<Py<PyAny>> {
@@ -300,7 +300,7 @@ impl ListProxy {
         } else if n > 1 {
             list_ops::item_repeat(&mut new_doc["_"], n as usize - 1, "__mul__()")?;
         }
-        Self::wrap_in_doc(py, new_doc)
+        ProxyParts::wrap_fresh(new_doc, py)
     }
 
     pub fn __rmul__(slf: &Bound<'_, Self>, py: Python<'_>, n: isize) -> PyResult<Py<PyAny>> {

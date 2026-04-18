@@ -10,7 +10,7 @@ use crate::dict_ops;
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{self, Key, table_to_pydict};
-use crate::item_proxy::{ItemProxy, with_resolved_item};
+use crate::item_proxy::{ProxyParts, with_resolved_item};
 use crate::trie::MutationTrie;
 use crate::value::Table;
 use crate::views::{ItemsView, KeysView, ValuesView};
@@ -39,10 +39,15 @@ impl Document {
         self.trie.read().revision()
     }
 
-    fn make_proxy(slf: &Bound<'_, Self>, key: &str) -> ItemProxy {
-        let doc = slf.get();
-        let document_py: Py<Document> = slf.clone().unbind();
-        ItemProxy::new(document_py, vec![Key::Str(key.to_owned())], doc.revision())
+    /// Snapshot the parts needed to build a typed proxy for the root
+    /// entry at `key`.  Caller must hold `inner`; revision is sampled
+    /// internally so it stays consistent with the held guard.
+    ///
+    /// Mutators stamp the trie before releasing `inner.write()`, so any
+    /// later mutation will produce a strictly greater revision and a proxy
+    /// minted from these parts will correctly invalidate.
+    pub(crate) fn snapshot_child(&self, inner: &DocumentRs, key: String) -> PyResult<ProxyParts> {
+        ProxyParts::snapshot(inner, vec![Key::Str(key)], self.revision())
     }
 
     /// Record a mutation at the given path. Returns the new revision.
@@ -169,23 +174,30 @@ impl Document {
         let Some(key) = item_ops::extract_key_str(key)? else {
             return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
         };
-        if slf.get().inner.read().get(&key).is_some() {
-            let proxy = Self::make_proxy(slf, &key);
-            ItemProxy::into_typed(py, proxy)
-        } else {
-            Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()))
-        }
+        let doc = slf.get();
+        let parts = {
+            let inner = doc.inner.read();
+            if inner.get(&key).is_none() {
+                return Ok(default.map_or_else(|| py.None(), |d| d.clone().unbind()));
+            }
+            doc.snapshot_child(&inner, key)?
+        };
+        parts.build(slf.as_unbound(), py)
     }
 
     pub fn __getitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         let Some(key) = item_ops::extract_key_str(key)? else {
             return Err(PyKeyError::new_err(key.repr()?.to_string()));
         };
-        if !slf.get().inner.read().contains_key(&key) {
-            return Err(PyKeyError::new_err(key));
-        }
-        let proxy = Self::make_proxy(slf, &key);
-        ItemProxy::into_typed(slf.py(), proxy)
+        let doc = slf.get();
+        let parts = {
+            let inner = doc.inner.read();
+            if !inner.contains_key(&key) {
+                return Err(PyKeyError::new_err(key));
+            }
+            doc.snapshot_child(&inner, key)?
+        };
+        parts.build(slf.as_unbound(), slf.py())
     }
 
     pub fn __setitem__(slf: &Bound<'_, Self>, key: &Bound<'_, PyAny>, value: Item) -> PyResult<()> {
@@ -322,7 +334,7 @@ impl Document {
         let key = item_ops::extract_key_str(key)?
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("keys must be strings"))?;
         let doc = slf.get();
-        {
+        let parts = {
             let mut inner = doc.inner.write();
             if !inner.contains_key(&key) {
                 let default = default.ok_or_else(|| {
@@ -332,9 +344,9 @@ impl Document {
                 })?;
                 dict_ops::set_with_decor_preservation(inner.as_item_mut(), &key, default);
             }
-        }
-        let proxy = Self::make_proxy(slf, &key);
-        ItemProxy::into_typed(py, proxy)
+            doc.snapshot_child(&inner, key)?
+        };
+        parts.build(slf.as_unbound(), py)
     }
 
     pub fn clear(&self) {

@@ -332,52 +332,20 @@ impl ItemProxy {
         item_ops::navigate_path_mut(doc, &self.path)
     }
 
-    /// Build a child proxy as the correct Python subclass (DictItem,
-    /// ListItem, or ScalarItem) by inspecting the TOML node type.
-    /// Returns `Py<PyAny>` since the concrete type varies.
+    /// Snapshot the parts needed to build a typed child proxy at
+    /// `self.path + [key]` under an existing `inner` guard.
     ///
-    /// Takes `inner.read()` once and performs the parent freshness check,
-    /// the revision sample and the kind lookup under that single guard —
-    /// so child-proxy minting is atomic w.r.t. mutations.
-    pub(crate) fn child_proxy_typed(&self, py: Python<'_>, key: Key) -> PyResult<Py<PyAny>> {
-        let mut child_path = self.path.clone();
-        child_path.push(key);
-        let (revision, kind) = {
-            let (doc, inner) = self.read_checked(py)?;
-            let kind = item_kind(item_ops::navigate_path(&inner, &child_path)?);
-            (doc.revision(), kind)
-        };
-        let base = ItemProxy::new(self.document.clone_ref(py), child_path, revision);
-        into_typed_proxy(py, base, kind)
-    }
-
-    /// Build a typed child proxy from constituent parts, without a freshness
-    /// check on the parent (caller must have verified the context is safe).
-    /// Used by views that have already taken `inner.read()` and sampled a
-    /// coherent revision.
-    pub(crate) fn make_child_typed(
-        document: &Py<Document>,
-        path: &[Key],
-        revision: u64,
-        py: Python<'_>,
-        child_key: Key,
-    ) -> PyResult<Py<PyAny>> {
-        let mut child_path = path.to_vec();
-        child_path.push(child_key);
-        let base = ItemProxy::new(document.clone_ref(py), child_path, revision);
-        Self::into_typed(py, base)
-    }
-
-    /// Wrap an already-constructed ItemProxy base into the right Python
-    /// subclass.  Used by Document::__getitem__ and friends.
-    pub(crate) fn into_typed(py: Python<'_>, base: ItemProxy) -> PyResult<Py<PyAny>> {
-        let kind = {
-            let doc = base.document.bind(py).get();
-            let inner = doc.inner.read();
-            let item = base.navigate(&inner)?;
-            item_kind(item)
-        };
-        into_typed_proxy(py, base, kind)
+    /// Revision is sampled internally so it stays consistent with the
+    /// held guard: callers cannot accidentally read it before locking.
+    pub(crate) fn snapshot_child(
+        &self,
+        doc: &Document,
+        inner: &DocumentRs,
+        key: Key,
+    ) -> PyResult<ProxyParts> {
+        let mut path = self.path.clone();
+        path.push(key);
+        ProxyParts::snapshot(inner, path, doc.revision())
     }
 
     /// Navigate to the parent item (all path segments except the last).
@@ -479,6 +447,59 @@ fn into_typed_proxy(py: Python<'_>, base: ItemProxy, kind: ItemKind) -> PyResult
             let init = PyClassInitializer::from(base).add_subclass(ScalarProxy);
             Ok(Py::new(py, init)?.into_any())
         }
+    }
+}
+
+/// A snapshot of everything needed to mint a typed proxy at a given path,
+/// captured under a single `inner.read()` (or write) guard.
+///
+/// The two-phase split is deliberate: [`snapshot`] is the only step that
+/// needs the document lock, and it returns plain data; [`build`] performs
+/// the Python allocation after the lock has been released.  Composing
+/// existence checks and proxy minting is therefore TOCTOU-free without
+/// holding the document lock across `Py::new`.
+///
+/// [`snapshot`]: Self::snapshot
+/// [`build`]: Self::build
+pub(crate) struct ProxyParts {
+    path: Vec<Key>,
+    revision: u64,
+    kind: ItemKind,
+}
+
+impl ProxyParts {
+    /// Snapshot the parts needed to build a typed proxy at `path`.
+    ///
+    /// The caller must hold a read or write guard on `inner`, and
+    /// `revision` must have been sampled under that same guard so that
+    /// the resulting proxy's revision is consistent with the navigated
+    /// item.
+    pub(crate) fn snapshot(inner: &DocumentRs, path: Vec<Key>, revision: u64) -> PyResult<Self> {
+        let kind = item_kind(item_ops::navigate_path(inner, &path)?);
+        Ok(Self {
+            path,
+            revision,
+            kind,
+        })
+    }
+
+    /// Build the typed Python proxy.  Holds no document locks.
+    pub(crate) fn build(self, document: &Py<Document>, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let base = ItemProxy::new(document.clone_ref(py), self.path, self.revision);
+        into_typed_proxy(py, base, self.kind)
+    }
+
+    /// Wrap a freshly-constructed `DocumentRs` (whose sole root entry is at
+    /// `"_"`) as the appropriate typed Python proxy.
+    ///
+    /// Used by helpers that materialise standalone values into a new
+    /// document, e.g. `Item.parse`, `DictItem.__or__`, and `ListItem`'s
+    /// arithmetic operators.
+    pub(crate) fn wrap_fresh(doc_rs: DocumentRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let path = vec![Key::Str("_".to_owned())];
+        let parts = Self::snapshot(&doc_rs, path, 0)?;
+        let doc = Py::new(py, Document::from_inner(doc_rs))?;
+        parts.build(&doc, py)
     }
 }
 
@@ -661,13 +682,7 @@ impl ItemProxy {
             .map_err(|e: toml_edit::TomlError| PyValueError::new_err(e.to_string()))?;
         let mut doc_rs = DocumentRs::new();
         doc_rs["_"] = ItemRs::Value(value);
-        let doc = Py::new(py, Document::from_inner(doc_rs))?;
-        let base = Self {
-            document: doc,
-            path: vec![Key::Str("_".to_owned())],
-            revision: AtomicU64::new(0),
-        };
-        Self::into_typed(py, base)
+        ProxyParts::wrap_fresh(doc_rs, py)
     }
 }
 

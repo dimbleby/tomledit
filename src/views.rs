@@ -15,7 +15,7 @@ use crate::dict_ops;
 use crate::document::Document;
 use crate::equality;
 use crate::item_ops::{self, Key};
-use crate::item_proxy::{ItemProxy, with_resolved_item};
+use crate::item_proxy::{ProxyParts, with_resolved_item};
 
 use toml_edit::DocumentMut as DocumentRs;
 
@@ -142,9 +142,10 @@ fn contains_key(doc: &DocumentRs, path: &[Key], key: &str) -> PyResult<bool> {
 /// Invoke `f(key, child_proxy)` for every entry in the table at `path`.
 ///
 /// Shared by `ValuesView` and `ItemsView` for both `__iter__` and
-/// `__reversed__`.  Keys are collected under the read lock, then proxies
-/// are built individually (each `make_child_typed` takes its own short-lived
-/// lock) to avoid a recursive `RwLock::read()`.
+/// `__reversed__`.  All child-proxy snapshots (path + kind + revision) are
+/// collected under a single `inner.read()` guard so that every yielded
+/// proxy reflects the same coherent document state; the typed Python
+/// proxies are then materialised after the lock is released.
 fn with_child_proxies(
     document: &Py<Document>,
     path: &[Key],
@@ -153,16 +154,24 @@ fn with_child_proxies(
     mut f: impl FnMut(&str, Py<PyAny>) -> PyResult<()>,
 ) -> PyResult<()> {
     let doc = document.bind(py).get();
-    let (keys, revision) = {
+    let snapshots: Vec<(String, ProxyParts)> = {
         let inner = doc.inner.read();
         doc.check_fresh(path, view_revision)?;
         let revision = doc.revision();
         let item = item_ops::navigate_path(&inner, path)?;
-        (dict_ops::item_keys(item)?, revision)
+        dict_ops::item_keys(item)?
+            .into_iter()
+            .map(|k| {
+                let mut child_path = path.to_vec();
+                child_path.push(Key::Str(k.clone()));
+                let parts = ProxyParts::snapshot(&inner, child_path, revision)?;
+                Ok((k, parts))
+            })
+            .collect::<PyResult<_>>()?
     };
-    for k in &keys {
-        let proxy = ItemProxy::make_child_typed(document, path, revision, py, Key::Str(k.clone()))?;
-        f(k, proxy)?;
+    for (k, parts) in snapshots {
+        let proxy = parts.build(document, py)?;
+        f(&k, proxy)?;
     }
     Ok(())
 }

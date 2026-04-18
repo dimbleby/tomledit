@@ -410,11 +410,7 @@ impl ValuesView {
             Ok(())
         })?;
         proxies.reverse();
-        let list = PyList::empty(py);
-        for proxy in proxies {
-            list.append(proxy)?;
-        }
-        Ok(list.try_iter()?.unbind())
+        Ok(PyList::new(py, proxies)?.try_iter()?.unbind())
     }
 
     // No __eq__: Python's dict_values has no equality support (returns
@@ -503,10 +499,7 @@ impl ItemsView {
             Ok(())
         })?;
         pairs.reverse();
-        let list = PyList::empty(py);
-        for (k, proxy) in pairs {
-            list.append((k, proxy.into_bound(py)).into_pyobject(py)?)?;
-        }
+        let list = PyList::new(py, pairs.into_iter().map(|(k, p)| (k, p.into_bound(py))))?;
         Ok(list.try_iter()?.unbind())
     }
 

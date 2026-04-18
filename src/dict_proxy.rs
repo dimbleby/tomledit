@@ -267,10 +267,10 @@ impl DictProxy {
         other: Option<&Bound<'_, PyAny>>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let base = slf.as_super().get();
         // Resolve before write lock — iteration may read inner.
         let update = other.map(|obj| dict_ops::resolve_update(obj)).transpose()?;
         let kwarg_pairs = dict_ops::extract_kwargs(kwargs)?;
+        let base = slf.as_super().get();
         let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         let mut replaced = match update {

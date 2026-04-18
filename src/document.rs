@@ -138,10 +138,11 @@ impl Document {
     }
 
     pub fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let list = PyList::empty(py);
-        for (k, _) in self.inner.read().iter() {
-            list.append(k)?;
-        }
+        let keys: Vec<String> = {
+            let inner = self.inner.read();
+            inner.iter().map(|(k, _)| k.to_owned()).collect()
+        };
+        let list = PyList::new(py, keys)?;
         Ok(list.try_iter()?.unbind())
     }
 

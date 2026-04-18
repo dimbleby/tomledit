@@ -10,7 +10,7 @@ from tests.conftest import toml_literal
 from tomledit import Document
 
 if TYPE_CHECKING:
-    from tomledit import Item
+    from tomledit import Item, ItemsView, KeysView, ValuesView
 
 
 class TestStaleProxyDetection:
@@ -991,3 +991,492 @@ class TestSliceOverInvalidation:
         # Index 1 was replaced — proxy should be stale
         with pytest.raises(RuntimeError, match="stale"):
             proxy_at_1.value  # noqa: B018
+
+
+# ---------------------------------------------------------------------------
+# Stale ScalarItem dunder methods
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def stale_scalar() -> Item:
+    """Return a ScalarItem proxy that has been invalidated."""
+    doc = Document.parse('x = 42\ns = "hello"\n')
+    proxy = doc["x"]
+    doc["x"] = 99  # invalidates proxy
+    return proxy
+
+
+@pytest.fixture
+def stale_scalar_str() -> Item:
+    doc = Document.parse('s = "hello"\n')
+    proxy = doc["s"]
+    doc["s"] = "world"
+    return proxy
+
+
+class TestStaleScalarOperators:
+    """Every dunder/operator on a ScalarItem must raise RuntimeError when stale."""
+
+    def test_lt(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar < 100
+
+    def test_le(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar <= 100
+
+    def test_gt(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar > 0
+
+    def test_ge(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar >= 0
+
+    def test_int(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            int(stale_scalar)
+
+    def test_float(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            float(stale_scalar)
+
+    def test_index(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            ["a", "b", "c"][stale_scalar]
+
+    def test_hash(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            hash(stale_scalar)
+
+    def test_add(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar + 1
+
+    def test_radd(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = 1 + stale_scalar
+
+    def test_sub(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar - 1
+
+    def test_rsub(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = 1 - stale_scalar
+
+    def test_mul(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar * 2
+
+    def test_rmul(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = 2 * stale_scalar
+
+    def test_truediv(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar / 2
+
+    def test_rtruediv(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = 100 / stale_scalar
+
+    def test_floordiv(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar // 2
+
+    def test_rfloordiv(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = 100 // stale_scalar
+
+    def test_mod(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar % 5
+
+    def test_rmod(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = 100 % stale_scalar
+
+    def test_pow(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_scalar**2
+
+    def test_pow_with_modulo(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            pow(stale_scalar, 2, 7)
+
+    def test_rpow(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = 2**stale_scalar
+
+    def test_neg(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = -stale_scalar
+
+    def test_pos(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = +stale_scalar
+
+    def test_abs(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            abs(stale_scalar)
+
+    def test_invert(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = ~stale_scalar
+
+    def test_format(self, stale_scalar: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            format(stale_scalar, "d")
+
+    def test_contains(self, stale_scalar_str: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = "hi" in stale_scalar_str
+
+    def test_getattr(self, stale_scalar_str: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_scalar_str.upper()
+
+
+# ---------------------------------------------------------------------------
+# Stale ListItem dunder/method coverage (slice, arithmetic, mutators)
+# ---------------------------------------------------------------------------
+
+
+class TestStaleListMethods:
+    @pytest.fixture
+    def stale_list(self) -> Item:
+        doc = Document.parse("arr = [1, 2, 3]\n")
+        proxy = doc["arr"]
+        doc["arr"] = [10, 20]
+        return proxy
+
+    def test_slice_get(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_list[0:2]
+
+    def test_slice_set(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_list[0:2] = [99]
+
+    def test_slice_del(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            del stale_list[0:2]
+
+    def test_iadd(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_list += [99]
+
+    def test_add(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_list + [99]  # noqa: RUF005
+
+    def test_radd(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = [99] + stale_list  # noqa: RUF005
+
+    def test_mul(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_list * 2
+
+    def test_rmul(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = 2 * stale_list
+
+    def test_imul(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_list *= 2
+
+    def test_append(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_list.append(99)
+
+    def test_insert(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_list.insert(0, 99)
+
+    def test_remove(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_list.remove(1)
+
+    def test_extend(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_list.extend([99])
+
+    def test_pop(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_list.pop()
+
+    def test_set_multiline(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_list.set_multiline(indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Stale DictItem mutator coverage
+# ---------------------------------------------------------------------------
+
+
+class TestStaleDictMutators:
+    @pytest.fixture
+    def stale_table(self) -> Item:
+        doc = Document.parse("[t]\na = 1\n")
+        proxy = doc["t"]
+        doc["t"] = {"c": 3}
+        return proxy
+
+    def test_setitem(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_table["x"] = 1
+
+    def test_delitem(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            del stale_table["a"]
+
+    def test_pop(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_table.pop("a")
+
+    def test_popitem(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_table.popitem()
+
+    def test_update(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_table.update({"x": 1})
+
+    def test_setdefault(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_table.setdefault("x", 1)
+
+    def test_or(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_table | {"x": 1}
+
+    def test_ror(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = {"x": 1} | stale_table
+
+    def test_ior(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_table |= {"x": 1}
+
+    def test_keys_view(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_table.keys()
+
+    def test_values_view(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_table.values()
+
+    def test_items_view(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_table.items()
+
+    def test_get_implicit(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_table.implicit
+
+    def test_set_implicit(self, stale_table: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_table.implicit = True
+
+
+# ---------------------------------------------------------------------------
+# Stale views (KeysView / ValuesView / ItemsView)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def stale_views() -> tuple[KeysView, ValuesView, ItemsView]:
+    """Return KeysView, ValuesView, ItemsView for a table that's been replaced."""
+    doc = Document.parse("[t]\na = 1\nb = 2\n")
+    keys = doc["t"].keys()
+    values = doc["t"].values()
+    items = doc["t"].items()
+    doc["t"] = {"c": 3}  # invalidate the views' path
+    return keys, values, items
+
+
+class TestStaleKeysView:
+    def test_len(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            len(keys)
+
+    def test_iter(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            iter(keys)
+
+    def test_contains(
+        self, stale_views: tuple[KeysView, ValuesView, ItemsView]
+    ) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = "a" in keys
+
+    def test_repr(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            repr(keys)
+
+    def test_reversed(
+        self, stale_views: tuple[KeysView, ValuesView, ItemsView]
+    ) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            reversed(keys)
+
+    def test_eq(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = keys == {"a", "b"}
+
+    def test_and(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = keys & {"a"}
+
+    def test_or(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = keys | {"x"}
+
+    def test_sub(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = keys - {"a"}
+
+    def test_xor(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = keys ^ {"a"}
+
+    def test_rsub(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = {"a", "b", "c"} - keys
+
+    def test_ror(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = {"x"} | keys
+
+    def test_rand(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = {"a"} & keys
+
+    def test_rxor(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        keys, _, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = {"a"} ^ keys
+
+
+class TestStaleValuesView:
+    def test_len(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, values, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            len(values)
+
+    def test_iter(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, values, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            iter(values)
+
+    def test_contains(
+        self, stale_views: tuple[KeysView, ValuesView, ItemsView]
+    ) -> None:
+        _, values, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = 1 in values
+
+    def test_repr(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, values, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            repr(values)
+
+    def test_reversed(
+        self, stale_views: tuple[KeysView, ValuesView, ItemsView]
+    ) -> None:
+        _, values, _ = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            reversed(values)
+
+
+class TestStaleItemsView:
+    def test_len(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            len(items)
+
+    def test_iter(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            iter(items)
+
+    def test_contains(
+        self, stale_views: tuple[KeysView, ValuesView, ItemsView]
+    ) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = ("a", 1) in items  # type: ignore[comparison-overlap]
+
+    def test_repr(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            repr(items)
+
+    def test_reversed(
+        self, stale_views: tuple[KeysView, ValuesView, ItemsView]
+    ) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            reversed(items)
+
+    def test_eq(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = items == {("a", 1), ("b", 2)}
+
+    def test_or(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = items | {("x", 0)}
+
+    def test_and(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = items & {("a", 1)}
+
+    def test_sub(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = items - {("a", 1)}
+
+    def test_xor(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = items ^ {("a", 1)}
+
+    def test_ror(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = {("x", 0)} | items
+
+    def test_rand(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = {("a", 1)} & items
+
+    def test_rxor(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = {("a", 1)} ^ items
+
+    def test_rsub(self, stale_views: tuple[KeysView, ValuesView, ItemsView]) -> None:
+        _, _, items = stale_views
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = {("a", 1), ("x", 0)} - items

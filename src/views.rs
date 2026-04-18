@@ -113,19 +113,6 @@ fn get_keys(doc: &DocumentRs, path: &[Key]) -> PyResult<Vec<String>> {
     dict_ops::item_keys(item)
 }
 
-/// Build a Python list of key strings directly from the TOML iterator,
-/// without an intermediate Rust Vec.
-fn keys_to_pylist<'py>(
-    doc: &DocumentRs,
-    path: &[Key],
-    py: Python<'py>,
-) -> PyResult<Bound<'py, PyList>> {
-    let item = item_ops::navigate_path(doc, path)?;
-    let list = PyList::empty(py);
-    dict_ops::for_each_key(item, |k| list.append(k))?;
-    Ok(list)
-}
-
 fn get_len(doc: &DocumentRs, path: &[Key]) -> PyResult<usize> {
     let item = item_ops::navigate_path(doc, path)?;
     let tbl = item
@@ -207,8 +194,11 @@ impl KeysView {
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyIterator>> {
-        let (_doc, inner) = self.read_checked(py)?;
-        let list = keys_to_pylist(&inner, &self.path, py)?;
+        let keys = {
+            let (_doc, inner) = self.read_checked(py)?;
+            get_keys(&inner, &self.path)?
+        };
+        let list = PyList::new(py, keys)?;
         Ok(list.try_iter()?.unbind())
     }
 

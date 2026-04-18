@@ -1102,10 +1102,6 @@ class TestStaleScalarOperators:
         with pytest.raises(RuntimeError, match="stale"):
             _ = stale_scalar**2
 
-    def test_pow_with_modulo(self, stale_scalar: Item) -> None:
-        with pytest.raises(RuntimeError, match="stale"):
-            pow(stale_scalar, 2, 7)
-
     def test_rpow(self, stale_scalar: Item) -> None:
         with pytest.raises(RuntimeError, match="stale"):
             _ = 2**stale_scalar

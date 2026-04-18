@@ -1933,14 +1933,10 @@ class TestWriteLockDeadlocks:
 
 
 class TestListMultiplyEdges:
-    def test_mul_zero_returns_empty(self) -> None:
+    @pytest.mark.parametrize("count", [0, -5])
+    def test_mul_non_positive_returns_empty(self, count: int) -> None:
         doc = Document.parse("arr = [1, 2, 3]\n")
-        result = doc["arr"] * 0
-        assert list(result) == []
-
-    def test_mul_negative_returns_empty(self) -> None:
-        doc = Document.parse("arr = [1, 2, 3]\n")
-        result = doc["arr"] * -5
+        result = doc["arr"] * count
         assert list(result) == []
 
     def test_imul_one_is_noop(self) -> None:

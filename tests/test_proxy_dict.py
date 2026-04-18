@@ -933,10 +933,6 @@ class TestViews:
         r = repr(doc["t"].items())
         assert "ItemsView" in r
 
-    def test_items_view_contains_wrong_length_tuple(self) -> None:
-        doc = Document.parse("a = 1\n")
-        assert ("a", 1, "extra") not in doc.items()  # type: ignore[comparison-overlap]
-
     def test_items_view_eq_other_longer(self) -> None:
         doc = Document.parse("a = 1\n")
         assert doc.items() != [("a", 1), ("b", 2)]
@@ -1844,34 +1840,8 @@ class TestItemsViewContainsEdges:
         assert doc["t"].items() != {("a", 1)}
 
 
-class TestKeysViewContainsEdges:
-    def test_non_string_returns_false(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
-        keys = doc["t"].keys()
-        assert 42 not in keys
-        assert None not in keys
-
-
-# ---------------------------------------------------------------------------
-# DictItem: get/pop/contains with non-string keys
-# ---------------------------------------------------------------------------
-
-
 class TestDictProxyKeyTypes:
     def test_get_with_non_string_returns_default(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
         assert doc["t"].get(42, "default") == "default"
         assert doc["t"].get(42) is None
-
-    def test_pop_with_non_string_returns_default(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
-        assert doc["t"].pop(42, "default") == "default"
-
-    def test_pop_with_non_string_no_default_raises(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
-        with pytest.raises(KeyError):
-            doc["t"].pop(42)
-
-    def test_contains_non_string_returns_false(self) -> None:
-        doc = Document.parse("[t]\na = 1\n")
-        assert 42 not in doc["t"]

@@ -664,7 +664,10 @@ class TestDocumentAsEqualityOperand:
         assert doc not in doc["arr"]
 
     def test_list_contains_different_document(self) -> None:
-        """A different Document whose root matches an array element."""
+        """A different Document whose root matches an array element.
+
+        Array of inline tables → value_eq → with_doc_item_ctx.
+        """
         doc = Document.parse("arr = [{a = 1}]\n")
         other = Document({"a": 1})
         assert other in doc["arr"]
@@ -742,12 +745,6 @@ class TestDocumentAsEqualityOperand:
         doc["arr"].remove(other)
         assert len(doc["arr"]) == 1
         assert doc["arr"][0] == {"a": 2}
-
-    def test_inline_array_contains_different_document(self) -> None:
-        """Array of inline tables → value_eq → with_doc_item_ctx."""
-        doc = Document.parse("arr = [{a = 1}]\n")
-        other = Document({"a": 1})
-        assert other in doc["arr"]
 
     def test_document_eq_self_identity(self) -> None:
         """Document.__eq__ same-object identity fast path."""

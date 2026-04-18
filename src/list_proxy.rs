@@ -264,10 +264,10 @@ impl ListProxy {
         if !list_ops::is_list_like(other, py) {
             return Ok(py.NotImplemented());
         }
-        let base = slf.as_super().get();
-        let source = prepare_source(other)?;
         let mut new_doc = DocumentRs::new();
+        let base = slf.as_super().get();
         new_doc["_"] = clone_self_item(base, py)?;
+        let source = prepare_source(other)?;
         append_source(&mut new_doc["_"], source, "__add__()")?;
         ProxyParts::wrap_fresh(new_doc, py)
     }
@@ -281,19 +281,19 @@ impl ListProxy {
             return Ok(py.NotImplemented());
         }
         let base = slf.as_super().get();
-        let other_source = prepare_source(other)?;
         let self_item = clone_self_item(base, py)?;
         let self_ref = list_ops::as_array_like(&self_item, "__radd__()")?;
         let mut new_doc = DocumentRs::new();
         new_doc["_"] = empty_array_like(self_ref);
+        let other_source = prepare_source(other)?;
         append_source(&mut new_doc["_"], other_source, "__radd__()")?;
         list_ops::clone_elements_into(&mut new_doc["_"], self_ref, 1);
         ProxyParts::wrap_fresh(new_doc, py)
     }
 
     pub fn __mul__(slf: &Bound<'_, Self>, py: Python<'_>, n: isize) -> PyResult<Py<PyAny>> {
-        let base = slf.as_super().get();
         let mut new_doc = DocumentRs::new();
+        let base = slf.as_super().get();
         new_doc["_"] = clone_self_item(base, py)?;
         if n <= 0 {
             item_ops::item_clear(&mut new_doc["_"])?;
@@ -308,10 +308,10 @@ impl ListProxy {
     }
 
     pub fn __imul__(slf: &Bound<'_, Self>, py: Python<'_>, n: isize) -> PyResult<()> {
-        let base = slf.as_super().get();
         if n == 1 {
             return Ok(());
         }
+        let base = slf.as_super().get();
         let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         if n <= 0 {
@@ -378,13 +378,12 @@ impl ListProxy {
 
     #[pyo3(signature = (value, /))]
     pub fn remove(slf: &Bound<'_, Self>, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
-        let base = slf.as_super().get();
-
         // Resolve the needle to an owned `toml_edit::Item` with no destination
         // lock held, then take the write lock for the actual removal.
         let needle = extract_owned_item(value)?
             .ok_or_else(|| PyValueError::new_err("value not in array"))?;
 
+        let base = slf.as_super().get();
         let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         let affected = list_ops::find_and_remove(item, &needle)?;
@@ -398,8 +397,8 @@ impl ListProxy {
         py: Python<'_>,
         values: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        let base = slf.as_super().get();
         let source = prepare_source(values)?;
+        let base = slf.as_super().get();
         let (_doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         append_source(item, source, "extend()")

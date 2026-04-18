@@ -303,10 +303,10 @@ impl Document {
         other: Option<&Bound<'_, PyAny>>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let doc = slf.get();
         // Resolve before write lock — iteration may read inner.
         let update = other.map(|obj| dict_ops::resolve_update(obj)).transpose()?;
         let kwarg_pairs = dict_ops::extract_kwargs(kwargs)?;
+        let doc = slf.get();
         let mut inner = doc.inner.write();
         let mut replaced = match update {
             Some(u) => u.apply(inner.as_item_mut())?,

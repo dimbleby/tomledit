@@ -1002,8 +1002,7 @@ pub(crate) fn resolve_subscript_key<'py>(
             let type_name = key
                 .get_type()
                 .name()
-                .map(|n| n.to_string())
-                .unwrap_or_else(|_| "?".to_owned());
+                .map_or_else(|_| "?".to_owned(), |n| n.to_string());
             PyTypeError::new_err(format!(
                 "TOML array indices must be integers or slices, not {type_name}"
             ))

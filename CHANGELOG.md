@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.1.4 (19 April 2026)
+
 - New entries appended/inserted into an array of tables now copy the indent
   style of their neighbours (both the header indent and the per-key body
   indent), instead of always being emitted at column 0.

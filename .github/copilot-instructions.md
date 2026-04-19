@@ -96,11 +96,10 @@ The **`MutationTrie`** (`trie.rs`) owns a monotonic revision counter.
 Every mutation stamps the trie at the mutated path and increments the revision
 (both under one write lock).
 Each proxy records the revision at creation.
-Before any access, a proxy walks the trie — if any ancestor node has `revised_at
-
-> proxy.revision`, the proxy is **stale** and raises `RuntimeError`.
-> Mutations to unrelated subtrees do **not** invalidate a proxy (path-precise
-> invalidation).
+Before any access, a proxy walks the trie — if any ancestor node has
+`revised_at > proxy.revision`, the proxy is **stale** and raises `RuntimeError`.
+Mutations to unrelated subtrees do **not** invalidate a proxy (path-precise
+invalidation).
 
 ### Rust module layout
 

@@ -86,41 +86,49 @@ fn build_block_comment(text: &str, indent: &str) -> PyResult<String> {
     Ok(out)
 }
 
-/// Build a block-comment string, or fall back to `default` when
-/// `comment` is `None`.
-fn build_block_or_default(comment: Option<&str>, indent: &str, default: &str) -> PyResult<String> {
+/// Build a block-comment string from `comment`, or empty when `None`.
+fn build_block_opt(comment: Option<&str>, indent: &str) -> PyResult<String> {
     Ok(comment
         .map(|t| build_block_comment(t, indent))
         .transpose()?
-        .unwrap_or_else(|| default.to_owned()))
+        .unwrap_or_default())
 }
 
-/// Decompose a table/key decor prefix into `(leading_blanks, trailing_indent)`.
+/// Decomposed parts of a table or key decor prefix.
 ///
-/// `leading_blanks` is the run of `\n` characters at the start of the prefix
-/// (encoding blank-line separation from the previous entry).
-/// `trailing_indent` is whatever follows the last `\n` (the indent before
-/// the entry).  Anything in between is discarded — typically an existing
-/// block comment that the caller intends to replace.
-fn split_block_envelope(prefix: &str) -> (&str, &str) {
-    let leading_end = prefix.bytes().take_while(|&b| b == b'\n').count();
-    let leading = &prefix[..leading_end];
-    let trailing = prefix
-        .rsplit_once('\n')
-        .map_or(&prefix[leading_end..], |(_, after)| after);
-    (leading, trailing)
+/// A table/key prefix is `<leading><...block...><indent>` where:
+///   - `leading` is the run of `\n` characters at the start of the prefix
+///     (encoding blank-line separation from the previous entry)
+///   - `indent`  is whatever follows the last `\n` (the indent before the
+///     entry).
+///
+/// Any block comment between the two is owned by the caller, who replaces
+/// it via `with_block`.
+struct TablePrefix<'a> {
+    leading: &'a str,
+    indent: &'a str,
 }
 
-/// Build a new decor prefix that swaps the block comment in `existing`
-/// for `comment`, preserving the leading blank-line spacing and the
-/// trailing indent.
-fn build_block_preserving_envelope(existing: &str, comment: Option<&str>) -> PyResult<String> {
-    let (leading, indent) = split_block_envelope(existing);
-    let body = comment
-        .map(|t| build_block_comment(t, indent))
-        .transpose()?
-        .unwrap_or_default();
-    Ok(format!("{leading}{body}{indent}"))
+impl<'a> TablePrefix<'a> {
+    fn split(prefix: &'a str) -> Self {
+        let leading_end = prefix.bytes().take_while(|&b| b == b'\n').count();
+        let leading = &prefix[..leading_end];
+        let indent = prefix
+            .rsplit_once('\n')
+            .map_or(&prefix[leading_end..], |(_, after)| after);
+        Self { leading, indent }
+    }
+}
+
+impl TablePrefix<'_> {
+    /// Build a new prefix that swaps the block comment in `existing` for
+    /// `comment`, preserving the leading blank-line spacing and the
+    /// trailing indent.
+    fn with_block(existing: &str, comment: Option<&str>) -> PyResult<String> {
+        let parts = TablePrefix::split(existing);
+        let body = build_block_opt(comment, parts.indent)?;
+        Ok(format!("{}{body}{}", parts.leading, parts.indent))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +208,7 @@ pub(crate) fn set_block_comment(
             };
             if let Some(d) = decor {
                 let existing = d.prefix().and_then(|r| r.as_str()).unwrap_or("").to_owned();
-                let prefix = build_block_preserving_envelope(&existing, comment)?;
+                let prefix = TablePrefix::with_block(&existing, comment)?;
                 d.set_prefix(prefix);
                 return Ok(());
             }
@@ -213,7 +221,7 @@ pub(crate) fn set_block_comment(
                 .and_then(|r| r.as_str())
                 .unwrap_or("")
                 .to_owned();
-            let prefix = build_block_preserving_envelope(&existing, comment)?;
+            let prefix = TablePrefix::with_block(&existing, comment)?;
             km.leaf_decor_mut().set_prefix(prefix);
             Ok(())
         }
@@ -250,13 +258,13 @@ pub(crate) fn set_block_comment(
 ///   - `indent` is the trailing whitespace before the value
 ///
 /// `split` and `join` are exact inverses for any input.
-struct PrefixParts {
+struct SlotPrefix {
     head: String,
     block: String,
     indent: String,
 }
 
-impl PrefixParts {
+impl SlotPrefix {
     /// Decompose a raw slot string.
     fn split(raw: &str) -> Self {
         let Some((first_line, rest)) = raw.split_once('\n') else {
@@ -288,15 +296,6 @@ impl PrefixParts {
         self.head.strip_suffix('\n').unwrap_or("")
     }
 
-    /// Replace the inline-comment text.  A non-empty `text` ensures the
-    /// structural newline is present (upgrading single-line layout); an
-    /// empty `text` preserves the existing layout.
-    fn set_inline(&mut self, text: &str) {
-        if !text.is_empty() || !self.head.is_empty() {
-            self.head = format!("{text}\n");
-        }
-    }
-
     /// Replace the block-comment portion.  A non-empty `block` ensures the
     /// structural newline is present (upgrading single-line layout); an
     /// empty `block` preserves the existing layout.
@@ -308,10 +307,23 @@ impl PrefixParts {
     }
 
     /// Return `raw` with its inline-comment portion replaced by `new_inline`.
+    /// A non-empty `new_inline` ensures the structural newline is present
+    /// (upgrading single-line layout); an empty `new_inline` preserves the
+    /// existing layout.
     fn with_inline(raw: &str, new_inline: &str) -> String {
         let mut parts = Self::split(raw);
-        parts.set_inline(new_inline);
+        if !new_inline.is_empty() || !parts.head.is_empty() {
+            parts.head = format!("{new_inline}\n");
+        }
         parts.join()
+    }
+
+    /// Return `raw` with its block-comment portion replaced by `comment`,
+    /// preserving any inline comment on the previous element and the indent.
+    fn with_block(raw: &str, comment: Option<&str>) -> PyResult<String> {
+        let mut parts = Self::split(raw);
+        parts.set_block(build_block_opt(comment, &parts.indent)?);
+        Ok(parts.join())
     }
 }
 
@@ -354,7 +366,7 @@ impl CommentPreservation for toml_edit::Array {
     fn save_inline_comments(&self) -> Vec<String> {
         (0..self.len())
             .map(|i| {
-                PrefixParts::split(array_read_slot(self, i))
+                SlotPrefix::split(array_read_slot(self, i))
                     .inline()
                     .to_owned()
             })
@@ -365,8 +377,8 @@ impl CommentPreservation for toml_edit::Array {
         debug_assert_eq!(comments.len(), self.len());
         for (i, inline) in comments.iter().enumerate() {
             let raw = array_read_slot(self, i);
-            if PrefixParts::split(raw).inline() != inline {
-                let new_raw = PrefixParts::with_inline(raw, inline);
+            if SlotPrefix::split(raw).inline() != inline {
+                let new_raw = SlotPrefix::with_inline(raw, inline);
                 array_write_slot(self, i, &new_raw);
             }
         }
@@ -400,7 +412,7 @@ impl CommentPreservation for toml_edit::InlineTable {
         let keys: Vec<&str> = self.iter().map(|(k, _)| k).collect();
         (0..keys.len())
             .map(|i| {
-                PrefixParts::split(it_read_slot(self, keys.get(i + 1).copied()))
+                SlotPrefix::split(it_read_slot(self, keys.get(i + 1).copied()))
                     .inline()
                     .to_owned()
             })
@@ -413,8 +425,8 @@ impl CommentPreservation for toml_edit::InlineTable {
         for (i, inline) in comments.iter().enumerate() {
             let next_key = keys.get(i + 1).map(String::as_str);
             let raw = it_read_slot(self, next_key);
-            if PrefixParts::split(raw).inline() != inline {
-                let new_raw = PrefixParts::with_inline(raw, inline);
+            if SlotPrefix::split(raw).inline() != inline {
+                let new_raw = SlotPrefix::with_inline(raw, inline);
                 it_write_slot(self, next_key, &new_raw);
             }
         }
@@ -426,17 +438,17 @@ impl CommentPreservation for toml_edit::InlineTable {
 /// Get the inline comment for array element `idx` from a parent `ItemRs`.
 pub(crate) fn get_array_inline_comment(parent: &ItemRs, idx: usize) -> Option<String> {
     let array = parent.as_value()?.as_array()?;
-    extract_inline_comment(PrefixParts::split(array_read_slot(array, idx)).inline())
+    extract_inline_comment(SlotPrefix::split(array_read_slot(array, idx)).inline())
 }
 
 /// Set the inline comment for array element `idx`.  `inline` is a
 /// pre-validated raw suffix (e.g. `" # note"`) or empty to clear.
 pub(crate) fn set_array_inline_comment(array: &mut toml_edit::Array, idx: usize, inline: &str) {
     let raw = array_read_slot(array, idx).to_owned();
-    if PrefixParts::split(&raw).inline() == inline {
+    if SlotPrefix::split(&raw).inline() == inline {
         return;
     }
-    array_write_slot(array, idx, &PrefixParts::with_inline(&raw, inline));
+    array_write_slot(array, idx, &SlotPrefix::with_inline(&raw, inline));
 }
 
 /// Get the inline comment for an inline-table entry by key name.
@@ -448,7 +460,7 @@ pub(crate) fn get_inline_table_inline_comment(
     // If the key doesn't exist, skip_while exhausts the iterator.
     iter.next()?;
     let next_key = iter.next().map(|(k, _)| k);
-    extract_inline_comment(PrefixParts::split(it_read_slot(it, next_key)).inline())
+    extract_inline_comment(SlotPrefix::split(it_read_slot(it, next_key)).inline())
 }
 
 /// Set the inline comment for an inline-table entry by key name.
@@ -466,13 +478,13 @@ pub(crate) fn set_inline_table_inline_comment(
         iter.next().map(|(k, _)| k.to_owned())
     };
     let raw = it_read_slot(it, next_key.as_deref()).to_owned();
-    if PrefixParts::split(&raw).inline() == inline {
+    if SlotPrefix::split(&raw).inline() == inline {
         return;
     }
     it_write_slot(
         it,
         next_key.as_deref(),
-        &PrefixParts::with_inline(&raw, inline),
+        &SlotPrefix::with_inline(&raw, inline),
     );
 }
 
@@ -506,7 +518,7 @@ pub(crate) fn take_value_inline_comment(value: &mut ValueRs) -> String {
 /// Get the block comment from an element's decor prefix.
 pub(crate) fn get_element_block_comment(decor: &toml_edit::Decor) -> Option<String> {
     let raw = decor.prefix()?.as_str()?;
-    let parts = PrefixParts::split(raw);
+    let parts = SlotPrefix::split(raw);
     if parts.block.is_empty() {
         return None;
     }
@@ -520,9 +532,7 @@ pub(crate) fn set_element_block_comment(
     comment: Option<&str>,
 ) -> PyResult<()> {
     let raw = decor.prefix().and_then(|r| r.as_str()).unwrap_or_default();
-    let mut parts = PrefixParts::split(raw);
-    parts.set_block(build_block_or_default(comment, &parts.indent, "")?);
-    decor.set_prefix(parts.join());
+    decor.set_prefix(SlotPrefix::with_block(raw, comment)?);
     Ok(())
 }
 
@@ -545,8 +555,8 @@ fn get_inline_table_block_comment(it: &toml_edit::InlineTable, key: &str) -> Opt
         extract_block_comment(raw.strip_prefix('\n').unwrap_or(raw).trim_end())
     } else {
         // Non-first key: the prefix mixes the previous key's inline comment
-        // with this key's block comment; PrefixParts separates them.
-        extract_block_comment(&PrefixParts::split(raw).block)
+        // with this key's block comment; SlotPrefix separates them.
+        extract_block_comment(&SlotPrefix::split(raw).block)
     }
 }
 
@@ -560,7 +570,7 @@ fn canonical_inline_table_indent(it: &toml_edit::InlineTable) -> String {
         let indent = it
             .key(key)
             .and_then(|k| k.leaf_decor().prefix()?.as_str())
-            .map(PrefixParts::split)
+            .map(SlotPrefix::split)
             .map(|parts| parts.indent)
             .unwrap_or_default();
         if !indent.is_empty() {
@@ -588,14 +598,14 @@ fn set_inline_table_block_comment(
         .and_then(|r| r.as_str())
         .unwrap_or_default()
         .to_owned();
-    let mut parts = PrefixParts::split(&raw);
+    let mut parts = SlotPrefix::split(&raw);
 
     // First key always uses the canonical indent. Newly inserted non-first keys
     // may have an empty prefix, so seed them from the table style as well.
     if let Some(ci) = canonical.filter(|_| is_first || parts.indent.is_empty()) {
         parts.indent = ci;
     }
-    parts.set_block(build_block_or_default(comment, &parts.indent, "")?);
+    parts.set_block(build_block_opt(comment, &parts.indent)?);
     km.leaf_decor_mut().set_prefix(parts.join());
     Ok(())
 }
@@ -604,10 +614,10 @@ fn set_inline_table_block_comment(
 mod tests {
     use super::*;
 
-    /// `PrefixParts::split` followed by `PrefixParts::join` must be the
+    /// `SlotPrefix::split` followed by `SlotPrefix::join` must be the
     /// identity for any input — no spurious or lost newlines.
     #[test]
-    fn prefix_parts_split_join_round_trip() {
+    fn slot_prefix_split_join_round_trip() {
         for raw in [
             "",
             "  ",
@@ -618,7 +628,7 @@ mod tests {
             "\n\n# block\n  ",
         ] {
             assert_eq!(
-                PrefixParts::split(raw).join(),
+                SlotPrefix::split(raw).join(),
                 raw,
                 "round-trip failed for {raw:?}"
             );

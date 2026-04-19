@@ -285,63 +285,150 @@ fn fix_first_aot_prefix(aot: &mut toml_edit::ArrayOfTables) {
     }
 }
 
-/// After inserting a new table at position `pos`, ensure the affected element
-/// has the correct blank-line spacing to match its neighbours.
-///
-/// We only *detect* whether the nearest non-first neighbour uses a leading
-/// `\n` (blank-line separator) and then add or strip a leading `\n` on the
-/// target.  The rest of the prefix (block comments, etc.) is never touched.
-///
-/// When inserting at position 0 the new element needs no prefix (it is now
-/// first), but the *old* first element — now at position 1 — was re-pushed
-/// with its original prefix and must be fixed instead.
-fn fix_inserted_aot_spacing(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
-    // Detect whether the nearest non-first neighbour uses blank-line spacing.
-    // Prefer the element *before* — elements after may also be newly pushed
-    // and not yet corrected.
-    //
-    // A `None` prefix means "unset" — toml_edit will insert a default blank
-    // line for non-first AoT entries, so we treat it as spaced.  Only an
-    // explicitly set prefix that does NOT start with '\n' counts as compact.
-    //
-    // Inserting at the front: the element that needs fixing is the old first
-    // element, now sitting at position 1.
-    let target = if pos == 0 { 1 } else { pos };
-    let spaced = [target - 1, target + 1]
-        .into_iter()
-        .filter(|&i| i > 0 && i < aot.len())
-        .find_map(|i| {
-            aot.get(i).map(|t| {
-                let as_str = t.decor().prefix().and_then(|r| r.as_str());
-                // None → default blank line (spaced)
-                // Some(s) starting with '\n' → explicitly spaced
-                // Some(s) not starting with '\n' → compact
-                as_str.is_none() || as_str.is_some_and(|s| s.starts_with('\n'))
-            })
-        })
-        .unwrap_or(true);
+/// The indent that follows the last `\n` in `s` (or the whole string if
+/// there is no newline).  Callers pass decor prefixes that, in normal
+/// parsed TOML, end with pure horizontal whitespace after the last newline.
+fn trailing_indent(s: &str) -> &str {
+    s.rsplit_once('\n').map_or(s, |(_, after)| after)
+}
 
-    // Read the target's current prefix.  Distinguish between `None` (unset —
-    // toml_edit will insert a default blank line) and `Some("")` (explicitly
-    // empty — no blank line).
-    let Some(entry) = aot.get_mut(target) else {
-        return;
-    };
-    let raw_prefix = entry
-        .decor()
-        .prefix()
+/// Read a table's decor prefix as a `&str`.
+fn prefix_str(t: &toml_edit::Table) -> Option<&str> {
+    t.decor().prefix().and_then(|r| r.as_str())
+}
+
+/// Extract the body indent of a table — the indent that would precede a
+/// new key inserted into it.  Reads the leaf-decor prefix of the first
+/// key, taking whatever indent appears after the last `\n`.  Returns an
+/// empty string if the table has no keys, or if the prefix has no clean
+/// indent (e.g. ends in a comment).
+pub(crate) fn table_body_indent(t: &toml_edit::Table) -> String {
+    t.iter()
+        .next()
+        .and_then(|(k, _)| t.key(k))
+        .and_then(|k| k.leaf_decor().prefix())
         .and_then(|r| r.as_str())
-        .map(str::to_owned);
-    let current = raw_prefix.as_deref().unwrap_or("");
-    let has_blank = current.starts_with('\n');
+        .map(trailing_indent)
+        .unwrap_or_default()
+        .to_owned()
+}
 
-    if spaced && !has_blank {
-        // Prepend a blank line, preserving any existing content (comments).
+/// Read the (header, body) indents of an entry — the indent before its
+/// `[[header]]` and the indent before its first key.
+fn entry_indents(t: &toml_edit::Table) -> (String, String) {
+    let header = prefix_str(t)
+        .map(trailing_indent)
+        .unwrap_or_default()
+        .to_owned();
+    (header, table_body_indent(t))
+}
+
+/// Ensure `entry`'s prefix starts with (or does not start with) a `\n`.
+fn set_spacing(entry: &mut toml_edit::Table, spaced: bool) {
+    let raw = prefix_str(entry).map(str::to_owned);
+    let current = raw.as_deref().unwrap_or("");
+    if spaced && !current.starts_with('\n') {
         entry.decor_mut().set_prefix(format!("\n{current}"));
-    } else if !spaced && (raw_prefix.is_none() || current == "\n") {
-        // Prefix is either unset (toml_edit would insert a default blank
-        // line) or is a bare "\n".  Explicitly set to "" to suppress it.
+    } else if !spaced && raw.as_deref().unwrap_or("\n") == "\n" {
+        // Either unset (toml_edit would emit a default `\n`) or just a
+        // bare `\n` — clear it to suppress the separator.
         entry.decor_mut().set_prefix("");
+    }
+}
+
+/// Append `indent` to `entry`'s prefix iff the prefix has no trailing indent.
+fn set_header_indent(entry: &mut toml_edit::Table, indent: &str) {
+    if indent.is_empty() {
+        return;
+    }
+    let current = prefix_str(entry).unwrap_or("").to_owned();
+    if !trailing_indent(&current).is_empty() {
+        return;
+    }
+    entry.decor_mut().set_prefix(format!("{current}{indent}"));
+}
+
+/// Set `indent` as the leaf-decor prefix on every key of `entry` whose
+/// prefix is currently unset.
+fn set_body_indent(entry: &mut toml_edit::Table, indent: &str) {
+    if indent.is_empty() {
+        return;
+    }
+    let keys: Vec<String> = entry.iter().map(|(k, _)| k.to_owned()).collect();
+    for k in keys {
+        let mut km = entry.key_mut(&k).expect("key just listed from same table");
+        let needs = km
+            .leaf_decor()
+            .prefix()
+            .and_then(|r| r.as_str())
+            .is_none_or(str::is_empty);
+        if needs {
+            km.leaf_decor_mut().set_prefix(indent);
+        }
+    }
+}
+
+/// True if the entry's prefix expresses a leading blank-line separator.
+/// `None` is treated as spaced because toml_edit emits a default `\n`.
+fn is_spaced(t: &toml_edit::Table) -> bool {
+    prefix_str(t).is_none_or(|s| s.starts_with('\n'))
+}
+
+/// After inserting a new table at position `pos`, restore the spacing
+/// (blank-line separator) and the indent style of its neighbours.
+///
+/// Two entries may need attention:
+///   * the new entry at `pos` itself, which has no decor yet and may need
+///     the indent (header + body) of its neighbours; and
+///   * when `pos == 0`, the *old* first element — now at index 1 — which
+///     was re-pushed with its original prefix and may need a blank-line
+///     separator added (or removed).
+///
+/// We only *detect* style from neighbours and never trample explicit user
+/// decor: spacing only adjusts the leading `\n`, indent only fills in
+/// unset prefixes.
+fn fix_inserted_aot_decor(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
+    debug_assert!(pos < aot.len());
+    // The entry whose blank-line separator may need adjusting: the new
+    // entry, except when inserting at the front (then it's the survivor,
+    // which is no longer first).
+    let spacing_target = if pos == 0 { 1 } else { pos };
+
+    // Indent style: copy from any pre-existing entry.
+    let (header_indent, body_indent) = (0..aot.len())
+        .find(|&i| i != pos)
+        .and_then(|i| aot.get(i))
+        .map(entry_indents)
+        .unwrap_or_default();
+
+    // Spacing: detect from any entry past index 0 that isn't the
+    // spacing_target itself (position 0's empty prefix is conventional,
+    // and the spacing_target is what we're about to fix).
+    let spaced = (1..aot.len())
+        .find(|&i| i != spacing_target)
+        .and_then(|i| aot.get(i))
+        .is_none_or(is_spaced);
+
+    // Apply the spacing + indent fixes.
+    if let Some(entry) = aot.get_mut(spacing_target) {
+        set_spacing(entry, spaced);
+        set_header_indent(entry, &header_indent);
+        set_body_indent(entry, &body_indent);
+    }
+
+    // Insert-at-front: also fix the new entry at position 0.  When the
+    // survivor was indented (so `header_indent` is non-empty), we are in
+    // a nested-AoT context — the new front entry needs both a leading
+    // `\n` and the header indent.  Otherwise (top-level AoT) it stays at
+    // column 0 with just body indent.
+    if pos == 0
+        && let Some(entry) = aot.get_mut(0)
+    {
+        if !header_indent.is_empty() {
+            set_spacing(entry, true);
+            set_header_indent(entry, &header_indent);
+        }
+        set_body_indent(entry, &body_indent);
     }
 }
 
@@ -572,7 +659,7 @@ fn aot_setitem_slice(
         for (offset, table) in tables.into_iter().enumerate() {
             aot.insert(start_idx + offset, table);
         }
-        // fix_inserted_aot_spacing(aot, 0) targets index 1.  When that is
+        // fix_inserted_aot_decor(aot, 0) targets index 1.  When that is
         // an old survivor (tables_count <= 1) rather than a newly inserted
         // entry, skip — its prefix is already correct, and the spacing
         // detector can't infer the style from index 0 alone.
@@ -582,7 +669,7 @@ fn aot_setitem_slice(
             start_idx
         };
         for i in spacing_start..start_idx + tables_count {
-            fix_inserted_aot_spacing(aot, i);
+            fix_inserted_aot_decor(aot, i);
         }
     } else {
         let indices = collect_slice_indices(start, stop, step);
@@ -702,7 +789,8 @@ pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()>
         ArrayLikeMut::Aot(aot) => {
             let table = require_table(value)?;
             aot.push(table);
-            fix_inserted_aot_spacing(aot, aot.len() - 1);
+            let pos = aot.len() - 1;
+            fix_inserted_aot_decor(aot, pos);
             Ok(())
         }
     }
@@ -741,7 +829,7 @@ pub(crate) fn item_insert(
             let at_end = resolved == aot.len();
             let table = require_table(value)?;
             aot.insert(resolved, table);
-            fix_inserted_aot_spacing(aot, resolved);
+            fix_inserted_aot_decor(aot, resolved);
             Ok((!at_end).then_some(Affected::Range {
                 from: resolved,
                 to: aot.len(),
@@ -804,7 +892,7 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
                 .collect::<PyResult<_>>()?;
             for table in tables {
                 aot.push(table);
-                fix_inserted_aot_spacing(aot, aot.len() - 1);
+                fix_inserted_aot_decor(aot, aot.len() - 1);
             }
             Ok(())
         }
@@ -844,7 +932,7 @@ pub(crate) fn clone_elements_into(dest: &mut ItemRs, source: ArrayLikeRef<'_>, n
                     // entry in push order rather than interleaving it by span.
                     t.set_position(None);
                     dest_aot.push(t);
-                    fix_inserted_aot_spacing(dest_aot, dest_aot.len() - 1);
+                    fix_inserted_aot_decor(dest_aot, dest_aot.len() - 1);
                 }
             }
             true

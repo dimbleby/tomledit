@@ -139,6 +139,15 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
             .get(key)
             .and_then(|e| e.as_value())
             .map(|v| v.decor().clone());
+
+        // For brand-new keys in a regular table, copy the table's body
+        // indent so the new key lines up with its siblings.
+        let new_key_indent = old_decor
+            .is_none()
+            .then(|| item.as_table().map(crate::list_ops::table_body_indent))
+            .flatten()
+            .filter(|s| !s.is_empty());
+
         // into_value() only fails for Item::None which we never produce.
         let mut new_value = value
             .0
@@ -153,6 +162,17 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
             }
         }
         item[key] = ItemRs::Value(new_value);
+
+        if let Some(indent) = new_key_indent
+            && let Some(mut km) = item.as_table_mut().and_then(|t| t.key_mut(key))
+            && km
+                .leaf_decor()
+                .prefix()
+                .and_then(|r| r.as_str())
+                .is_none_or(str::is_empty)
+        {
+            km.leaf_decor_mut().set_prefix(&indent);
+        }
 
         if let Some((mut ic, last_key)) = inline_insertion {
             ic.push(String::new());

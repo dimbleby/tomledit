@@ -20,6 +20,8 @@ dynamic = [
 
 [project.urls]
 Repository = "https://github.com/dimbleby/tomledit"
+Issues = "https://github.com/dimbleby/tomledit/issues"
+Changelog = "https://github.com/dimbleby/tomledit/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [

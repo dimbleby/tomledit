@@ -15,8 +15,9 @@ make coverage
 
 ## Uncovered line numbers
 
-Use `--lcov` output. **All steps must run in the same shell** (shared env
-vars point pytest's profraw output to the right directory).
+Use `--lcov` output.
+**All steps must run in the same shell** (shared env vars point pytest's profraw
+output to the right directory).
 
 ### All files
 
@@ -43,10 +44,10 @@ eval "$(cargo llvm-cov show-env --sh)" && \
 
 ## Pitfalls
 
-- `cargo llvm-cov report` gives summary tables; there is no `show`
-  subcommand. Use `--lcov` for line-level data.
+- `cargo llvm-cov report` gives summary tables; there is no `show` subcommand.
+  Use `--lcov` for line-level data.
 - The `--sources` flag does not work with this project.
-- Running the steps in separate shells causes "not found *.profraw".
+- Running the steps in separate shells causes "not found \*.profraw".
 - `make coverage-build` handles the instrumented build.
 
 ## Clean up

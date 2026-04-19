@@ -241,52 +241,76 @@ pub(crate) fn set_block_comment(
 // `CommentPreservation` trait abstracts over the difference so that
 // save/restore operations are written once.
 
-/// Decomposed parts of an element's slot string: `{inline}\n{block}{indent}`.
+/// Decomposed parts of an element's slot string.
+///
+/// A slot is `<head><block><indent>` where:
+///   - `head`   is empty (single-line layout) or `<inline-text>\n`
+///     (the structural newline lives with the inline portion)
+///   - `block`  is zero or more block comment lines, each terminated by `\n`
+///   - `indent` is the trailing whitespace before the value
+///
+/// `split` and `join` are exact inverses for any input.
 struct PrefixParts {
-    inline: String,
+    head: String,
     block: String,
     indent: String,
 }
 
 impl PrefixParts {
-    /// Decompose a raw slot string into its inline, block, and indent parts.
+    /// Decompose a raw slot string.
     fn split(raw: &str) -> Self {
-        if let Some((first_line, rest)) = raw.split_once('\n') {
-            if let Some((block, indent)) = rest.rsplit_once('\n') {
-                Self {
-                    inline: first_line.to_owned(),
-                    block: if block.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{block}\n")
-                    },
-                    indent: indent.to_owned(),
-                }
-            } else {
-                Self {
-                    inline: first_line.to_owned(),
-                    block: String::new(),
-                    indent: rest.to_owned(),
-                }
-            }
-        } else {
-            Self {
-                inline: String::new(),
+        let Some((first_line, rest)) = raw.split_once('\n') else {
+            return Self {
+                head: String::new(),
                 block: String::new(),
                 indent: raw.to_owned(),
-            }
+            };
+        };
+        let (block, indent) = match rest.rsplit_once('\n') {
+            Some((block, indent)) => (format!("{block}\n"), indent.to_owned()),
+            None => (String::new(), rest.to_owned()),
+        };
+        Self {
+            head: format!("{first_line}\n"),
+            block,
+            indent,
         }
     }
 
-    /// Reconstruct the raw prefix string from its parts.
+    /// Reconstruct the raw slot string.
     fn join(&self) -> String {
-        format!("{}\n{}{}", self.inline, self.block, self.indent)
+        format!("{}{}{}", self.head, self.block, self.indent)
+    }
+
+    /// The inline-comment text (without the structural newline), or empty
+    /// when the slot has no newline at all.
+    fn inline(&self) -> &str {
+        self.head.strip_suffix('\n').unwrap_or("")
+    }
+
+    /// Replace the inline-comment text.  A non-empty `text` ensures the
+    /// structural newline is present (upgrading single-line layout); an
+    /// empty `text` preserves the existing layout.
+    fn set_inline(&mut self, text: &str) {
+        if !text.is_empty() || !self.head.is_empty() {
+            self.head = format!("{text}\n");
+        }
+    }
+
+    /// Replace the block-comment portion.  A non-empty `block` ensures the
+    /// structural newline is present (upgrading single-line layout); an
+    /// empty `block` preserves the existing layout.
+    fn set_block(&mut self, block: String) {
+        if !block.is_empty() && self.head.is_empty() {
+            self.head = String::from("\n");
+        }
+        self.block = block;
     }
 
     /// Return `raw` with its inline-comment portion replaced by `new_inline`.
     fn with_inline(raw: &str, new_inline: &str) -> String {
         let mut parts = Self::split(raw);
-        parts.inline = new_inline.to_owned();
+        parts.set_inline(new_inline);
         parts.join()
     }
 }
@@ -329,7 +353,11 @@ fn array_write_slot(arr: &mut toml_edit::Array, idx: usize, raw: &str) {
 impl CommentPreservation for toml_edit::Array {
     fn save_inline_comments(&self) -> Vec<String> {
         (0..self.len())
-            .map(|i| PrefixParts::split(array_read_slot(self, i)).inline)
+            .map(|i| {
+                PrefixParts::split(array_read_slot(self, i))
+                    .inline()
+                    .to_owned()
+            })
             .collect()
     }
 
@@ -337,7 +365,7 @@ impl CommentPreservation for toml_edit::Array {
         debug_assert_eq!(comments.len(), self.len());
         for (i, inline) in comments.iter().enumerate() {
             let raw = array_read_slot(self, i);
-            if PrefixParts::split(raw).inline != *inline {
+            if PrefixParts::split(raw).inline() != inline {
                 let new_raw = PrefixParts::with_inline(raw, inline);
                 array_write_slot(self, i, &new_raw);
             }
@@ -371,7 +399,11 @@ impl CommentPreservation for toml_edit::InlineTable {
     fn save_inline_comments(&self) -> Vec<String> {
         let keys: Vec<&str> = self.iter().map(|(k, _)| k).collect();
         (0..keys.len())
-            .map(|i| PrefixParts::split(it_read_slot(self, keys.get(i + 1).copied())).inline)
+            .map(|i| {
+                PrefixParts::split(it_read_slot(self, keys.get(i + 1).copied()))
+                    .inline()
+                    .to_owned()
+            })
             .collect()
     }
 
@@ -381,7 +413,7 @@ impl CommentPreservation for toml_edit::InlineTable {
         for (i, inline) in comments.iter().enumerate() {
             let next_key = keys.get(i + 1).map(String::as_str);
             let raw = it_read_slot(self, next_key);
-            if PrefixParts::split(raw).inline != *inline {
+            if PrefixParts::split(raw).inline() != inline {
                 let new_raw = PrefixParts::with_inline(raw, inline);
                 it_write_slot(self, next_key, &new_raw);
             }
@@ -394,15 +426,14 @@ impl CommentPreservation for toml_edit::InlineTable {
 /// Get the inline comment for array element `idx` from a parent `ItemRs`.
 pub(crate) fn get_array_inline_comment(parent: &ItemRs, idx: usize) -> Option<String> {
     let array = parent.as_value()?.as_array()?;
-    extract_inline_comment(&PrefixParts::split(array_read_slot(array, idx)).inline)
+    extract_inline_comment(PrefixParts::split(array_read_slot(array, idx)).inline())
 }
 
 /// Set the inline comment for array element `idx`.  `inline` is a
 /// pre-validated raw suffix (e.g. `" # note"`) or empty to clear.
 pub(crate) fn set_array_inline_comment(array: &mut toml_edit::Array, idx: usize, inline: &str) {
     let raw = array_read_slot(array, idx).to_owned();
-    let current = PrefixParts::split(&raw).inline;
-    if current == inline {
+    if PrefixParts::split(&raw).inline() == inline {
         return;
     }
     array_write_slot(array, idx, &PrefixParts::with_inline(&raw, inline));
@@ -417,7 +448,7 @@ pub(crate) fn get_inline_table_inline_comment(
     // If the key doesn't exist, skip_while exhausts the iterator.
     iter.next()?;
     let next_key = iter.next().map(|(k, _)| k);
-    extract_inline_comment(&PrefixParts::split(it_read_slot(it, next_key)).inline)
+    extract_inline_comment(PrefixParts::split(it_read_slot(it, next_key)).inline())
 }
 
 /// Set the inline comment for an inline-table entry by key name.
@@ -435,8 +466,7 @@ pub(crate) fn set_inline_table_inline_comment(
         iter.next().map(|(k, _)| k.to_owned())
     };
     let raw = it_read_slot(it, next_key.as_deref()).to_owned();
-    let current = PrefixParts::split(&raw).inline;
-    if current == inline {
+    if PrefixParts::split(&raw).inline() == inline {
         return;
     }
     it_write_slot(
@@ -491,9 +521,8 @@ pub(crate) fn set_element_block_comment(
 ) -> PyResult<()> {
     let raw = decor.prefix().and_then(|r| r.as_str()).unwrap_or_default();
     let mut parts = PrefixParts::split(raw);
-    parts.block = build_block_or_default(comment, &parts.indent, "")?;
-    let new_prefix = parts.join();
-    decor.set_prefix(new_prefix);
+    parts.set_block(build_block_or_default(comment, &parts.indent, "")?);
+    decor.set_prefix(parts.join());
     Ok(())
 }
 
@@ -566,16 +595,33 @@ fn set_inline_table_block_comment(
     if let Some(ci) = canonical.filter(|_| is_first || parts.indent.is_empty()) {
         parts.indent = ci;
     }
-    parts.block = build_block_or_default(comment, &parts.indent, "")?;
-
-    let new_prefix = if is_first && parts.block.is_empty() {
-        // Clearing the first key: just the indent.  Can't use parts.join() here
-        // because it always inserts `\n` after `parts.inline`, which would add
-        // a spurious blank line after `{`.
-        parts.indent
-    } else {
-        parts.join()
-    };
-    km.leaf_decor_mut().set_prefix(new_prefix);
+    parts.set_block(build_block_or_default(comment, &parts.indent, "")?);
+    km.leaf_decor_mut().set_prefix(parts.join());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `PrefixParts::split` followed by `PrefixParts::join` must be the
+    /// identity for any input — no spurious or lost newlines.
+    #[test]
+    fn prefix_parts_split_join_round_trip() {
+        for raw in [
+            "",
+            "  ",
+            "\n",
+            "\n  ",
+            "\n\n  ",
+            " # foo\n  # bar\n  ",
+            "\n\n# block\n  ",
+        ] {
+            assert_eq!(
+                PrefixParts::split(raw).join(),
+                raw,
+                "round-trip failed for {raw:?}"
+            );
+        }
+    }
 }

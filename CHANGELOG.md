@@ -2,9 +2,12 @@
 
 ## Unreleased
 
+## 1.1.3 (19 April 2026)
+
 - Fix a TOCTOU window in `DictItem.update()` between proxy freshness check
   and document write-lock acquisition that could let a stale proxy mutate
   post-mutation state under free-threading.
+- Use `pyo3::sync::RwLockExt` to avoid possible deadlocks
 
 ## 1.1.2 (18 April 2026)
 

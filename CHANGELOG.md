@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- New entries appended/inserted into an array of tables now copy the indent
+  style of their neighbours (both the header indent and the per-key body
+  indent), instead of always being emitted at column 0.
+- New keys added to a regular table now copy the indent of existing sibling
+  keys, instead of always being emitted at column 0.
+
 ## 1.1.3 (19 April 2026)
 
 - Fix a TOCTOU window in `DictItem.update()` between proxy freshness check

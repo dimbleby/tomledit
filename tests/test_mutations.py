@@ -664,3 +664,56 @@ class TestFormatPreservation:
             a = 10
             b = 2
         """)
+
+    def test_new_key_inherits_sibling_indent(self) -> None:
+        """Adding a new key to an indented table copies the sibling indent."""
+        doc = Document.parse(
+            toml_literal("""
+            [[fruit]]
+              name = "apple"
+        """)
+        )
+        doc["fruit"][0]["fresh"] = True
+        assert doc.as_toml() == toml_literal("""
+            [[fruit]]
+              name = "apple"
+              fresh = true
+        """)
+
+    def test_new_key_no_indent_when_siblings_unindented(self) -> None:
+        """Default (unindented) tables stay unindented."""
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            a = 1
+        """)
+        )
+        doc["t"]["b"] = 2
+        assert doc.as_toml() == toml_literal("""
+            [t]
+            a = 1
+            b = 2
+        """)
+
+    def test_new_key_in_inline_table_no_indent(self) -> None:
+        """Inline tables never gain multi-line indentation."""
+        doc = Document.parse("t = {a = 1, b = 2}\n")
+        doc["t"]["c"] = 3
+        assert "\n" not in doc.as_toml().rstrip("\n")
+
+    def test_new_key_no_indent_when_sibling_has_comment_prefix(self) -> None:
+        """A sibling key whose prefix ends in a comment yields no indent."""
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+            # leading comment
+            a = 1
+        """)
+        )
+        doc["t"]["b"] = 2
+        assert doc.as_toml() == toml_literal("""
+            [t]
+            # leading comment
+            a = 1
+            b = 2
+        """)

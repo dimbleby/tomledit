@@ -10,16 +10,12 @@ use toml_edit::Value as ValueRs;
 /// Extract an inline comment from a raw string: trim whitespace, return if `#`-prefixed.
 fn extract_inline_comment(s: &str) -> Option<String> {
     let trimmed = s.trim();
-    if trimmed.starts_with('#') {
-        Some(trimmed.to_owned())
-    } else {
-        None
-    }
+    trimmed.starts_with('#').then(|| trimmed.to_owned())
 }
 
 /// Extract block comment lines from a raw string.
 /// Returns `#`-prefixed lines (trimmed of indentation) and empty lines for blank lines.
-/// Returns `None` if there are no comment lines.
+/// Trailing blank lines are dropped.  Returns `None` if there are no comment lines.
 fn extract_block_comment(s: &str) -> Option<String> {
     let mut result: Vec<&str> = Vec::new();
     for line in s.lines() {
@@ -30,11 +26,10 @@ fn extract_block_comment(s: &str) -> Option<String> {
             result.push("");
         }
     }
-    if result.iter().all(|s| s.is_empty()) {
-        None
-    } else {
-        Some(result.join("\n"))
+    while result.last().is_some_and(|s| s.is_empty()) {
+        result.pop();
     }
+    (!result.is_empty()).then(|| result.join("\n"))
 }
 
 /// Whether a character is forbidden in a TOML comment.
@@ -98,6 +93,34 @@ fn build_block_or_default(comment: Option<&str>, indent: &str, default: &str) ->
         .map(|t| build_block_comment(t, indent))
         .transpose()?
         .unwrap_or_else(|| default.to_owned()))
+}
+
+/// Decompose a table/key decor prefix into `(leading_blanks, trailing_indent)`.
+///
+/// `leading_blanks` is the run of `\n` characters at the start of the prefix
+/// (encoding blank-line separation from the previous entry).
+/// `trailing_indent` is whatever follows the last `\n` (the indent before
+/// the entry).  Anything in between is discarded — typically an existing
+/// block comment that the caller intends to replace.
+fn split_block_envelope(prefix: &str) -> (&str, &str) {
+    let leading_end = prefix.bytes().take_while(|&b| b == b'\n').count();
+    let leading = &prefix[..leading_end];
+    let trailing = prefix
+        .rsplit_once('\n')
+        .map_or(&prefix[leading_end..], |(_, after)| after);
+    (leading, trailing)
+}
+
+/// Build a new decor prefix that swaps the block comment in `existing`
+/// for `comment`, preserving the leading blank-line spacing and the
+/// trailing indent.
+fn build_block_preserving_envelope(existing: &str, comment: Option<&str>) -> PyResult<String> {
+    let (leading, indent) = split_block_envelope(existing);
+    let body = comment
+        .map(|t| build_block_comment(t, indent))
+        .transpose()?
+        .unwrap_or_default();
+    Ok(format!("{leading}{body}{indent}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -176,14 +199,22 @@ pub(crate) fn set_block_comment(
                 _ => None,
             };
             if let Some(d) = decor {
-                d.set_prefix(build_block_or_default(comment, "", "\n")?);
+                let existing = d.prefix().and_then(|r| r.as_str()).unwrap_or("").to_owned();
+                let prefix = build_block_preserving_envelope(&existing, comment)?;
+                d.set_prefix(prefix);
                 return Ok(());
             }
             let Some(mut km) = table.key_mut(key) else {
                 return Err(PyKeyError::new_err(key.to_owned()));
             };
-            km.leaf_decor_mut()
-                .set_prefix(build_block_or_default(comment, "", "")?);
+            let existing = km
+                .leaf_decor()
+                .prefix()
+                .and_then(|r| r.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let prefix = build_block_preserving_envelope(&existing, comment)?;
+            km.leaf_decor_mut().set_prefix(prefix);
             Ok(())
         }
         ItemRs::Value(ValueRs::InlineTable(it)) => set_inline_table_block_comment(it, key, comment),
@@ -486,12 +517,7 @@ fn get_inline_table_block_comment(it: &toml_edit::InlineTable, key: &str) -> Opt
     } else {
         // Non-first key: the prefix mixes the previous key's inline comment
         // with this key's block comment; PrefixParts separates them.
-        let parts = PrefixParts::split(raw);
-        if parts.block.is_empty() {
-            None
-        } else {
-            extract_block_comment(&parts.block)
-        }
+        extract_block_comment(&PrefixParts::split(raw).block)
     }
 }
 

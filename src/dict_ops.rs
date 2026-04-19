@@ -488,5 +488,5 @@ pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
 pub(crate) fn item_setitem_str(item: &mut ItemRs, key: String, value: Item) -> Option<Key> {
     let replaced = item.get(key.as_str()).is_some();
     set_with_decor_preservation(item, &key, value);
-    if replaced { Some(Key::Str(key)) } else { None }
+    replaced.then_some(Key::Str(key))
 }

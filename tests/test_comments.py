@@ -832,7 +832,7 @@ class TestComment:
         """)
         )
         doc["section"].comment = None
-        assert doc.as_toml() == "\n[section]\nx = 1\n"
+        assert doc.as_toml() == "[section]\nx = 1\n"
         assert doc["section"].comment is None
 
     def test_multiline_table_comment(self) -> None:
@@ -877,6 +877,87 @@ class TestComment:
         """)
         assert doc["section"].comment == "# above"
         assert doc["section"].inline_comment == "# inline"
+
+    def test_block_comment_preserves_key_indent(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+              a = 1
+              b = 2
+        """)
+        )
+        doc["t"]["a"].comment = "# explains a"
+        assert doc.as_toml() == toml_literal("""
+            [t]
+              # explains a
+              a = 1
+              b = 2
+        """)
+        assert doc["t"]["a"].comment == "# explains a"
+
+    def test_block_comment_preserves_indented_aot_entry(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [[fruit]]
+              name = "apple"
+
+              [[fruit.variety]]
+                name = "red"
+        """)
+        )
+        doc["fruit"][0]["variety"][0].comment = "# the red one"
+        assert doc.as_toml() == toml_literal("""
+            [[fruit]]
+              name = "apple"
+
+              # the red one
+              [[fruit.variety]]
+                name = "red"
+        """)
+
+    def test_multiline_block_comment_preserves_key_indent(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+              a = 1
+        """)
+        )
+        doc["t"]["a"].comment = "# line one\n# line two"
+        assert doc.as_toml() == toml_literal("""
+            [t]
+              # line one
+              # line two
+              a = 1
+        """)
+
+    def test_replace_block_comment_preserves_key_indent(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+              # old
+              a = 1
+        """)
+        )
+        doc["t"]["a"].comment = "# new"
+        assert doc.as_toml() == toml_literal("""
+            [t]
+              # new
+              a = 1
+        """)
+
+    def test_clear_block_comment_preserves_key_indent(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [t]
+              # old
+              a = 1
+        """)
+        )
+        doc["t"]["a"].comment = None
+        assert doc.as_toml() == toml_literal("""
+            [t]
+              a = 1
+        """)
 
     # ---- table section inline comments ----
 

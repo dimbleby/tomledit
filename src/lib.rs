@@ -4,6 +4,7 @@ mod dict_ops;
 mod dict_proxy;
 mod document;
 mod equality;
+mod funcs;
 mod item;
 mod item_ops;
 mod item_proxy;
@@ -33,6 +34,11 @@ fn tomledit(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<KeysView>()?;
     m.add_class::<ValuesView>()?;
     m.add_class::<ItemsView>()?;
+
+    m.add_function(wrap_pyfunction!(funcs::load, m)?)?;
+    m.add_function(wrap_pyfunction!(funcs::loads, m)?)?;
+    m.add_function(wrap_pyfunction!(funcs::dump, m)?)?;
+    m.add_function(wrap_pyfunction!(funcs::dumps, m)?)?;
 
     // Register as collections.abc subclasses so isinstance() checks work.
     let abc = m.py().import("collections.abc")?;

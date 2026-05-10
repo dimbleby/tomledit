@@ -47,7 +47,7 @@ enum Source {
 /// destination document, since it may invoke Python iteration (slow path)
 /// or take the source proxy's read lock (fast path).
 ///
-/// Non-array-like proxies (DictProxy, ScalarProxy) fall through to
+/// Non-array-like proxies (`DictProxy`, `ScalarProxy`) fall through to
 /// `Items`, matching Python's `list.extend(dict)` semantics (yielding
 /// the dict's keys).
 fn prepare_source(obj: &Bound<'_, PyAny>) -> PyResult<Source> {
@@ -145,7 +145,7 @@ impl ListProxy {
                 list_ops::item_setitem_slice(target, si.start, si.stop, si.step, values)?;
                 if new_count == indices.len() {
                     for &i in &indices {
-                        base.bump_child(doc, Key::Int(i));
+                        base.bump_child(doc, &Key::Int(i));
                     }
                 } else {
                     let from = indices.iter().min().copied().unwrap_or(si.start as usize);
@@ -161,7 +161,7 @@ impl ListProxy {
                 let item = base.navigate_mut(&mut inner)?;
                 let target = list_ops::as_array_like_mut(item, "__setitem__")?;
                 let replaced_key = list_ops::item_setitem_int(target, i, value)?;
-                base.bump_child(doc, replaced_key);
+                base.bump_child(doc, &replaced_key);
                 Ok(())
             }
         }
@@ -182,7 +182,7 @@ impl ListProxy {
                 let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
                 if let Some(&min_idx) = indices.iter().min() {
                     let old_len = target.len();
-                    list_ops::item_delitem_slice(target, &indices)?;
+                    list_ops::item_delitem_slice(target, &indices);
                     base.bump_range(doc, min_idx, old_len);
                 }
                 Ok(())
@@ -455,6 +455,7 @@ impl ListProxy {
         let (_doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         let target = list_ops::as_array_like_mut(item, "set_multiline()")?;
-        list_ops::item_set_multiline(target, indent)
+        list_ops::item_set_multiline(target, indent);
+        Ok(())
     }
 }

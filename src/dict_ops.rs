@@ -307,10 +307,7 @@ pub(crate) fn extract_kwargs(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Vec
 /// Apply pre-extracted update pairs to an item.
 ///
 /// Returns the keys that replaced existing entries.
-pub(crate) fn apply_update_pairs(
-    item: &mut ItemRs,
-    pairs: Vec<(String, Item)>,
-) -> PyResult<Vec<String>> {
+pub(crate) fn apply_update_pairs(item: &mut ItemRs, pairs: Vec<(String, Item)>) -> Vec<String> {
     // Callers guarantee `item` is table-like; `item.get()` returns `None`
     // for non-table items, so the replaced-key check is safe regardless.
     let mut replaced_keys = Vec::new();
@@ -320,7 +317,7 @@ pub(crate) fn apply_update_pairs(
         }
         set_with_decor_preservation(item, &key, val);
     }
-    Ok(replaced_keys)
+    replaced_keys
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +370,7 @@ pub(crate) fn merge_table_entries(target: &mut ItemRs, source: &ItemRs) -> PyRes
 /// on the target document.  This avoids lock conflicts when the
 /// source contains proxies from the same document.
 pub(crate) enum ResolvedUpdate {
-    /// Source is a TOML-aware type (Document or DictItem), cloned at
+    /// Source is a TOML-aware type (Document or `DictItem`), cloned at
     /// resolve time so no lock is needed during application.
     Toml(ItemRs),
     /// Source is a plain Python mapping or iterable of pairs.
@@ -385,7 +382,7 @@ impl ResolvedUpdate {
     pub(crate) fn apply(self, target: &mut ItemRs) -> PyResult<Vec<String>> {
         match self {
             Self::Toml(item) => merge_table_entries(target, &item),
-            Self::Pairs(pairs) => apply_update_pairs(target, pairs),
+            Self::Pairs(pairs) => Ok(apply_update_pairs(target, pairs)),
         }
     }
 }
@@ -413,7 +410,7 @@ pub(crate) fn merge_other_into(
         return result;
     }
     // Plain mapping / iterable — no TOML decor to preserve.
-    apply_update_pairs(target, extract_update_pairs(other)?)
+    Ok(apply_update_pairs(target, extract_update_pairs(other)?))
 }
 
 /// Returns `true` if `other` is a `Mapping` (the `collections.abc` ABC),

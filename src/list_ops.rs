@@ -44,7 +44,7 @@ impl ArrayLikeRef<'_> {
         }
     }
 
-    /// Construct a new, empty TOML item of the same kind (array or AoT).
+    /// Construct a new, empty TOML item of the same kind (array or `AoT`).
     pub(crate) fn empty(&self) -> ItemRs {
         match self {
             Self::Array(_) => ItemRs::Value(ValueRs::Array(toml_edit::Array::new())),
@@ -254,7 +254,7 @@ fn apply_first_prefix(arr: &mut toml_edit::Array, prefix: Option<String>) {
     }
 }
 
-/// Save the decor prefix of an AoT entry at `index`.
+/// Save the decor prefix of an `AoT` entry at `index`.
 ///
 /// Block comments and spacing separators live in each table's decor prefix.
 /// Mutations that replace an entry must save this first, then stamp the
@@ -266,7 +266,7 @@ fn save_aot_entry_prefix(aot: &toml_edit::ArrayOfTables, index: usize) -> String
         .to_owned()
 }
 
-/// Clean up the first AoT entry's decor prefix after a removal.
+/// Clean up the first `AoT` entry's decor prefix after a removal.
 ///
 /// When entry 0 is removed, the new first entry may have a leading `\n`
 /// separator (left over from being a non-first entry).  Strip it.
@@ -369,7 +369,7 @@ fn set_body_indent(entry: &mut toml_edit::Table, indent: &str) {
 }
 
 /// True if the entry's prefix expresses a leading blank-line separator.
-/// `None` is treated as spaced because toml_edit emits a default `\n`.
+/// `None` is treated as spaced because `toml_edit` emits a default `\n`.
 fn is_spaced(t: &toml_edit::Table) -> bool {
     prefix_str(t).is_none_or(|s| s.starts_with('\n'))
 }
@@ -499,7 +499,7 @@ pub(crate) fn collect_slice_indices(start: isize, stop: isize, step: isize) -> V
 }
 
 /// Delete elements at the given indices (sorted in reverse internally).
-pub(crate) fn item_delitem_slice(target: ArrayLikeMut<'_>, indices: &[usize]) -> PyResult<()> {
+pub(crate) fn item_delitem_slice(target: ArrayLikeMut<'_>, indices: &[usize]) {
     let mut sorted = indices.to_vec();
     sorted.sort_unstable();
     sorted.dedup();
@@ -517,7 +517,6 @@ pub(crate) fn item_delitem_slice(target: ArrayLikeMut<'_>, indices: &[usize]) ->
             }
             arr.restore_inline_comments(&ic);
             apply_removal_decor(arr, &decor);
-            Ok(())
         }
         ArrayLikeMut::Aot(aot) => {
             let removing_first = sorted.last() == Some(&0);
@@ -527,7 +526,6 @@ pub(crate) fn item_delitem_slice(target: ArrayLikeMut<'_>, indices: &[usize]) ->
             if removing_first {
                 fix_first_aot_prefix(aot);
             }
-            Ok(())
         }
     }
 }
@@ -926,7 +924,7 @@ pub(crate) fn clone_elements_into(dest: &mut ItemRs, source: ArrayLikeRef<'_>, n
         }
         (ItemRs::ArrayOfTables(dest_aot), ArrayLikeRef::Aot(src_aot)) => {
             for _ in 0..n {
-                for t in src_aot.iter() {
+                for t in src_aot {
                     let mut t = t.clone();
                     // Clear source position so toml_edit renders the cloned
                     // entry in push order rather than interleaving it by span.
@@ -1018,22 +1016,18 @@ pub(crate) fn find_and_remove(item: &mut ItemRs, needle: &ItemRs) -> PyResult<Af
 
 /// Format an array as multiline, with each element on its own line.
 /// No-op on empty arrays.
-pub(crate) fn item_set_multiline(target: ArrayLikeMut<'_>, indent: usize) -> PyResult<()> {
-    match target {
-        ArrayLikeMut::Array(arr) => {
-            if !arr.is_empty() {
-                let prefix = format!("\n{}", " ".repeat(indent));
-                for val in arr.iter_mut() {
-                    let decor = val.decor_mut();
-                    decor.set_prefix(&prefix);
-                    decor.set_suffix("");
-                }
-                arr.set_trailing_comma(true);
-                arr.set_trailing("\n");
-            }
-            Ok(())
+pub(crate) fn item_set_multiline(target: ArrayLikeMut<'_>, indent: usize) {
+    if let ArrayLikeMut::Array(arr) = target
+        && !arr.is_empty()
+    {
+        let prefix = format!("\n{}", " ".repeat(indent));
+        for val in arr.iter_mut() {
+            let decor = val.decor_mut();
+            decor.set_prefix(&prefix);
+            decor.set_suffix("");
         }
-        ArrayLikeMut::Aot(_) => Ok(()),
+        arr.set_trailing_comma(true);
+        arr.set_trailing("\n");
     }
 }
 
@@ -1044,14 +1038,13 @@ pub(crate) fn item_set_multiline(target: ArrayLikeMut<'_>, indent: usize) -> PyR
 /// because `extract::<i64>()` can invoke Python's `__index__` protocol.
 pub(crate) fn list_pop(target: ArrayLikeMut<'_>, index: Option<i64>) -> PyResult<(Item, Affected)> {
     let len = target.len();
-    let idx = match index {
-        Some(i) => resolve_index(i, len)?,
-        None => {
-            if len == 0 {
-                return Err(PyIndexError::new_err("pop from empty array"));
-            }
-            len - 1
+    let idx = if let Some(i) = index {
+        resolve_index(i, len)?
+    } else {
+        if len == 0 {
+            return Err(PyIndexError::new_err("pop from empty array"));
         }
+        len - 1
     };
     item_remove_at(target, idx)
 }
@@ -1147,7 +1140,7 @@ mod tests {
     fn test_delitem_slice_empty_array() {
         let mut arr = toml_edit::Array::new();
         // arr.len() - 1 underflows in debug builds when indices is empty
-        item_delitem_slice(ArrayLikeMut::Array(&mut arr), &[]).unwrap();
+        item_delitem_slice(ArrayLikeMut::Array(&mut arr), &[]);
         assert_eq!(arr.len(), 0);
     }
 }

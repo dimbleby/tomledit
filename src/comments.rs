@@ -566,7 +566,7 @@ fn get_inline_table_block_comment(it: &toml_edit::InlineTable, key: &str) -> Opt
 /// recover. Compact inline tables often store this as a single leading space.
 /// Falls back to `" "` when no key carries explicit indentation yet.
 fn canonical_inline_table_indent(it: &toml_edit::InlineTable) -> String {
-    for (key, _) in it.iter() {
+    for (key, _) in it {
         let indent = it
             .key(key)
             .and_then(|k| k.leaf_decor().prefix()?.as_str())

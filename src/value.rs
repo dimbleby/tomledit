@@ -1,4 +1,4 @@
-//! Python → toml_edit extraction for all TOML types.
+//! Python → `toml_edit` extraction for all TOML types.
 
 use crate::item::Item;
 use pyo3::exceptions::PyTypeError;
@@ -162,9 +162,12 @@ impl<'py> FromPyObject<'_, 'py> for InlineTable {
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         let py_mapping = obj.cast::<PyMapping>()?;
         let pairs: Vec<(String, Value)> = extract_mapping_pairs(&py_mapping)?;
-        Ok(Self(InlineTableRs::from_iter(
-            pairs.into_iter().map(|(k, v)| (k, v.0)),
-        )))
+        Ok(Self(
+            pairs
+                .into_iter()
+                .map(|(k, v)| (k, v.0))
+                .collect::<InlineTableRs>(),
+        ))
     }
 }
 
@@ -176,7 +179,10 @@ impl<'py> FromPyObject<'_, 'py> for Table {
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         let py_mapping = obj.cast::<PyMapping>()?;
         let pairs: Vec<(String, Item)> = extract_mapping_pairs(&py_mapping)?;
-        let table = TableRs::from_iter(pairs.into_iter().map(|(k, v)| (k, v.0)));
+        let table = pairs
+            .into_iter()
+            .map(|(k, v)| (k, v.0))
+            .collect::<TableRs>();
         Ok(Self(table))
     }
 }

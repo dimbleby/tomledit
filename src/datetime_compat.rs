@@ -1,6 +1,6 @@
-//! Datetime field accessors compatible with both the full CPython API and abi3.
+//! Datetime field accessors compatible with both the full `CPython` API and abi3.
 //!
-//! Under the full API, PyO3 provides [`PyDateAccess`], [`PyTimeAccess`], and
+//! Under the full API, `PyO3` provides [`PyDateAccess`], [`PyTimeAccess`], and
 //! [`PyDeltaAccess`] traits with fast C-level field access.  These are
 //! unavailable under the stable/limited API (abi3).
 //!

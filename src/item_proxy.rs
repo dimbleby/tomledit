@@ -281,8 +281,8 @@ impl ItemProxy {
 
     /// Record a mutation at a child key under this proxy's path.
     /// The proxy itself stays valid (only the child node is bumped).
-    pub(crate) fn bump_child(&self, doc: &Document, child_key: Key) {
-        doc.bump_at_child(&self.path, &child_key);
+    pub(crate) fn bump_child(&self, doc: &Document, child_key: &Key) {
+        doc.bump_at_child(&self.path, child_key);
     }
 
     /// Record a structural mutation at this proxy's own path (e.g. clear).
@@ -303,12 +303,12 @@ impl ItemProxy {
     /// by list mutation helpers.
     pub(crate) fn bump_affected(&self, doc: &Document, affected: Affected) {
         match affected {
-            Affected::Child(k) => self.bump_child(doc, k),
+            Affected::Child(k) => self.bump_child(doc, &k),
             Affected::Range { from, to } => self.bump_range(doc, from, to),
         }
     }
 
-    /// Clone the toml_edit item at this proxy's path.
+    /// Clone the `toml_edit` item at this proxy's path.
     ///
     /// For array elements and inline-table entries the inline comment is stored
     /// externally (in the next element's prefix).  It is embedded into the
@@ -377,7 +377,7 @@ impl ItemProxy {
             Key::Str(key) => Ok(parent
                 .as_inline_table()
                 .and_then(|it| comments::get_inline_table_inline_comment(it, key))),
-            _ => Ok(None),
+            Key::Int(_) => Ok(None),
         }
     }
 

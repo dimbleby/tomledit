@@ -1,4 +1,4 @@
-//! Live dictionary views (KeysView, ValuesView, ItemsView) for Document and
+//! Live dictionary views (`KeysView`, `ValuesView`, `ItemsView`) for Document and
 //! Item proxies.  Each view holds a `Py<Document>`, a key path, and a
 //! creation revision — just like `ItemProxy`.  It re-navigates on every
 //! access so it always reflects the current state of the document, but goes
@@ -42,7 +42,7 @@ fn get_key_set(doc: &DocumentRs, path: &[Key]) -> PyResult<HashSet<String>> {
 }
 
 /// Collect elements from `other` that are strings (or string-valued proxies)
-/// into a HashSet.  Non-string elements are silently ignored.
+/// into a `HashSet`.  Non-string elements are silently ignored.
 fn other_to_string_set(other: &Bound<'_, PyAny>) -> PyResult<HashSet<String>> {
     let mut set = HashSet::new();
     for item in other.try_iter()? {

@@ -326,7 +326,7 @@ impl Document {
             replaced.extend(dict_ops::apply_update_pairs(
                 inner.as_item_mut(),
                 kwarg_pairs,
-            )?);
+            ));
         }
         for key in replaced {
             doc.bump_at(&[Key::Str(key)]);

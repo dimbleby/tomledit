@@ -138,7 +138,6 @@ pub(crate) fn item_str(item: &ItemRs, py: Python<'_>) -> PyResult<String> {
         match v {
             ValueRs::String(s) => return Ok(s.value().to_owned()),
             ValueRs::Integer(i) => return Ok(i.value().to_string()),
-            ValueRs::Float(_) => {}
             ValueRs::Boolean(b) => return Ok(if *b.value() { "True" } else { "False" }.to_owned()),
             _ => {}
         }
@@ -162,7 +161,7 @@ pub(crate) fn into_value(item: Item) -> PyResult<ValueRs> {
     })
 }
 
-/// Convert a toml_edit table's entries to a Python dict.
+/// Convert a `toml_edit` table's entries to a Python dict.
 pub(crate) fn table_to_pydict<'a>(
     iter: impl Iterator<Item = (&'a str, &'a ItemRs)>,
     py: Python<'_>,
@@ -174,19 +173,19 @@ pub(crate) fn table_to_pydict<'a>(
     Ok(dict)
 }
 
-/// Convert a toml_edit Item to a native Python object (dict/list/str/int/etc).
+/// Convert a `toml_edit` Item to a native Python object (dict/list/str/int/etc).
 pub(crate) fn item_to_py(item: &ItemRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
     match item {
         ItemRs::Value(v) => value_to_py(v, py),
         ItemRs::Table(table) => Ok(table_to_pydict(table.iter(), py)?.into_any().unbind()),
         ItemRs::ArrayOfTables(aot) => {
             let list = PyList::empty(py);
-            for table in aot.iter() {
+            for table in aot {
                 list.append(table_to_pydict(table.iter(), py)?)?;
             }
             Ok(list.into_any().unbind())
         }
-        _ => Ok(py.None()),
+        ItemRs::None => Ok(py.None()),
     }
 }
 
@@ -198,14 +197,14 @@ fn value_to_py(value: &ValueRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
         ValueRs::Boolean(b) => Ok(b.value().into_pyobject(py)?.to_owned().into_any().unbind()),
         ValueRs::Array(arr) => {
             let list = PyList::empty(py);
-            for v in arr.iter() {
+            for v in arr {
                 list.append(value_to_py(v, py)?)?;
             }
             Ok(list.into_any().unbind())
         }
         ValueRs::InlineTable(it) => {
             let dict = PyDict::new(py);
-            for (k, v) in it.iter() {
+            for (k, v) in it {
                 dict.set_item(k, value_to_py(v, py)?)?;
             }
             Ok(dict.into_any().unbind())
@@ -214,12 +213,12 @@ fn value_to_py(value: &ValueRs, py: Python<'_>) -> PyResult<Py<PyAny>> {
     }
 }
 
-/// Convert a toml_edit Datetime to a Python datetime.datetime, date, or time.
+/// Convert a `toml_edit` Datetime to a Python datetime.datetime, date, or time.
 pub(crate) fn datetime_to_py(dt: &toml_edit::Datetime, py: Python<'_>) -> PyResult<Py<PyAny>> {
     let make_tz = |offset: &toml_edit::Offset| -> PyResult<Bound<'_, PyTzInfo>> {
         let minutes: i32 = match offset {
             toml_edit::Offset::Z => 0,
-            toml_edit::Offset::Custom { minutes } => *minutes as i32,
+            toml_edit::Offset::Custom { minutes } => i32::from(*minutes),
         };
         let td = PyDelta::new(py, 0, minutes * 60, 0, true)?;
         let datetime_mod = py.import("datetime")?;

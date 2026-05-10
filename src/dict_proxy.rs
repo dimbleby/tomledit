@@ -54,7 +54,7 @@ impl DictProxy {
         let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         if let Some(replaced_key) = dict_ops::item_setitem_str(item, key_str, value) {
-            base.bump_child(doc, replaced_key);
+            base.bump_child(doc, &replaced_key);
         }
         Ok(())
     }
@@ -68,7 +68,7 @@ impl DictProxy {
         let (doc, mut inner) = base.write_checked(py)?;
         let item = base.navigate_mut(&mut inner)?;
         let (_removed, k) = dict_ops::table_pop(item, &key_str)?;
-        base.bump_child(doc, k);
+        base.bump_child(doc, &k);
         Ok(())
     }
 
@@ -185,7 +185,7 @@ impl DictProxy {
             let (doc, mut inner) = base.write_checked(py)?;
             let item = base.navigate_mut(&mut inner)?;
             dict_ops::table_pop(item, &key_str).map(|(removed, affected_key)| {
-                base.bump_child(doc, affected_key);
+                base.bump_child(doc, &affected_key);
                 removed
             })
         };
@@ -204,7 +204,7 @@ impl DictProxy {
             let (doc, mut inner) = base.write_checked(py)?;
             let item = base.navigate_mut(&mut inner)?;
             let (key, removed) = dict_ops::item_popitem(item)?;
-            base.bump_child(doc, Key::Str(key.clone()));
+            base.bump_child(doc, &Key::Str(key.clone()));
             (key, removed)
         };
         let py_val = item_ops::item_to_py(&removed, py)?;
@@ -278,10 +278,10 @@ impl DictProxy {
             None => Vec::new(),
         };
         if !kwarg_pairs.is_empty() {
-            replaced.extend(dict_ops::apply_update_pairs(item, kwarg_pairs)?);
+            replaced.extend(dict_ops::apply_update_pairs(item, kwarg_pairs));
         }
         for key in replaced {
-            base.bump_child(doc, Key::Str(key));
+            base.bump_child(doc, &Key::Str(key));
         }
         Ok(())
     }

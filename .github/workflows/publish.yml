@@ -12,6 +12,12 @@ on:
 permissions:
   contents: read
 
+# Never cancel an in-flight publish: a half-completed release (tag pushed,
+# artifact missing) is worse than two overlapping runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   sdist:
     name: Source distribution
@@ -132,7 +138,7 @@ jobs:
     needs: [sdist, wheels]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
-      id-token: write
+      id-token: write # OIDC token for PyPI trusted publishing
     environment: pypi
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

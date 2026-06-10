@@ -142,8 +142,9 @@ pub(crate) fn get_inline_comment(item: &ItemRs) -> Option<String> {
         ItemRs::Table(t) => t.decor(),
         _ => return None,
     };
-    let raw = decor.suffix()?.as_str()?;
-    extract_inline_comment(raw)
+    // An inline comment is on the value's own line — the first line of the
+    // suffix.  Any later comment lines are block comments for what follows.
+    value_suffix_inline(decor.suffix()?.as_str()?).map(str::to_owned)
 }
 
 /// Set the inline comment on an item's value decor (the `# ...` after the value).
@@ -235,19 +236,26 @@ pub(crate) fn set_block_comment(
 // ---------------------------------------------------------------------------
 //
 // A "slot" is where toml_edit physically stores an element's inline comment.
-// Because the comment sits after the comma but before the next value, it ends
-// up in the **next** element's decor prefix (or the container's trailing
-// string for the last element).  `slot(N)` means "the storage location that
-// carries element N's inline comment" — not element N's own decor.
+// The comment always sits on the same line as the value, immediately before
+// the line break that follows the element — so it lives wherever that break
+// lives:
+//   - the element's own decor **suffix**, when the break is there (the comma
+//     starts the next line, "leading-comma" style, or it is the last element
+//     before the closing `]`/`}`); or
+//   - the **next** element's decor prefix (or the container's trailing string
+//     for the last element), when the break sits after the comma
+//     ("trailing-comma" style).
+//
+// `array_read_slot` / `it_read_slot` pick the right location; everything else
+// (`SlotPrefix`, get/set, save/restore) is written once against the slot.
 //
 // A slot string has the form `{inline}\n{block}{indent}` where:
-//   - `inline` is ` # text` (inline comment after comma) or empty
+//   - `inline` is ` # text` (the element's inline comment) or empty
 //   - `block`  is zero or more `{indent}# text\n` lines
 //   - `indent` is the whitespace before the value
 //
-// Both arrays and inline tables use this same indirection.  The
-// `CommentPreservation` trait abstracts over the difference so that
-// save/restore operations are written once.
+// The `CommentPreservation` trait abstracts over arrays vs inline tables so
+// that save/restore operations are written once.
 
 /// Decomposed parts of an element's slot string.
 ///
@@ -327,6 +335,57 @@ impl SlotPrefix {
     }
 }
 
+// -- Suffix break / inline-comment helpers --
+//
+// When the line break following an element lives in the element's own decor
+// suffix (leading-comma layout, or the last element before `]`/`}`), the
+// suffix has the form `{inline}\n{indent}`: an optional ` # comment` on the
+// first line, then the structural whitespace positioning the comma or bracket.
+
+/// The inline comment carried on the first line of a value's decor suffix,
+/// trimmed (e.g. `# note`), or `None` if the first line has no comment.
+fn value_suffix_inline(suffix: &str) -> Option<&str> {
+    let first_line = suffix.split('\n').next().unwrap_or(suffix);
+    let trimmed = first_line.trim();
+    trimmed.starts_with('#').then_some(trimmed)
+}
+
+/// If a value's decor suffix carries a before-bracket inline comment, return
+/// it in slot form (` # note`, ready to store after a separator); else `None`.
+pub(crate) fn suffix_inline_as_slot(suffix: &str) -> Option<String> {
+    value_suffix_inline(suffix).map(|c| format!(" {c}"))
+}
+
+/// Build a value suffix carrying `suffix`'s inline comment (if any) followed by
+/// the structural whitespace `structural` (a separator or bracket layout).
+pub(crate) fn suffix_with_structural(suffix: &str, structural: &str) -> String {
+    let inline = suffix_inline_as_slot(suffix).unwrap_or_default();
+    format!("{inline}{structural}")
+}
+
+/// The part of a value suffix from the first newline onward (the structural
+/// whitespace that positions the following comma or bracket), or empty.
+pub(crate) fn value_suffix_tail(suffix: &str) -> &str {
+    suffix.find('\n').map_or("", |i| &suffix[i..])
+}
+
+/// A value's decor prefix / suffix as a `&str`, or `None` when unset.
+pub(crate) fn value_prefix(v: &ValueRs) -> Option<&str> {
+    v.decor().prefix().and_then(|r| r.as_str())
+}
+pub(crate) fn value_suffix(v: &ValueRs) -> Option<&str> {
+    v.decor().suffix().and_then(|r| r.as_str())
+}
+
+/// Whether `suffix` carries the line break that follows its element — and thus
+/// the element's inline comment.  This is the case for leading-comma elements
+/// (the comma starts the next line) and for the last element before a closing
+/// `]`/`}`; it is false for trailing-comma elements, whose break sits after the
+/// comma in the next element's prefix.
+pub(crate) fn suffix_holds_break(suffix: &str) -> bool {
+    suffix.contains('\n') || value_suffix_inline(suffix).is_some()
+}
+
 // -- CommentPreservation trait and implementations --
 
 /// Batch save/restore of element inline comments across mutations.
@@ -341,21 +400,31 @@ pub(crate) trait CommentPreservation {
 
 // -- Array helpers --
 
-/// Read the slot for array element `idx`: the next element's prefix,
-/// or the trailing string for the last element.
+/// Read the slot that holds array element `idx`'s inline comment: the line
+/// break following the element carries the comment, so the slot is the
+/// element's own suffix when that suffix holds the break (leading-comma layout,
+/// or the last element before `]`), otherwise the next element's prefix (or the
+/// array trailing for the last element).
 fn array_read_slot(arr: &toml_edit::Array, idx: usize) -> &str {
-    if idx + 1 < arr.len() {
-        arr.get(idx + 1)
-            .and_then(|v| v.decor().prefix().and_then(|r| r.as_str()))
-            .unwrap_or_default()
+    let own = arr.get(idx).and_then(value_suffix).unwrap_or_default();
+    if suffix_holds_break(own) {
+        own
+    } else if idx + 1 < arr.len() {
+        arr.get(idx + 1).and_then(value_prefix).unwrap_or_default()
     } else {
         arr.trailing().as_str().unwrap_or_default()
     }
 }
 
-/// Write the slot for array element `idx`.
+/// Write the slot for array element `idx` (see [`array_read_slot`]).
 fn array_write_slot(arr: &mut toml_edit::Array, idx: usize, raw: &str) {
-    if idx + 1 < arr.len() {
+    let in_suffix = arr
+        .get(idx)
+        .and_then(value_suffix)
+        .is_some_and(suffix_holds_break);
+    if in_suffix {
+        arr.get_mut(idx).unwrap().decor_mut().set_suffix(raw);
+    } else if idx + 1 < arr.len() {
         arr.get_mut(idx + 1).unwrap().decor_mut().set_prefix(raw);
     } else {
         arr.set_trailing(raw);
@@ -387,23 +456,38 @@ impl CommentPreservation for toml_edit::Array {
 
 // -- InlineTable helpers --
 
-/// Read the slot for an inline-table element, given the next key name
-/// (or `None` for the last element).
-fn it_read_slot<'a>(it: &'a toml_edit::InlineTable, next_key: Option<&str>) -> &'a str {
-    match next_key {
-        Some(k) => it
-            .key(k)
-            .and_then(|k| k.leaf_decor().prefix().and_then(|r| r.as_str()))
-            .unwrap_or_default(),
-        None => it.trailing().as_str().unwrap_or_default(),
+/// Read the slot that holds inline-table entry `key`'s inline comment: the
+/// value's own suffix when it carries the break (leading-comma layout, or the
+/// last entry before `}`), otherwise the next key's leaf-decor prefix (or the
+/// table trailing for the last entry).
+fn it_read_slot<'a>(it: &'a toml_edit::InlineTable, key: &str, next_key: Option<&str>) -> &'a str {
+    let own = it.get(key).and_then(value_suffix).unwrap_or_default();
+    if suffix_holds_break(own) {
+        own
+    } else {
+        match next_key {
+            Some(k) => it
+                .key(k)
+                .and_then(|k| k.leaf_decor().prefix().and_then(|r| r.as_str()))
+                .unwrap_or_default(),
+            None => it.trailing().as_str().unwrap_or_default(),
+        }
     }
 }
 
-/// Write the slot for an inline-table element, given the next key name.
-fn it_write_slot(it: &mut toml_edit::InlineTable, next_key: Option<&str>, raw: &str) {
-    match next_key {
-        Some(k) => it.key_mut(k).unwrap().leaf_decor_mut().set_prefix(raw),
-        None => it.set_trailing(raw),
+/// Write the slot for inline-table entry `key` (see [`it_read_slot`]).
+fn it_write_slot(it: &mut toml_edit::InlineTable, key: &str, next_key: Option<&str>, raw: &str) {
+    let in_suffix = it
+        .get(key)
+        .and_then(value_suffix)
+        .is_some_and(suffix_holds_break);
+    if in_suffix {
+        it.get_mut(key).unwrap().decor_mut().set_suffix(raw);
+    } else {
+        match next_key {
+            Some(k) => it.key_mut(k).unwrap().leaf_decor_mut().set_prefix(raw),
+            None => it.set_trailing(raw),
+        }
     }
 }
 
@@ -412,7 +496,7 @@ impl CommentPreservation for toml_edit::InlineTable {
         let keys: Vec<&str> = self.iter().map(|(k, _)| k).collect();
         (0..keys.len())
             .map(|i| {
-                SlotPrefix::split(it_read_slot(self, keys.get(i + 1).copied()))
+                SlotPrefix::split(it_read_slot(self, keys[i], keys.get(i + 1).copied()))
                     .inline()
                     .to_owned()
             })
@@ -424,10 +508,10 @@ impl CommentPreservation for toml_edit::InlineTable {
         let keys: Vec<String> = self.iter().map(|(k, _)| k.to_owned()).collect();
         for (i, inline) in comments.iter().enumerate() {
             let next_key = keys.get(i + 1).map(String::as_str);
-            let raw = it_read_slot(self, next_key);
+            let raw = it_read_slot(self, &keys[i], next_key);
             if SlotPrefix::split(raw).inline() != inline {
                 let new_raw = SlotPrefix::with_inline(raw, inline);
-                it_write_slot(self, next_key, &new_raw);
+                it_write_slot(self, &keys[i], next_key, &new_raw);
             }
         }
     }
@@ -460,7 +544,7 @@ pub(crate) fn get_inline_table_inline_comment(
     // If the key doesn't exist, skip_while exhausts the iterator.
     iter.next()?;
     let next_key = iter.next().map(|(k, _)| k);
-    extract_inline_comment(SlotPrefix::split(it_read_slot(it, next_key)).inline())
+    extract_inline_comment(SlotPrefix::split(it_read_slot(it, key, next_key)).inline())
 }
 
 /// Set the inline comment for an inline-table entry by key name.
@@ -470,19 +554,20 @@ pub(crate) fn set_inline_table_inline_comment(
     key: &str,
     inline: &str,
 ) {
-    let next_key: Option<String> = {
-        let mut iter = it.iter().skip_while(|(k, _)| *k != key);
-        if iter.next().is_none() {
-            return;
-        }
-        iter.next().map(|(k, _)| k.to_owned())
-    };
-    let raw = it_read_slot(it, next_key.as_deref()).to_owned();
+    // The caller navigated to `key`, so it exists; `next_key` is the entry
+    // after it (or `None` when it is the last entry).
+    let next_key: Option<String> = it
+        .iter()
+        .skip_while(|(k, _)| *k != key)
+        .nth(1)
+        .map(|(k, _)| k.to_owned());
+    let raw = it_read_slot(it, key, next_key.as_deref()).to_owned();
     if SlotPrefix::split(&raw).inline() == inline {
         return;
     }
     it_write_slot(
         it,
+        key,
         next_key.as_deref(),
         &SlotPrefix::with_inline(&raw, inline),
     );
@@ -491,23 +576,41 @@ pub(crate) fn set_inline_table_inline_comment(
 /// Extract (and clear) an inline comment from a value's decor suffix.
 ///
 /// When [`ItemProxy::clone_item`] clones an array element it copies the
-/// slot-based inline comment into the value's decor suffix.  Array mutation
-/// functions call this to retrieve that comment before pushing/replacing
-/// the value, then feed it into the target array's slot system.
-/// Returns the raw suffix (e.g. `" # note"`) or empty string if none,
-/// matching the format used by [`CommentPreservation::save_inline_comments`].
+/// element's inline comment into the cloned value's decor suffix.  Array
+/// mutation functions call this to retrieve that comment before pushing or
+/// replacing the value, then feed it into the target array's slot system.
+/// Returns the comment in slot form (e.g. `" # note"`) or an empty string if
+/// none, matching the format used by
+/// [`CommentPreservation::save_inline_comments`].  Any structural whitespace
+/// following the comment (the comma-on-next-line tail) is discarded along with
+/// the comment.
 pub(crate) fn take_value_inline_comment(value: &mut ValueRs) -> String {
-    let raw = value
+    let suffix = value
         .decor()
         .suffix()
         .and_then(|r| r.as_str())
         .unwrap_or_default();
-    if raw.trim().starts_with('#') {
-        let result = raw.to_owned();
+    if let Some(c) = value_suffix_inline(suffix) {
+        let result = format!(" {c}");
         value.decor_mut().set_suffix("");
         result
     } else {
         String::new()
+    }
+}
+
+/// Remove a before-bracket inline comment from a value's own decor suffix,
+/// keeping the structural whitespace that follows it.  No-op when the suffix
+/// carries no such comment.
+pub(crate) fn strip_value_suffix_inline(value: &mut ValueRs) {
+    let suffix = value
+        .decor()
+        .suffix()
+        .and_then(|r| r.as_str())
+        .unwrap_or_default();
+    if value_suffix_inline(suffix).is_some() {
+        let tail = value_suffix_tail(suffix).to_owned();
+        value.decor_mut().set_suffix(tail);
     }
 }
 
@@ -533,6 +636,67 @@ pub(crate) fn set_element_block_comment(
 ) -> PyResult<()> {
     let raw = decor.prefix().and_then(|r| r.as_str()).unwrap_or_default();
     decor.set_prefix(SlotPrefix::with_block(raw, comment)?);
+    Ok(())
+}
+
+/// Get the block comment above array element `idx`.
+///
+/// A block comment occupies the inter-value region before `idx`: the previous
+/// element's suffix (before the comma) followed by this element's own prefix
+/// (after the comma).  Concatenating them and letting [`SlotPrefix`] separate
+/// the previous element's inline head from the block lines yields the comment
+/// for every layout — first element, trailing-comma, and leading-comma with the
+/// comment on either side of the comma.
+pub(crate) fn get_array_element_block_comment(
+    arr: &toml_edit::Array,
+    idx: usize,
+) -> Option<String> {
+    let prev_suffix = idx
+        .checked_sub(1)
+        .and_then(|p| arr.get(p))
+        .and_then(value_suffix)
+        .unwrap_or_default();
+    let own_prefix = arr.get(idx).and_then(value_prefix).unwrap_or_default();
+    let block = SlotPrefix::split(&format!("{prev_suffix}{own_prefix}")).block;
+    (!block.is_empty())
+        .then(|| extract_block_comment(&block))
+        .flatten()
+}
+
+/// The block-comment lines of a prefix whose first line is itself a block
+/// comment (no leading inline head) — as in a leading-comma element's own
+/// prefix.  Returned with each line's trailing newline preserved.
+fn prefix_only_block(prefix: &str) -> String {
+    SlotPrefix::split(&format!("\n{prefix}")).block
+}
+
+/// Set or clear the block comment above array element `idx`
+/// (see [`get_array_element_block_comment`]).
+pub(crate) fn set_array_element_block_comment(
+    arr: &mut toml_edit::Array,
+    idx: usize,
+    comment: Option<&str>,
+) -> PyResult<()> {
+    if idx == 0 {
+        // The caller navigated to this element, so element 0 exists.
+        let decor = arr.get_mut(0).expect("element exists").decor_mut();
+        return set_element_block_comment(decor, comment);
+    }
+    // Write the block into the slot (the canonical location, before the comma).
+    let raw = array_read_slot(arr, idx - 1).to_owned();
+    array_write_slot(arr, idx - 1, &SlotPrefix::with_block(&raw, comment)?);
+    // In leading-comma layout, drop any stale block sitting after the comma
+    // (the element's own prefix) so the comment is not duplicated.
+    if arr
+        .get(idx - 1)
+        .and_then(value_suffix)
+        .is_some_and(suffix_holds_break)
+    {
+        let own = arr.get(idx).and_then(value_prefix).unwrap_or_default();
+        if !prefix_only_block(own).is_empty() {
+            arr.get_mut(idx).unwrap().decor_mut().set_prefix("");
+        }
+    }
     Ok(())
 }
 

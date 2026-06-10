@@ -114,7 +114,7 @@ invalidation).
 | `item.rs`                                             | Thin `Item(toml_edit::Item)` newtype for `FromPyObject` — **not** the Python-visible `Item` |
 | `value.rs`                                            | Python ↔ `toml_edit` type conversion                                                        |
 | `equality.rs`                                         | Semantic equality between TOML items and Python objects                                     |
-| `comments.rs`                                         | Comment get/set; array element comments live in the _next_ element's decor prefix           |
+| `comments.rs`                                         | Comment get/set; an element's comment lives in the "slot" — wherever the line break after it sits (its own suffix, or the next element's prefix) |
 | `views.rs`                                            | `KeysView`, `ValuesView`, `ItemsView`                                                       |
 | `trie.rs`                                             | `MutationTrie` + revision counter for path-precise staleness                                |
 | `py_pairs.rs`                                         | Helper for extracting length-2 iterable pairs                                               |

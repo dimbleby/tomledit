@@ -6,6 +6,7 @@ use toml_edit::Value as ValueRs;
 
 use crate::comments;
 use crate::comments::CommentPreservation;
+use crate::comments::{value_prefix, value_suffix};
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{Affected, into_value};
@@ -145,77 +146,98 @@ fn multiline_prefix(arr: &toml_edit::Array) -> Option<String> {
     indent_only(raw)
 }
 
-/// For a single-line array, return the prefix a newly inserted element
-/// should have, matching the array's inter-element separator.  Returns
-/// `None` for multiline or empty arrays.
-fn single_line_separator(arr: &toml_edit::Array) -> Option<String> {
-    if multiline_prefix(arr).is_some() {
-        return None;
+/// The structural `(prefix, suffix)` a new element adopts to sit on its own
+/// line, matching the array's inter-element layout.  The line break lives in
+/// the prefix for trailing-comma / single-line arrays and in the suffix for
+/// leading-comma arrays (where the comma starts the next line).  Returns
+/// `("", "")` for an empty array.
+fn element_separator(arr: &toml_edit::Array) -> (String, String) {
+    if arr.get(0).is_none() {
+        return (String::new(), String::new());
     }
-    inter_element_prefix(arr)
-}
-
-/// The prefix of an existing non-first element — the whitespace that
-/// follows a comma in a single-line array.  Falls back to `" "` when the
-/// array has only one element; `None` when the array is empty.
-///
-/// Only meaningful for single-line arrays; on a multiline array element 1's
-/// prefix includes the line break and possibly a block comment.
-fn inter_element_prefix(arr: &toml_edit::Array) -> Option<String> {
-    if arr.is_empty() {
-        return None;
+    let Some(second) = arr.get(1) else {
+        // Single element: a multiline break in the prefix, else a plain space.
+        return (
+            multiline_prefix(arr).unwrap_or_else(|| " ".to_owned()),
+            String::new(),
+        );
+    };
+    // Leading-comma: the break sits in the first element's suffix (before the
+    // comma).  Checked first because element 1's prefix may contain a newline
+    // from a block comment even in leading-comma layout.
+    let first_suffix = value_suffix(arr.get(0).expect("non-empty")).unwrap_or_default();
+    if let Some(tail) = indent_only(first_suffix) {
+        return (String::new(), tail);
     }
-    let sep = arr
-        .get(1)
-        .and_then(|e| e.decor().prefix())
-        .and_then(|r| r.as_str())
-        .unwrap_or(" ");
-    Some(sep.to_owned())
+    // Trailing-comma multiline: the break sits in the next element's prefix.
+    let second_prefix = value_prefix(second);
+    if second_prefix.is_some_and(|p| p.contains('\n')) {
+        return (
+            indent_only(second_prefix.unwrap()).unwrap_or_default(),
+            String::new(),
+        );
+    }
+    // Single-line, or an unset separator (a freshly constructed array → `" "`).
+    (second_prefix.unwrap_or(" ").to_owned(), String::new())
 }
 
 /// Apply decor to a newly created value, matching the array's existing style.
 fn apply_element_decor(arr: &toml_edit::Array, v: &mut ValueRs) {
-    if let Some(prefix) = multiline_prefix(arr) {
-        let decor = v.decor_mut();
-        decor.set_prefix(prefix);
-        decor.set_suffix("");
-    } else if let Some(sep) = inter_element_prefix(arr) {
-        v.decor_mut().set_prefix(sep);
+    let (prefix, suffix) = element_separator(arr);
+    let decor = v.decor_mut();
+    decor.set_prefix(prefix);
+    decor.set_suffix(suffix);
+}
+
+/// The bracket-positioning whitespace in a last element's suffix: the part from
+/// the first newline onward when the suffix holds the element's break,
+/// otherwise the whole suffix.  Any inline comment is excluded.
+fn bracket_whitespace(suffix: &str) -> &str {
+    if comments::suffix_holds_break(suffix) {
+        comments::value_suffix_tail(suffix)
+    } else {
+        suffix
     }
 }
 
-/// Read a value's prefix string.
-fn value_prefix(v: &ValueRs) -> Option<&str> {
-    v.decor().prefix().and_then(|r| r.as_str())
+/// Detach the bracket-positioning whitespace ahead of an append/end-insert,
+/// and demote the current last element to a non-last element: its trailing
+/// layout becomes the array's inter-element separator suffix (preserving any
+/// inline comment), and the bracket whitespace is returned to be re-applied to
+/// the new last element.
+fn take_last_seam(arr: &mut toml_edit::Array) -> Option<String> {
+    let li = arr.len().checked_sub(1)?;
+    let (_, sep_suffix) = element_separator(arr);
+    let suffix = value_suffix(arr.get(li)?).unwrap_or_default().to_owned();
+    let bracket_ws = bracket_whitespace(&suffix).to_owned();
+    // When the demoted element keeps its break in the suffix (leading-comma),
+    // its inline comment stays there; otherwise (trailing-comma) the comment
+    // moves to the next element's prefix and is replaced by `restore`.
+    let new_suffix = if sep_suffix.is_empty() {
+        String::new()
+    } else {
+        comments::suffix_with_structural(&suffix, &sep_suffix)
+    };
+    arr.get_mut(li)?.decor_mut().set_suffix(new_suffix);
+    (!bracket_ws.is_empty()).then_some(bracket_ws)
 }
 
-/// Read a value's suffix string.
-fn value_suffix(v: &ValueRs) -> Option<&str> {
-    v.decor().suffix().and_then(|r| r.as_str())
-}
-
-/// Strip the last element's trailing suffix (whitespace before `]`) and return
-/// it.  Returns `None` if the array is empty or the suffix is empty.
-fn strip_last_suffix(arr: &mut toml_edit::Array) -> Option<String> {
-    let last = arr.get_mut(arr.len().checked_sub(1)?)?;
-    let suffix = value_suffix(last).filter(|s| !s.is_empty())?.to_owned();
-    last.decor_mut().set_suffix("");
-    Some(suffix)
-}
-
-/// Apply a saved trailing suffix to the current last element.
-fn apply_last_suffix(arr: &mut toml_edit::Array, suffix: Option<String>) {
-    if let Some(s) = suffix
-        && let Some(last) = arr.get_mut(arr.len() - 1)
-    {
-        last.decor_mut().set_suffix(&s);
-    }
+/// Re-apply the saved bracket whitespace to the current last element,
+/// preserving any inline comment now sitting in that element's suffix.
+fn apply_last_suffix(arr: &mut toml_edit::Array, seam: Option<String>) {
+    let Some(ws) = seam else { return };
+    // A seam is only produced for a non-empty array that then gains an element,
+    // so a last element always exists here.
+    let li = arr.len() - 1;
+    let last = arr.get_mut(li).expect("non-empty");
+    let cur = value_suffix(last).unwrap_or_default().to_owned();
+    last.decor_mut()
+        .set_suffix(comments::suffix_with_structural(&cur, &ws));
 }
 
 /// Run `body` on `arr` with the last-element seam preserved across the
-/// operation.  The inline comment attached to the current last element
-/// (stored in the array's trailing slot) and the last element's suffix
-/// are both saved beforehand and re-applied afterwards.
+/// operation.  The inline comments and the bracket-positioning whitespace are
+/// saved beforehand and re-applied afterwards (see [`take_last_seam`]).
 ///
 /// `body` receives the inline-comment vector and must push one entry per
 /// element it appends so `restore_inline_comments` lands each comment in
@@ -224,8 +246,8 @@ fn with_preserved_seam(
     arr: &mut toml_edit::Array,
     body: impl FnOnce(&mut toml_edit::Array, &mut Vec<String>),
 ) {
-    let saved_suffix = strip_last_suffix(arr);
     let mut inlines = arr.save_inline_comments();
+    let saved_suffix = take_last_seam(arr);
     body(arr, &mut inlines);
     arr.restore_inline_comments(&inlines);
     apply_last_suffix(arr, saved_suffix);
@@ -575,7 +597,7 @@ fn array_setitem_slice(
             .then(|| save_first_prefix(arr))
             .flatten();
         let last_suffix = (stop_idx == arr.len() && inserting)
-            .then(|| strip_last_suffix(arr))
+            .then(|| take_last_seam(arr))
             .flatten();
 
         // Remove old elements from back to front.
@@ -725,9 +747,9 @@ fn save_removal_decor(
                 .to_owned()
         }),
         last_suffix: (removing_last && at_least_two).then(|| {
-            value_suffix(arr.get(arr.len() - 1).expect("at_least_two"))
-                .unwrap_or_default()
-                .to_owned()
+            let suffix =
+                value_suffix(arr.get(arr.len() - 1).expect("at_least_two")).unwrap_or_default();
+            bracket_whitespace(suffix).to_owned()
         }),
     }
 }
@@ -806,9 +828,14 @@ pub(crate) fn item_insert(
             let resolved = clamp_index(index, arr.len());
             let at_end = resolved == arr.len();
             let at_start = resolved == 0 && !arr.is_empty();
-            let saved_suffix = at_end.then(|| strip_last_suffix(arr)).flatten();
-            let saved_prefix = at_start.then(|| save_first_prefix(arr)).flatten();
             let mut ic = arr.save_inline_comments();
+            let saved_suffix = at_end.then(|| take_last_seam(arr)).flatten();
+            let saved_prefix = at_start.then(|| save_first_prefix(arr)).flatten();
+            // A new first element in a leading-comma array demotes the old first
+            // element, whose post-`[` prefix must become the (empty) leading
+            // separator.  Trailing-comma arrays need no change here.
+            let (sep_prefix, sep_suffix) = element_separator(arr);
+            let demoted_prefix = (at_start && !sep_suffix.is_empty()).then_some(sep_prefix);
             let mut v = into_value(value)?;
             let inline = comments::take_value_inline_comment(&mut v);
             apply_element_decor(arr, &mut v);
@@ -817,6 +844,11 @@ pub(crate) fn item_insert(
             arr.restore_inline_comments(&ic);
             apply_last_suffix(arr, saved_suffix);
             apply_first_prefix(arr, saved_prefix);
+            if let Some(p) = demoted_prefix
+                && let Some(old_first) = arr.get_mut(1)
+            {
+                old_first.decor_mut().set_prefix(p);
+            }
             Ok((!at_end).then_some(Affected::Range {
                 from: resolved,
                 to: arr.len(),
@@ -940,17 +972,31 @@ pub(crate) fn clone_elements_into(dest: &mut ItemRs, source: ArrayLikeRef<'_>, n
 }
 
 fn clone_array_elements(dest_arr: &mut toml_edit::Array, src_arr: &toml_edit::Array, n: usize) {
+    // Capture each source element's inline comment (the style-aware slot reads
+    // it from the value's suffix or the next prefix), then clone the source
+    // values with any suffix comment stripped so the comment is propagated
+    // solely through `ic` and restored into the destination's slots.
     let src_inlines = src_arr.save_inline_comments();
+    let src_values: Vec<ValueRs> = src_arr
+        .iter()
+        .map(|v| {
+            let mut v = v.clone();
+            comments::strip_value_suffix_inline(&mut v);
+            v
+        })
+        .collect();
     with_preserved_seam(dest_arr, |dest_arr, ic| {
+        let (sep_prefix, sep_suffix) = element_separator(dest_arr);
         for _ in 0..n {
-            for (src_i, v) in src_arr.iter().enumerate() {
+            for (src_i, v) in src_values.iter().enumerate() {
                 let mut v = v.clone();
-                // At a single-line seam, inject the destination's inter-element
-                // separator — source element 0 has no leading separator of its own.
-                if src_i == 0
-                    && let Some(sep) = single_line_separator(dest_arr)
-                {
-                    v.decor_mut().set_prefix(sep);
+                // Source element 0 has no leading separator of its own.  Give it
+                // the destination's inter-element prefix — unless the array is
+                // trailing-comma multiline, where that prefix is a line break
+                // and the source element's own prefix (with any block comment)
+                // already provides it.
+                if src_i == 0 && (!sep_suffix.is_empty() || !sep_prefix.contains('\n')) {
+                    v.decor_mut().set_prefix(&sep_prefix);
                 }
                 dest_arr.push_formatted(v);
                 ic.push(src_inlines[src_i].clone());

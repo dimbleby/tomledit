@@ -566,15 +566,20 @@ impl ItemProxy {
         let (_doc, inner) = self.read_checked(py)?;
         if let Some((ancestor_path, key)) = self.block_comment_target(&inner)? {
             let ancestor = item_ops::navigate_path(&inner, ancestor_path)?;
-            Ok(comments::get_block_comment(ancestor, key))
-        } else {
-            let item = self.navigate(&inner)?;
-            let decor = item
-                .as_value()
-                .map(ValueRs::decor)
-                .or_else(|| item.as_table().map(toml_edit::Table::decor));
-            Ok(decor.and_then(comments::get_element_block_comment))
+            return Ok(comments::get_block_comment(ancestor, key));
         }
+        if let Some(Key::Int(idx)) = self.path.last() {
+            let parent = self.navigate_parent(&inner)?;
+            if let Some(arr) = parent.as_value().and_then(|v| v.as_array()) {
+                return Ok(comments::get_array_element_block_comment(arr, *idx));
+            }
+        }
+        let item = self.navigate(&inner)?;
+        let decor = item
+            .as_value()
+            .map(ValueRs::decor)
+            .or_else(|| item.as_table().map(toml_edit::Table::decor));
+        Ok(decor.and_then(comments::get_element_block_comment))
     }
 
     /// Set or clear the block comment above this entry.
@@ -592,15 +597,23 @@ impl ItemProxy {
             let key = key.to_owned();
             let ancestor = item_ops::navigate_path_mut(&mut inner, ancestor_path)?;
             comments::set_block_comment(ancestor, &key, value)?;
-        } else {
-            let item = self.navigate_mut(&mut inner)?;
-            let decor = match item {
-                ItemRs::Value(v) => v.decor_mut(),
-                ItemRs::Table(t) => t.decor_mut(),
-                _ => return Ok(()),
-            };
-            comments::set_element_block_comment(decor, value)?;
+            return Ok(());
         }
+        if let Some(Key::Int(idx)) = self.path.last() {
+            let idx = *idx;
+            let parent = self.navigate_parent_mut(&mut inner)?;
+            if let Some(arr) = parent.as_value_mut().and_then(|v| v.as_array_mut()) {
+                comments::set_array_element_block_comment(arr, idx, value)?;
+                return Ok(());
+            }
+        }
+        let item = self.navigate_mut(&mut inner)?;
+        let decor = match item {
+            ItemRs::Value(v) => v.decor_mut(),
+            ItemRs::Table(t) => t.decor_mut(),
+            _ => return Ok(()),
+        };
+        comments::set_element_block_comment(decor, value)?;
         Ok(())
     }
 

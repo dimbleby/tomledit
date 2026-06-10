@@ -2036,3 +2036,286 @@ class TestCommentIdempotency:
         original = doc.as_toml()
         doc["arr"][0].inline_comment = doc["arr"][0].inline_comment
         assert doc.as_toml() == original
+
+
+class TestLeadingCommaLayout:
+    """Arrays/inline tables where the comma sits on the next line, so an
+    element's inline comment lands before the comma (in the element's own
+    suffix) rather than after it.  See the ``foo.py`` reproduction."""
+
+    # Leading-comma array: each comma starts a new line.
+    A = toml_literal("""
+        a = [
+              1  # cmt0
+             ,2
+             ,3
+            ]
+    """)
+    # Comment on the last element, before the closing bracket.
+    B = toml_literal("""
+        a = [
+          1,
+          2  # last
+        ]
+    """)
+    # Inline table with the comma on the next line.
+    C = toml_literal("""
+        a = { x = 1  # cx
+          , y = 2 }
+    """)
+
+    # ---- reading ----
+
+    def test_read_before_comma_comment(self) -> None:
+        doc = Document.parse(self.A)
+        assert doc["a"][0].inline_comment == "# cmt0"
+
+    def test_read_before_bracket_comment(self) -> None:
+        doc = Document.parse(self.B)
+        assert doc["a"][1].inline_comment == "# last"
+
+    def test_read_inline_table_before_comma_comment(self) -> None:
+        doc = Document.parse(self.C)
+        assert doc["a"]["x"].inline_comment == "# cx"
+
+    # ---- setting / clearing (in place, no duplication) ----
+
+    def test_set_before_comma_comment(self) -> None:
+        doc = Document.parse(self.A)
+        doc["a"][0].inline_comment = "# new"
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  1 # new
+                 ,2
+                 ,3
+                ]
+        """)
+
+    def test_clear_before_comma_comment(self) -> None:
+        doc = Document.parse(self.A)
+        doc["a"][0].inline_comment = None
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  1
+                 ,2
+                 ,3
+                ]
+        """)
+
+    def test_set_before_bracket_comment_no_duplicate(self) -> None:
+        doc = Document.parse(self.B)
+        doc["a"][1].inline_comment = "# changed"
+        assert doc.as_toml() == toml_literal("""
+            a = [
+              1,
+              2 # changed
+            ]
+        """)
+
+    def test_set_inline_table_before_comma_comment(self) -> None:
+        doc = Document.parse(self.C)
+        doc["a"]["x"].inline_comment = "# newx"
+        assert doc.as_toml() == toml_literal("""
+            a = { x = 1 # newx
+              , y = 2 }
+        """)
+
+    def test_clear_inline_table_before_comma_comment(self) -> None:
+        doc = Document.parse(self.C)
+        doc["a"]["x"].inline_comment = None
+        assert doc.as_toml() == toml_literal("""
+            a = { x = 1
+              , y = 2 }
+        """)
+
+    # ---- structural mutations keep the leading-comma style and comments ----
+
+    def test_append_keeps_style(self) -> None:
+        doc = Document.parse(self.A)
+        doc["a"].append(4)
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  1  # cmt0
+                 ,2
+                 ,3
+                 ,4
+                ]
+        """)
+
+    def test_extend_keeps_style(self) -> None:
+        doc = Document.parse(self.A)
+        doc["a"].extend([4, 5])
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  1  # cmt0
+                 ,2
+                 ,3
+                 ,4
+                 ,5
+                ]
+        """)
+
+    def test_insert_front_keeps_style(self) -> None:
+        doc = Document.parse(self.A)
+        doc["a"].insert(0, 0)
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  0
+                 ,1  # cmt0
+                 ,2
+                 ,3
+                ]
+        """)
+
+    def test_insert_middle_keeps_style(self) -> None:
+        doc = Document.parse(self.A)
+        doc["a"].insert(1, 99)
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  1  # cmt0
+                 ,99
+                 ,2
+                 ,3
+                ]
+        """)
+
+    def test_delete_first_drops_its_comment(self) -> None:
+        doc = Document.parse(self.A)
+        del doc["a"][0]
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  2
+                 ,3
+                ]
+        """)
+
+    def test_multiply_propagates_comment_to_each_copy(self) -> None:
+        doc = Document.parse(self.A)
+        doc["a"] *= 2
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  1  # cmt0
+                 ,2
+                 ,3
+                 ,1  # cmt0
+                 ,2
+                 ,3
+                ]
+        """)
+
+    def test_append_does_not_move_last_comment(self) -> None:
+        doc = Document.parse(self.B)
+        doc["a"].append(3)
+        # The comment stays with element ``2`` (now after its comma).
+        assert doc.as_toml() == toml_literal("""
+            a = [
+              1,
+              2,  # last
+              3
+            ]
+        """)
+
+    def test_delete_last_drops_its_comment(self) -> None:
+        doc = Document.parse(self.B)
+        del doc["a"][1]
+        assert doc.as_toml() == toml_literal("""
+            a = [
+              1
+            ]
+        """)
+
+    def test_round_trip_is_identity(self) -> None:
+        # Parsing and re-rendering reproduces the original document exactly.
+        for text in (self.A, self.B, self.C):
+            assert Document.parse(text).as_toml() == text
+
+
+class TestLeadingCommaBlockComments:
+    """Block (non-inline) comments on leading-comma array elements.  A block
+    comment can sit before the comma (the previous element's slot) or after it
+    (the element's own prefix); both must be readable, and they coexist with
+    inline comments."""
+
+    # Block above the first element, block + inline on others, block after comma.
+    A = toml_literal("""
+        a = [
+              # c0
+              1  # cmt0
+             ,# c1
+              2
+            ]
+    """)
+    # Block placed before the comma.
+    BEFORE = toml_literal("""
+        a = [
+              1
+              # c1
+             ,2
+            ]
+    """)
+
+    def test_read_block_above_first(self) -> None:
+        assert Document.parse(self.A)["a"][0].comment == "# c0"
+
+    def test_read_block_after_comma(self) -> None:
+        assert Document.parse(self.A)["a"][1].comment == "# c1"
+
+    def test_read_block_before_comma(self) -> None:
+        assert Document.parse(self.BEFORE)["a"][1].comment == "# c1"
+
+    def test_block_and_inline_coexist(self) -> None:
+        doc = Document.parse(self.A)
+        assert doc["a"][0].comment == "# c0"
+        assert doc["a"][0].inline_comment == "# cmt0"
+
+    def test_set_block_replaces_without_duplicate(self) -> None:
+        doc = Document.parse(self.A)
+        doc["a"][1].comment = "# new1"
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  # c0
+                  1  # cmt0
+                 # new1
+                 ,2
+                ]
+        """)
+
+    def test_clear_block(self) -> None:
+        doc = Document.parse(self.BEFORE)
+        doc["a"][1].comment = None
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  1
+                 ,2
+                ]
+        """)
+
+    def test_insert_preserves_block_comments(self) -> None:
+        doc = Document.parse(self.A)
+        doc["a"].insert(1, 99)
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  # c0
+                  1  # cmt0
+                 ,99
+                 ,# c1
+                  2
+                ]
+        """)
+
+    def test_standalone_comment_not_read_as_inline(self) -> None:
+        # A comment on its own line before the comma is a block comment for the
+        # next element, not the previous element's inline comment.
+        assert Document.parse(self.BEFORE)["a"][0].inline_comment is None
+
+    def test_set_block_on_first_element(self) -> None:
+        doc = Document.parse(self.BEFORE)
+        doc["a"][0].comment = "# zero"
+        assert doc.as_toml() == toml_literal("""
+            a = [
+                  # zero
+                  1
+                  # c1
+                 ,2
+                ]
+        """)

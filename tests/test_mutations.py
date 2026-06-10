@@ -267,7 +267,7 @@ class TestInlineTableMutation:
         doc = Document.parse("meta = {x = 1}\n")
         doc["meta"]["y"] = 2
         assert doc["meta"]["y"] == 2
-        assert doc.as_toml() == "meta = {x = 1, y = 2 }\n"
+        assert doc.as_toml() == "meta = {x = 1, y = 2}\n"
 
     def test_set_new_key_in_table(self, doc: Document) -> None:
         doc["owner"]["email"] = "alice@example.com"

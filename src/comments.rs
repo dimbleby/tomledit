@@ -369,6 +369,17 @@ pub(crate) fn value_suffix_tail(suffix: &str) -> &str {
     suffix.find('\n').map_or("", |i| &suffix[i..])
 }
 
+/// The structural whitespace of a value suffix, with any leading before-bracket
+/// inline comment removed.  When the suffix carries no such comment the whole
+/// suffix is structural.
+pub(crate) fn value_suffix_structural(suffix: &str) -> &str {
+    if value_suffix_inline(suffix).is_some() {
+        value_suffix_tail(suffix)
+    } else {
+        suffix
+    }
+}
+
 /// A value's decor prefix / suffix as a `&str`, or `None` when unset.
 pub(crate) fn value_prefix(v: &ValueRs) -> Option<&str> {
     v.decor().prefix().and_then(|r| r.as_str())
@@ -608,9 +619,10 @@ pub(crate) fn strip_value_suffix_inline(value: &mut ValueRs) {
         .suffix()
         .and_then(|r| r.as_str())
         .unwrap_or_default();
-    if value_suffix_inline(suffix).is_some() {
-        let tail = value_suffix_tail(suffix).to_owned();
-        value.decor_mut().set_suffix(tail);
+    let structural = value_suffix_structural(suffix);
+    if structural != suffix {
+        let structural = structural.to_owned();
+        value.decor_mut().set_suffix(structural);
     }
 }
 

@@ -129,9 +129,18 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
             .as_inline_table()
             .filter(|it| !it.contains_key(key))
             .map(|it| {
+                let last = it.iter().last();
+                // Capture the trailing whitespace that currently sits before
+                // `}` (carried in the last value's suffix) so the new entry,
+                // which becomes the last one, can inherit it instead of
+                // falling back to toml_edit's default of a single space.
+                let trailing_ws = last
+                    .and_then(|(_, v)| comments::value_suffix(v))
+                    .map(|s| comments::value_suffix_structural(s).to_owned());
                 (
                     it.save_inline_comments(),
-                    it.iter().last().map(|(k, _)| k.to_owned()),
+                    last.map(|(k, _)| k.to_owned()),
+                    trailing_ws,
                 )
             });
 
@@ -161,6 +170,13 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
                 new_value.decor_mut().set_suffix(suffix.clone());
             }
         }
+        // The new entry becomes the last one in an inline table, so it inherits
+        // the trailing whitespace that previously sat before `}`.  Without this
+        // the value's unset suffix falls back to toml_edit's default of a
+        // single space, adding spurious padding (e.g. `{a = 1, b = 2 }`).
+        if let Some((_, _, Some(ws))) = inline_insertion.as_ref() {
+            new_value.decor_mut().set_suffix(ws.clone());
+        }
         item[key] = ItemRs::Value(new_value);
 
         if let Some(indent) = new_key_indent
@@ -174,7 +190,7 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
             km.leaf_decor_mut().set_prefix(&indent);
         }
 
-        if let Some((mut ic, last_key)) = inline_insertion {
+        if let Some((mut ic, last_key, _)) = inline_insertion {
             ic.push(String::new());
             if let Some(it) = item.as_inline_table_mut() {
                 if let Some(last_key) = last_key

@@ -16,5 +16,5 @@ parking_lot = "0.12"
 toml_edit = "0.25.9"
 
 [dependencies.pyo3]
-version = "0.28"
-features = ["generate-import-lib", "parking_lot"]
+version = "0.29"
+features = ["parking_lot"]

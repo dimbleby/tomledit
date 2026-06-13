@@ -267,6 +267,39 @@ class TestProxyDictMethods:
             doc["title"].keys()
 
 
+class TestMultilineInlineTableInsert:
+    """Inserting a new key into a multi-line inline table indents it to
+    match its siblings instead of leaving it unindented or on the same line."""
+
+    def test_insert_after_commented_entry(self) -> None:
+        doc = Document.parse(
+            "tbl = {\n    p = { k = 1 },\n    q = { k = 2 }  # comment\n}\n"
+        )
+        doc["tbl"]["added"] = 3
+        assert doc.as_toml() == (
+            "tbl = {\n"
+            "    p = { k = 1 },\n"
+            "    q = { k = 2 },  # comment\n"
+            "    added = 3\n"
+            "}\n"
+        )
+
+    def test_insert_no_trailing_comma(self) -> None:
+        doc = Document.parse("tbl = {\n    p = 1,\n    q = 2\n}\n")
+        doc["tbl"]["added"] = 3
+        assert doc.as_toml() == "tbl = {\n    p = 1,\n    q = 2,\n    added = 3\n}\n"
+
+    def test_insert_trailing_comma(self) -> None:
+        doc = Document.parse("tbl = {\n    p = 1,\n    q = 2,\n}\n")
+        doc["tbl"]["added"] = 3
+        assert doc.as_toml() == "tbl = {\n    p = 1,\n    q = 2,\n    added = 3,\n}\n"
+
+    def test_compact_inline_table_stays_on_one_line(self) -> None:
+        doc = Document.parse("tbl = { a = 1, b = 2 }\n")
+        doc["tbl"]["added"] = 3
+        assert doc.as_toml() == "tbl = { a = 1, b = 2, added = 3 }\n"
+
+
 # ---------------------------------------------------------------------------
 # Document-level dict methods (get, pop with defaults, return types)
 # ---------------------------------------------------------------------------

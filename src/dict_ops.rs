@@ -199,6 +199,7 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
                     last.decor_mut().set_suffix("");
                 }
                 it.restore_inline_comments(&ic);
+                comments::align_inserted_inline_key(it, key);
             }
         }
     }

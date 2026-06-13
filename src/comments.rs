@@ -756,6 +756,49 @@ fn canonical_inline_table_indent(it: &toml_edit::InlineTable) -> String {
     " ".to_owned()
 }
 
+/// True if `it` uses multi-line layout (entries separated by newlines), as
+/// opposed to a compact single-line table.  `exclude` is ignored when scanning
+/// (the freshly-inserted key, which has no newline yet).
+fn is_multiline_inline_table(it: &toml_edit::InlineTable, exclude: &str) -> bool {
+    if it.trailing().as_str().is_some_and(|s| s.contains('\n')) {
+        return true;
+    }
+    it.iter().any(|(k, _)| {
+        k != exclude
+            && it
+                .key(k)
+                .and_then(|key| key.leaf_decor().prefix()?.as_str())
+                .is_some_and(|s| s.contains('\n'))
+    })
+}
+
+/// Align a freshly-inserted key in a multi-line inline table so it sits on its
+/// own indented line, matching its siblings.  No-op for compact (single-line)
+/// inline tables, whose new keys correctly stay on the same line.
+pub(crate) fn align_inserted_inline_key(it: &mut toml_edit::InlineTable, key: &str) {
+    if !is_multiline_inline_table(it, key) {
+        return;
+    }
+    let indent = canonical_inline_table_indent(it);
+    // The caller inserts `key` immediately before calling us, so the lookup
+    // cannot fail; toml_edit only exposes the mutable handle via `Option`.
+    let mut km = it
+        .key_mut(key)
+        .expect("key was just inserted by the caller");
+    let raw = km
+        .leaf_decor()
+        .prefix()
+        .and_then(|r| r.as_str())
+        .unwrap_or_default()
+        .to_owned();
+    let mut parts = SlotPrefix::split(&raw);
+    if parts.head.is_empty() {
+        parts.head = "\n".to_owned();
+    }
+    parts.indent = indent;
+    km.leaf_decor_mut().set_prefix(parts.join());
+}
+
 /// Set the block comment on an inline table key's prefix.
 fn set_inline_table_block_comment(
     it: &mut toml_edit::InlineTable,

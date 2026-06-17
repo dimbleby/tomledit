@@ -1603,6 +1603,52 @@ class TestSliceIndexing:
         doc["arr"][3:5] = []
         assert doc.as_toml() == "arr = [ 1, 2, 3 ]\n"
 
+    def test_setitem_slice_preserves_multiline_layout(self) -> None:
+        """New elements from a slice assignment each get their own line."""
+        doc = Document.parse(
+            toml_literal("""
+            arr = [
+              1,
+              2,
+              3,
+            ]
+        """)
+        )
+        doc["arr"][1:2] = [10, 20]
+        assert doc.as_toml() == toml_literal("""
+            arr = [
+              1,
+              10,
+              20,
+              3,
+            ]
+        """)
+
+    def test_setitem_slice_replace_all_preserves_multiline(self) -> None:
+        """Replacing every element keeps the array's one-per-line layout."""
+        doc = Document.parse(
+            toml_literal("""
+            arr = [
+              1,
+              2,
+            ]
+        """)
+        )
+        doc["arr"][:] = [10, 20, 30]
+        assert doc.as_toml() == toml_literal("""
+            arr = [
+              10,
+              20,
+              30,
+            ]
+        """)
+
+    def test_setitem_slice_preserves_leading_comma_layout(self) -> None:
+        """New elements adopt leading-comma layout, even when replacing all."""
+        doc = Document.parse("arr = [ 1\n      , 2\n      , 3\n      ]\n")
+        doc["arr"][:] = [10, 20, 30]
+        assert doc.as_toml() == "arr = [ 10\n      ,20\n      ,30\n      ]\n"
+
     def test_aot_setitem_slice_empty_removes_leading_blank_line(self) -> None:
         doc = Document.parse(
             toml_literal("""

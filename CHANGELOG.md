@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix slice assignment collapsing a multiline array onto one line; new
+  elements now keep the array's existing layout.
+
 ## 1.2.0 (17 June 2026)
 
 - Add module-level `load`, `loads`, `dump`, and `dumps` functions.

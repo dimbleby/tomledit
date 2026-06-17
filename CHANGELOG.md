@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.2.0 (17 June 2026)
+
 - Add module-level `load`, `loads`, `dump`, and `dumps` functions.
 - Fix inline and block comments in "leading-comma" array/inline-table layouts
   (where the comma starts the next line), including reads, edits, and

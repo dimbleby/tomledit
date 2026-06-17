@@ -92,3 +92,7 @@ first = doc["arr"][0].value   # "a" - a regular string, not a path
 doc["arr"][0] = "changed"
 print(first)                  # still "a"
 ```
+
+For many usage patterns, stale `Item`s will never be an issue.
+If they become a problem for you, you might prefer
+[tomlrt](https://pypi.org/project/tomlrt/).

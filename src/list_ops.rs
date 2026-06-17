@@ -181,12 +181,21 @@ fn element_separator(arr: &toml_edit::Array) -> (String, String) {
     (second_prefix.unwrap_or(" ").to_owned(), String::new())
 }
 
-/// Apply decor to a newly created value, matching the array's existing style.
-fn apply_element_decor(arr: &toml_edit::Array, v: &mut ValueRs) {
-    let (prefix, suffix) = element_separator(arr);
+/// Stamp an element separator (a `(prefix, suffix)` pair) onto a value's decor.
+fn set_element_decor(v: &mut ValueRs, (prefix, suffix): &(String, String)) {
     let decor = v.decor_mut();
     decor.set_prefix(prefix);
     decor.set_suffix(suffix);
+}
+
+/// Capture the array's element layout to stamp onto newly appended elements.
+///
+/// Returns `None` for an empty array: toml_edit's default `push`/`insert` decor
+/// already yields correct single-line spacing, and there is no prior layout to
+/// mirror.  The layout is stable across appends (they never touch the first or
+/// second element), so a single capture suffices for a whole batch.
+fn capture_separator(arr: &toml_edit::Array) -> Option<(String, String)> {
+    (!arr.is_empty()).then(|| element_separator(arr))
 }
 
 /// The bracket-positioning whitespace in a last element's suffix: the part from
@@ -592,6 +601,12 @@ fn array_setitem_slice(
         let decor =
             save_removal_decor(arr, removes_first && !inserting, removes_last && !inserting);
 
+        // The array's element layout, captured once before removal (only when
+        // inserting; pure removals need no layout).  Stamped onto each inserted
+        // element so a multiline (or leading-comma) array stays so, even when
+        // the slice replaced every prior element.
+        let separator = inserting.then(|| capture_separator(arr)).flatten();
+
         // Save boundary spacing (space after `[` / before `]`) before mutating.
         let first_prefix = (start_idx == 0 && inserting)
             .then(|| save_first_prefix(arr))
@@ -609,6 +624,9 @@ fn array_setitem_slice(
         // Insert new elements at start position.
         for (offset, mut v) in converted.into_iter().enumerate() {
             let inline = comments::take_value_inline_comment(&mut v);
+            if let Some(sep) = &separator {
+                set_element_decor(&mut v, sep);
+            }
             let idx = start_idx + offset;
             if idx >= arr.len() {
                 arr.push(v);
@@ -795,25 +813,8 @@ fn apply_removal_decor(arr: &mut toml_edit::Array, decor: &RemovalDecor) {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn item_append(target: ArrayLikeMut<'_>, value: Item) -> PyResult<()> {
-    match target {
-        ArrayLikeMut::Array(arr) => {
-            let mut v = into_value(value)?;
-            let inline = comments::take_value_inline_comment(&mut v);
-            with_preserved_seam(arr, |arr, ic| {
-                apply_element_decor(arr, &mut v);
-                arr.push(v);
-                ic.push(inline);
-            });
-            Ok(())
-        }
-        ArrayLikeMut::Aot(aot) => {
-            let table = require_table(value)?;
-            aot.push(table);
-            let pos = aot.len() - 1;
-            fix_inserted_aot_decor(aot, pos);
-            Ok(())
-        }
-    }
+    // Appending one element is exactly extending by a single-element batch.
+    item_extend(target, vec![value])
 }
 
 /// Insert an element.  Returns `Some(Affected::Shift(..))` when the
@@ -834,11 +835,11 @@ pub(crate) fn item_insert(
             // A new first element in a leading-comma array demotes the old first
             // element, whose post-`[` prefix must become the (empty) leading
             // separator.  Trailing-comma arrays need no change here.
-            let (sep_prefix, sep_suffix) = element_separator(arr);
-            let demoted_prefix = (at_start && !sep_suffix.is_empty()).then_some(sep_prefix);
+            let sep = element_separator(arr);
+            let demoted_prefix = (at_start && !sep.1.is_empty()).then(|| sep.0.clone());
             let mut v = into_value(value)?;
             let inline = comments::take_value_inline_comment(&mut v);
-            apply_element_decor(arr, &mut v);
+            set_element_decor(&mut v, &sep);
             arr.insert(resolved, v);
             ic.insert(resolved, inline);
             arr.restore_inline_comments(&ic);
@@ -906,9 +907,12 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
             let converted: Vec<ValueRs> =
                 items.into_iter().map(into_value).collect::<PyResult<_>>()?;
             with_preserved_seam(arr, |arr, ic| {
+                let separator = capture_separator(arr);
                 for mut v in converted {
                     ic.push(comments::take_value_inline_comment(&mut v));
-                    apply_element_decor(arr, &mut v);
+                    if let Some(sep) = &separator {
+                        set_element_decor(&mut v, sep);
+                    }
                     arr.push(v);
                 }
             });

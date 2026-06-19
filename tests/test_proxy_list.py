@@ -1647,7 +1647,7 @@ class TestSliceIndexing:
         """New elements adopt leading-comma layout, even when replacing all."""
         doc = Document.parse("arr = [ 1\n      , 2\n      , 3\n      ]\n")
         doc["arr"][:] = [10, 20, 30]
-        assert doc.as_toml() == "arr = [ 10\n      ,20\n      ,30\n      ]\n"
+        assert doc.as_toml() == "arr = [ 10\n      , 20\n      , 30\n      ]\n"
 
     def test_aot_setitem_slice_empty_removes_leading_blank_line(self) -> None:
         doc = Document.parse(
@@ -1905,6 +1905,34 @@ class TestCompactArrayFrontInsert:
         doc = Document.parse("a = [1, 2, 3]\n")
         doc["a"][0:1] = [7, 8]
         assert doc.as_toml() == "a = [7, 8, 2, 3]\n"
+
+
+class TestLeadingCommaPreservation:
+    """New elements in a leading-comma array keep the space after the comma."""
+
+    LEADING = "a = [ 1\n    , 2\n    , 3\n    ]\n"
+
+    def test_append_keeps_post_comma_space(self) -> None:
+        doc = Document.parse(self.LEADING)
+        doc["a"].append(4)
+        assert doc.as_toml() == "a = [ 1\n    , 2\n    , 3\n    , 4\n    ]\n"
+
+    def test_extend_keeps_post_comma_space(self) -> None:
+        doc = Document.parse(self.LEADING)
+        doc["a"].extend([4, 5])
+        assert doc.as_toml() == "a = [ 1\n    , 2\n    , 3\n    , 4\n    , 5\n    ]\n"
+
+    def test_insert_keeps_post_comma_space(self) -> None:
+        doc = Document.parse(self.LEADING)
+        doc["a"].insert(1, 9)
+        assert doc.as_toml() == "a = [ 1\n    , 9\n    , 2\n    , 3\n    ]\n"
+
+    def test_slice_assign_keeps_post_comma_space(self) -> None:
+        doc = Document.parse(self.LEADING)
+        doc["a"][:] = [10, 20, 30]
+        assert doc.as_toml() == "a = [ 10\n    , 20\n    , 30\n    ]\n"
+
+
 class TestMultilineFormatPreservation:
     def test_insert_at_start_preserves_multiline(self) -> None:
         doc = Document.parse(MULTILINE_ARRAY)

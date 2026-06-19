@@ -167,7 +167,15 @@ fn element_separator(arr: &toml_edit::Array) -> (String, String) {
     // from a block comment even in leading-comma layout.
     let first_suffix = value_suffix(arr.get(0).expect("non-empty")).unwrap_or_default();
     if let Some(tail) = indent_only(first_suffix) {
-        return (String::new(), tail);
+        // Mirror the post-comma spacing of an existing element: the run of
+        // horizontal whitespace before its value (and before any block
+        // comment), typically `" "` — or empty when a comment hugs the comma.
+        let prefix: String = value_prefix(second)
+            .unwrap_or(" ")
+            .chars()
+            .take_while(|&c| c == ' ' || c == '\t')
+            .collect();
+        return (prefix, tail);
     }
     // Trailing-comma multiline: the break sits in the next element's prefix.
     let second_prefix = value_prefix(second);

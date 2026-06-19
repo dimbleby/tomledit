@@ -202,19 +202,21 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         }
         item[key] = ItemRs::Value(new_value);
 
-        if was_header && let Some(mut km) = item.as_table_mut().and_then(|t| t.key_mut(key)) {
-            km.leaf_decor_mut().set_suffix(" ");
-        }
-
-        if let Some(indent) = new_key_indent
+        if (was_header || new_key_indent.is_some())
             && let Some(mut km) = item.as_table_mut().and_then(|t| t.key_mut(key))
-            && km
-                .leaf_decor()
-                .prefix()
-                .and_then(|r| r.as_str())
-                .is_none_or(str::is_empty)
         {
-            km.leaf_decor_mut().set_prefix(&indent);
+            if was_header {
+                km.leaf_decor_mut().set_suffix(" ");
+            }
+            if let Some(indent) = new_key_indent
+                && km
+                    .leaf_decor()
+                    .prefix()
+                    .and_then(|r| r.as_str())
+                    .is_none_or(str::is_empty)
+            {
+                km.leaf_decor_mut().set_prefix(&indent);
+            }
         }
 
         if let Some((mut ic, last_key, _)) = inline_insertion {

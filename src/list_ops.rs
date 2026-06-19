@@ -292,16 +292,12 @@ fn apply_first_prefix(arr: &mut toml_edit::Array, prefix: Option<String>) {
     }
 }
 
-/// Demote the old first element, pushed to interior index `index` by a front
-/// insertion, so it adopts the inter-element separator `sep`'s prefix.
+/// Demote the old first element (pushed to interior index `index` by a front
+/// insertion) so it adopts the separator `sep`'s prefix.
 ///
-/// Skipped only for trailing-comma multiline arrays (the break lives in the
-/// separator prefix), where the old first already sits on its own line and its
-/// prefix — including any block comments — coincides with the separator;
-/// overwriting it would drop those comments.  Every other layout (single-line
-/// compact/spaced and leading-comma) needs the old first to swap its boundary
-/// prefix for the separator: e.g. `[1, 2]` + front insert keeps `1`'s post-`[`
-/// `""` from becoming a missing-space `,1`.
+/// Skipped for trailing-comma multiline arrays, where the old first already
+/// owns its line and its prefix — including any block comments — coincides with
+/// the separator, so overwriting it would drop those comments.
 fn demote_old_first(arr: &mut toml_edit::Array, index: usize, sep: &(String, String)) {
     let trailing_multiline = sep.1.is_empty() && sep.0.contains('\n');
     if !trailing_multiline && let Some(v) = arr.get_mut(index) {

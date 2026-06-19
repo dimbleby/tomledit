@@ -795,3 +795,25 @@ class TestEqualityErrorPropagation:
         doc = Document.parse("arr = [{a = 1}]\n")
         with pytest.raises(RuntimeError, match="boom"):
             assert BadMapping() in doc["arr"]
+
+
+class TestOutOfRangeIntComparison:
+    """Comparing/containment against a Python int outside i64 range must not
+    raise — it simply cannot match any TOML value, so it compares unequal."""
+
+    def test_scalar_eq_out_of_range_int(self) -> None:
+        doc = Document.parse("x = 5\n")
+        assert doc["x"] != 10**30
+        assert (doc["x"] == 10**30) is False
+
+    def test_out_of_range_int_not_in_list(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]\n")
+        assert 10**30 not in doc["a"]
+
+    def test_document_eq_list_with_out_of_range_int(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]\n")
+        assert doc["a"] != [10**30, 2, 3]
+
+    def test_out_of_range_int_not_in_values_view(self) -> None:
+        doc = Document.parse("x = 5\n")
+        assert 10**30 not in doc.values()

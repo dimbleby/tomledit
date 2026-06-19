@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::RwLockExt;
 use toml_edit::DocumentMut as DocumentRs;
@@ -196,11 +196,19 @@ fn resolve_other_item<R>(
 
 /// Try to extract a Python object as a `toml_edit::Item`.  Returns `None`
 /// for objects that have no TOML representation (caller treats as "not found"
-/// / "not equal").
+/// / "not equal").  A value of the right Python type but an unrepresentable
+/// magnitude (e.g. an int beyond `i64`) likewise has no TOML counterpart, so
+/// its `TypeError`/`OverflowError` is swallowed rather than propagated —
+/// `==`/`in` must never raise for it.
 fn try_extract_item(value: &Bound<'_, PyAny>) -> PyResult<Option<Item>> {
     match value.extract::<Item>() {
         Ok(item) => Ok(Some(item)),
-        Err(e) if e.is_instance_of::<PyTypeError>(value.py()) => Ok(None),
+        Err(e)
+            if e.is_instance_of::<PyTypeError>(value.py())
+                || e.is_instance_of::<PyOverflowError>(value.py()) =>
+        {
+            Ok(None)
+        }
         Err(e) => Err(e),
     }
 }

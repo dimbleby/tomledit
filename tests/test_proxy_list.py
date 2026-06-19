@@ -1910,27 +1910,56 @@ class TestCompactArrayFrontInsert:
 class TestLeadingCommaPreservation:
     """New elements in a leading-comma array keep the space after the comma."""
 
-    LEADING = "a = [ 1\n    , 2\n    , 3\n    ]\n"
+    LEADING = toml_literal("""
+        a = [ 1
+            , 2
+            , 3
+            ]
+    """)
 
     def test_append_keeps_post_comma_space(self) -> None:
         doc = Document.parse(self.LEADING)
         doc["a"].append(4)
-        assert doc.as_toml() == "a = [ 1\n    , 2\n    , 3\n    , 4\n    ]\n"
+        assert doc.as_toml() == toml_literal("""
+            a = [ 1
+                , 2
+                , 3
+                , 4
+                ]
+        """)
 
     def test_extend_keeps_post_comma_space(self) -> None:
         doc = Document.parse(self.LEADING)
         doc["a"].extend([4, 5])
-        assert doc.as_toml() == "a = [ 1\n    , 2\n    , 3\n    , 4\n    , 5\n    ]\n"
+        assert doc.as_toml() == toml_literal("""
+            a = [ 1
+                , 2
+                , 3
+                , 4
+                , 5
+                ]
+        """)
 
     def test_insert_keeps_post_comma_space(self) -> None:
         doc = Document.parse(self.LEADING)
         doc["a"].insert(1, 9)
-        assert doc.as_toml() == "a = [ 1\n    , 9\n    , 2\n    , 3\n    ]\n"
+        assert doc.as_toml() == toml_literal("""
+            a = [ 1
+                , 9
+                , 2
+                , 3
+                ]
+        """)
 
     def test_slice_assign_keeps_post_comma_space(self) -> None:
         doc = Document.parse(self.LEADING)
         doc["a"][:] = [10, 20, 30]
-        assert doc.as_toml() == "a = [ 10\n    , 20\n    , 30\n    ]\n"
+        assert doc.as_toml() == toml_literal("""
+            a = [ 10
+                , 20
+                , 30
+                ]
+        """)
 
 
 class TestMultilineFormatPreservation:

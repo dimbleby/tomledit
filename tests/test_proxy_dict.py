@@ -325,14 +325,36 @@ class TestInlineTableRemoveFirstKey:
         assert doc.as_toml() == "a = [{y = 2}]\n"
 
     def test_del_first_key_multiline(self) -> None:
-        doc = Document.parse("t = {\n    p = 1,\n    q = 2,\n}\n")
+        doc = Document.parse(
+            toml_literal("""
+            t = {
+                p = 1,
+                q = 2,
+            }
+            """)
+        )
         del doc["t"]["p"]
-        assert doc.as_toml() == "t = {\n    q = 2,\n}\n"
+        assert doc.as_toml() == toml_literal("""
+            t = {
+                q = 2,
+            }
+        """)
 
     def test_del_first_key_multiline_drops_its_comment(self) -> None:
-        doc = Document.parse("t = {\n    p = 1,  # cp\n    q = 2\n}\n")
+        doc = Document.parse(
+            toml_literal("""
+            t = {
+                p = 1,  # cp
+                q = 2
+            }
+            """)
+        )
         del doc["t"]["p"]
-        assert doc.as_toml() == "t = {\n    q = 2\n}\n"
+        assert doc.as_toml() == toml_literal("""
+            t = {
+                q = 2
+            }
+        """)
 
 
 # ---------------------------------------------------------------------------

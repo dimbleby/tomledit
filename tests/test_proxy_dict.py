@@ -300,6 +300,39 @@ class TestMultilineInlineTableInsert:
         assert doc.as_toml() == "tbl = { a = 1, b = 2, added = 3 }\n"
 
 
+class TestInlineTableRemoveFirstKey:
+    """Deleting the first key of an inline table must not leave a stray space
+    (or leaked comment) immediately after `{`."""
+
+    def test_del_first_key_compact(self) -> None:
+        doc = Document.parse("t = {a = 1, b = 2}\n")
+        del doc["t"]["a"]
+        assert doc.as_toml() == "t = {b = 2}\n"
+
+    def test_pop_first_key_compact(self) -> None:
+        doc = Document.parse("t = {a = 1, b = 2}\n")
+        assert doc["t"].pop("a") == 1
+        assert doc.as_toml() == "t = {b = 2}\n"
+
+    def test_del_first_key_spaced(self) -> None:
+        doc = Document.parse("t = { a = 1, b = 2 }\n")
+        del doc["t"]["a"]
+        assert doc.as_toml() == "t = { b = 2 }\n"
+
+    def test_del_first_key_nested_inline(self) -> None:
+        doc = Document.parse("a = [{x = 1, y = 2}]\n")
+        del doc["a"][0]["x"]
+        assert doc.as_toml() == "a = [{y = 2}]\n"
+
+    def test_del_first_key_multiline(self) -> None:
+        doc = Document.parse("t = {\n    p = 1,\n    q = 2,\n}\n")
+        del doc["t"]["p"]
+        assert doc.as_toml() == "t = {\n    q = 2,\n}\n"
+
+    def test_del_first_key_multiline_drops_its_comment(self) -> None:
+        doc = Document.parse("t = {\n    p = 1,  # cp\n    q = 2\n}\n")
+        del doc["t"]["p"]
+        assert doc.as_toml() == "t = {\n    q = 2\n}\n"
 # ---------------------------------------------------------------------------
 # Document-level dict methods (get, pop with defaults, return types)
 # ---------------------------------------------------------------------------

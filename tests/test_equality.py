@@ -817,3 +817,23 @@ class TestOutOfRangeIntComparison:
     def test_out_of_range_int_not_in_values_view(self) -> None:
         doc = Document.parse("x = 5\n")
         assert 10**30 not in doc.values()
+
+
+class TestIntFloatBoundaryEquality:
+    """Cross-type int/float equality must be exact at the i64 boundary,
+    matching CPython rather than a saturating float->int cast."""
+
+    def test_i64_max_not_equal_to_two_pow_63_float(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            i = 9223372036854775807
+            f = 9223372036854775808.0
+        """)
+        )
+        # CPython: 9223372036854775807 == 9223372036854775808.0 is False
+        assert doc["i"] != doc["f"]
+        assert doc["i"] != 9223372036854775808.0
+
+    def test_i64_max_equal_to_its_own_value(self) -> None:
+        doc = Document.parse("i = 9223372036854775807\n")
+        assert doc["i"] == 9223372036854775807

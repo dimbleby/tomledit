@@ -4,6 +4,8 @@
 
 - `==` and `in` no longer raise `OverflowError` for a Python int outside the
   64-bit range; it simply compares unequal.
+- Fix a TOML integer wrongly comparing equal to a nearby float at the 64-bit
+  boundary.
 - Fix slice assignment collapsing a multiline array onto one line; new
   elements now keep the array's existing layout.
 

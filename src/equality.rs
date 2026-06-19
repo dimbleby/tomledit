@@ -60,9 +60,11 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 /// Check whether an integer and a float represent the same numeric value,
 /// mirroring Python's cross-type `int == float` semantics.
 fn int_float_eq(i: i64, f: f64) -> bool {
-    // Fast reject: non-finite floats are never equal to an integer.
-    // Then check that the float is a whole number and round-trips exactly.
-    f.is_finite() && f == (i as f64) && (f as i64) == i
+    // Equal iff the float is a whole number whose exact value equals the
+    // integer.  i128 holds any integral f64 within i64 range exactly and
+    // saturates harmlessly out of range, avoiding the false positives a
+    // saturating f64->i64 round-trip would produce at the i64 boundary.
+    f.fract() == 0.0 && i128::from(i) == (f as i128)
 }
 
 /// Compare two `toml_edit` Values structurally (pure Rust, no Python allocation).

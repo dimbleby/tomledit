@@ -1872,6 +1872,39 @@ class TestBoundarySpacePreservation:
         assert doc.as_toml() == "arr = [ 1, 2, 9 ]\n"
 
 
+class TestCompactArrayFrontInsert:
+    """Front insert / head replace on a compact array must keep `[`-hugging
+    layout: no spurious space after `[`, no dropped space after the comma."""
+
+    def test_insert_at_start(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]\n")
+        doc["a"].insert(0, 0)
+        assert doc.as_toml() == "a = [0, 1, 2, 3]\n"
+
+    def test_insert_at_start_single_element(self) -> None:
+        doc = Document.parse("a = [1]\n")
+        doc["a"].insert(0, 0)
+        assert doc.as_toml() == "a = [0, 1]\n"
+
+    def test_slice_insert_at_start(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]\n")
+        doc["a"][0:0] = [0]
+        assert doc.as_toml() == "a = [0, 1, 2, 3]\n"
+
+    def test_slice_insert_multiple_at_start(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]\n")
+        doc["a"][:0] = [8, 9]
+        assert doc.as_toml() == "a = [8, 9, 1, 2, 3]\n"
+
+    def test_slice_replace_all(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]\n")
+        doc["a"][:] = [7, 8]
+        assert doc.as_toml() == "a = [7, 8]\n"
+
+    def test_slice_replace_head(self) -> None:
+        doc = Document.parse("a = [1, 2, 3]\n")
+        doc["a"][0:1] = [7, 8]
+        assert doc.as_toml() == "a = [7, 8, 2, 3]\n"
 class TestMultilineFormatPreservation:
     def test_insert_at_start_preserves_multiline(self) -> None:
         doc = Document.parse(MULTILINE_ARRAY)

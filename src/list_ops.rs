@@ -263,17 +263,16 @@ fn with_preserved_seam(
 }
 
 /// Save the first element's leading prefix (whitespace after `[`).
-/// Returns `None` if the array is empty or the prefix is empty.
+/// Returns `None` only if the element has no prefix set (empty array or a
+/// freshly built element); an empty prefix (compact array) is preserved as
+/// `Some("")` so a front insertion keeps the value hugging `[`.
 ///
 /// For multiline arrays, only the structural indentation (`\n` + indent)
 /// is saved — block comments that belong to the first element are excluded
 /// so they stay attached to that element after an insertion at position 0.
 fn save_first_prefix(arr: &toml_edit::Array) -> Option<String> {
-    let raw = arr
-        .get(0)
-        .and_then(|v| value_prefix(v))
-        .filter(|s| !s.is_empty())?;
-    indent_only(raw).or_else(|| Some(raw.to_owned()))
+    let raw = arr.get(0).and_then(|v| value_prefix(v))?;
+    Some(indent_only(raw).unwrap_or_else(|| raw.to_owned()))
 }
 
 /// Apply a saved leading prefix to the current first element.
@@ -282,6 +281,23 @@ fn apply_first_prefix(arr: &mut toml_edit::Array, prefix: Option<String>) {
         && let Some(first) = arr.get_mut(0)
     {
         first.decor_mut().set_prefix(&p);
+    }
+}
+
+/// Demote the old first element, pushed to interior index `index` by a front
+/// insertion, so it adopts the inter-element separator `sep`'s prefix.
+///
+/// Skipped only for trailing-comma multiline arrays (the break lives in the
+/// separator prefix), where the old first already sits on its own line and its
+/// prefix — including any block comments — coincides with the separator;
+/// overwriting it would drop those comments.  Every other layout (single-line
+/// compact/spaced and leading-comma) needs the old first to swap its boundary
+/// prefix for the separator: e.g. `[1, 2]` + front insert keeps `1`'s post-`[`
+/// `""` from becoming a missing-space `,1`.
+fn demote_old_first(arr: &mut toml_edit::Array, index: usize, sep: &(String, String)) {
+    let trailing_multiline = sep.1.is_empty() && sep.0.contains('\n');
+    if !trailing_multiline && let Some(v) = arr.get_mut(index) {
+        v.decor_mut().set_prefix(&sep.0);
     }
 }
 
@@ -622,6 +638,7 @@ fn array_setitem_slice(
         }
 
         // Insert new elements at start position.
+        let n_inserted = converted.len();
         for (offset, mut v) in converted.into_iter().enumerate() {
             let inline = comments::take_value_inline_comment(&mut v);
             if let Some(sep) = &separator {
@@ -639,6 +656,15 @@ fn array_setitem_slice(
         // Restore boundary spacing.
         apply_first_prefix(arr, first_prefix);
         apply_last_suffix(arr, last_suffix);
+
+        // A pure front insertion (nothing removed at the head) demotes the
+        // surviving old first element to an interior slot.
+        if start_idx == 0
+            && stop_idx == 0
+            && let Some(sep) = &separator
+        {
+            demote_old_first(arr, n_inserted, sep);
+        }
 
         arr.restore_inline_comments(&ic);
         apply_removal_decor(arr, &decor);
@@ -832,11 +858,7 @@ pub(crate) fn item_insert(
             let mut ic = arr.save_inline_comments();
             let saved_suffix = at_end.then(|| take_last_seam(arr)).flatten();
             let saved_prefix = at_start.then(|| save_first_prefix(arr)).flatten();
-            // A new first element in a leading-comma array demotes the old first
-            // element, whose post-`[` prefix must become the (empty) leading
-            // separator.  Trailing-comma arrays need no change here.
             let sep = element_separator(arr);
-            let demoted_prefix = (at_start && !sep.1.is_empty()).then(|| sep.0.clone());
             let mut v = into_value(value)?;
             let inline = comments::take_value_inline_comment(&mut v);
             set_element_decor(&mut v, &sep);
@@ -845,10 +867,8 @@ pub(crate) fn item_insert(
             arr.restore_inline_comments(&ic);
             apply_last_suffix(arr, saved_suffix);
             apply_first_prefix(arr, saved_prefix);
-            if let Some(p) = demoted_prefix
-                && let Some(old_first) = arr.get_mut(1)
-            {
-                old_first.decor_mut().set_prefix(p);
+            if at_start {
+                demote_old_first(arr, resolved + 1, &sep);
             }
             Ok((!at_end).then_some(Affected::Range {
                 from: resolved,

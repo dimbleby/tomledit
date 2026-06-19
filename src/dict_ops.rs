@@ -165,6 +165,13 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
             .and_then(|e| e.as_value())
             .map(|v| v.decor().clone());
 
+        // A header entry ([table]/[[aot]]) has no `=`, so its key leaf-decor
+        // suffix between key and `=` is empty.  Replacing it with a value turns
+        // it into a `key = value` entry, which needs the standard space.
+        let was_header = item
+            .get(key)
+            .is_some_and(|e| e.is_table() || e.is_array_of_tables());
+
         // For brand-new keys in a regular table, copy the table's body
         // indent so the new key lines up with its siblings.
         let new_key_indent = old_decor
@@ -194,6 +201,10 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
             new_value.decor_mut().set_suffix(ws.clone());
         }
         item[key] = ItemRs::Value(new_value);
+
+        if was_header && let Some(mut km) = item.as_table_mut().and_then(|t| t.key_mut(key)) {
+            km.leaf_decor_mut().set_suffix(" ");
+        }
 
         if let Some(indent) = new_key_indent
             && let Some(mut km) = item.as_table_mut().and_then(|t| t.key_mut(key))

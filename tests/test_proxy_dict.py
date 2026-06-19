@@ -333,9 +333,47 @@ class TestInlineTableRemoveFirstKey:
         doc = Document.parse("t = {\n    p = 1,  # cp\n    q = 2\n}\n")
         del doc["t"]["p"]
         assert doc.as_toml() == "t = {\n    q = 2\n}\n"
+
+
 # ---------------------------------------------------------------------------
 # Document-level dict methods (get, pop with defaults, return types)
 # ---------------------------------------------------------------------------
+
+
+class TestReplaceTableWithValue:
+    """Replacing a `[table]`/`[[aot]]` header entry with a scalar/array value
+    must render `key = value` with the standard space before `=`."""
+
+    def test_table_with_scalar(self) -> None:
+        doc = Document.parse("[a]\nx = 1\n")
+        doc["a"] = 5
+        assert doc.as_toml() == "a = 5\n"
+
+    def test_table_with_array(self) -> None:
+        doc = Document.parse("[a]\nx = 1\n")
+        doc["a"] = [9]
+        assert doc.as_toml() == "a = [9]\n"
+
+    def test_table_with_string(self) -> None:
+        doc = Document.parse("[a]\nx = 1\n")
+        doc["a"] = "s"
+        assert doc.as_toml() == 'a = "s"\n'
+
+    def test_aot_with_scalar(self) -> None:
+        doc = Document.parse("[[a]]\nx = 1\n")
+        doc["a"] = 5
+        assert doc.as_toml() == "a = 5\n"
+
+    def test_nested_subtable_via_proxy(self) -> None:
+        doc = Document.parse("[t]\n[t.sub]\nx = 1\n")
+        doc["t"]["sub"] = 99
+        assert doc.as_toml() == "[t]\nsub = 99\n"
+
+    def test_scalar_replacement_preserves_compact_spacing(self) -> None:
+        # A plain scalar->scalar replacement must keep the user's own spacing.
+        doc = Document.parse("a=1\n")
+        doc["a"] = 5
+        assert doc.as_toml() == "a=5\n"
 
 
 class TestDocumentDictMethods:

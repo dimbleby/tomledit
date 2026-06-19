@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Deleting the first key of an inline table no longer leaves a stray space
+  after `{`.
+- Replacing a table with a value now keeps the space before `=`.
+- New elements added to a leading-comma array now keep the space after the
+  comma.
+- Inserting at the front of a compact array no longer adds a stray space or
+  drops the space after a comma.
 - `==` and `in` no longer raise `OverflowError` for a Python int outside the
   64-bit range; it simply compares unequal.
 - Fix a TOML integer wrongly comparing equal to a nearby float at the 64-bit

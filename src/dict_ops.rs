@@ -42,11 +42,27 @@ pub(crate) fn inline_table_remove(
 ) -> Option<toml_edit::Value> {
     let mut ic = it.save_inline_comments();
     let pos = it.iter().position(|(k, _)| k == key);
+    // When the first key is removed, the new first key must inherit the removed
+    // key's leaf-decor prefix (the structural whitespace right after `{`);
+    // otherwise it keeps its post-comma separator prefix and renders a spurious
+    // space — or a leaked comment — immediately after `{`.
+    let first_prefix = (pos == Some(0)).then(|| {
+        it.key(key)
+            .and_then(|k| k.leaf_decor().prefix().and_then(|r| r.as_str()))
+            .unwrap_or_default()
+            .to_owned()
+    });
     let removed = it.remove(key)?;
     if let Some(pos) = pos {
         ic.remove(pos);
     }
     it.restore_inline_comments(&ic);
+    if let Some(prefix) = first_prefix {
+        let new_first = it.iter().next().map(|(k, _)| k.to_owned());
+        if let Some(mut km) = new_first.and_then(|k| it.key_mut(&k)) {
+            km.leaf_decor_mut().set_prefix(prefix);
+        }
+    }
     Some(removed)
 }
 

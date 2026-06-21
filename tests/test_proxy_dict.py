@@ -2056,3 +2056,148 @@ class TestDictProxyKeyTypes:
         doc = Document.parse("[t]\na = 1\n")
         assert doc["t"].get(42, "default") == "default"
         assert doc["t"].get(42) is None
+
+
+class TestRemoveFirstHeaderTable:
+    """Removing the first ``[table]`` header (when a blank line separated it
+    from the next header) must not leave the survivor's leading newline behind,
+    which would render the document starting with a stray blank line."""
+
+    def test_delitem_first_header(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [a]
+            x = 1
+
+            [b]
+            y = 2
+            """)
+        )
+        del doc["a"]
+        assert doc.as_toml() == toml_literal("""
+            [b]
+            y = 2
+        """)
+
+    def test_pop_first_header(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [a]
+            x = 1
+
+            [b]
+            y = 2
+            """)
+        )
+        assert doc.pop("a")["x"] == 1
+        assert doc.as_toml() == toml_literal("""
+            [b]
+            y = 2
+        """)
+
+    def test_popitem_does_not_disturb_first_header(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [a]
+            x = 1
+
+            [b]
+            y = 2
+            """)
+        )
+        doc.popitem()
+        assert doc.as_toml() == toml_literal("""
+            [a]
+            x = 1
+        """)
+
+    def test_proxy_delitem_first_nested_header(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [p]
+            [p.a]
+            x = 1
+
+            [p.b]
+            y = 2
+            """)
+        )
+        del doc["p"]["a"]
+        assert doc.as_toml() == toml_literal("""
+            [p]
+            [p.b]
+            y = 2
+        """)
+
+    def test_proxy_pop_first_nested_header(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [p]
+            [p.a]
+            x = 1
+
+            [p.b]
+            y = 2
+            """)
+        )
+        assert doc["p"].pop("a")["x"] == 1
+        assert doc.as_toml() == toml_literal("""
+            [p]
+            [p.b]
+            y = 2
+        """)
+
+    def test_delitem_first_header_aot_survivor(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            [a]
+            x = 1
+
+            [[b]]
+            y = 2
+            """)
+        )
+        del doc["a"]
+        assert doc.as_toml() == toml_literal("""
+            [[b]]
+            y = 2
+        """)
+
+    def test_delitem_non_first_keeps_leading_blank_lines(self) -> None:
+        # Deleting a NON-first header must not strip leading blank lines from
+        # the surviving first header.
+        doc = Document.parse("\n\n[a]\nx = 1\n[b]\ny = 2\n")
+        del doc["b"]
+        assert doc.as_toml() == "\n\n[a]\nx = 1\n"
+
+    def test_pop_non_first_keeps_leading_blank_line(self) -> None:
+        doc = Document.parse("\n[a]\nx = 1\n[b]\ny = 2\n")
+        assert doc.pop("b")["y"] == 2
+        assert doc.as_toml() == "\n[a]\nx = 1\n"
+
+    def test_popitem_keeps_leading_blank_lines(self) -> None:
+        doc = Document.parse("\n\n[a]\nx = 1\n[b]\ny = 2\n")
+        doc.popitem()
+        assert doc.as_toml() == "\n\n[a]\nx = 1\n"
+
+    def test_proxy_delitem_non_first_keeps_blank_line(self) -> None:
+        doc = Document.parse("[p]\n\n[p.a]\nx = 1\n[p.b]\ny = 2\n")
+        del doc["p"]["b"]
+        assert doc.as_toml() == "[p]\n\n[p.a]\nx = 1\n"
+
+    def test_proxy_pop_non_first_keeps_blank_line(self) -> None:
+        doc = Document.parse("[p]\n\n[p.a]\nx = 1\n[p.b]\ny = 2\n")
+        assert doc["p"].pop("b")["y"] == 2
+        assert doc.as_toml() == "[p]\n\n[p.a]\nx = 1\n"
+
+    def test_delitem_sole_first_header_empties_document(self) -> None:
+        # Removing the only header leaves an empty document; the fixup must
+        # cope with there being no surviving first header.
+        doc = Document.parse("[a]\nx = 1\n")
+        del doc["a"]
+        assert doc.as_toml() == ""
+
+    def test_proxy_pop_sole_first_nested_header(self) -> None:
+        doc = Document.parse("[p]\n[p.a]\nx = 1\n")
+        assert doc["p"].pop("a")["x"] == 1
+        assert doc.as_toml() == "[p]\n"

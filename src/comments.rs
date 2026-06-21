@@ -200,13 +200,9 @@ pub(crate) fn set_block_comment(
 ) -> PyResult<()> {
     match parent {
         ItemRs::Table(table) => {
-            let decor = match table.get_mut(key) {
-                Some(ItemRs::Table(child)) => Some(child.decor_mut()),
-                Some(ItemRs::ArrayOfTables(aot)) => {
-                    aot.iter_mut().next().map(toml_edit::Table::decor_mut)
-                }
-                _ => None,
-            };
+            let decor = table
+                .get_mut(key)
+                .and_then(crate::dict_ops::header_decor_mut);
             if let Some(d) = decor {
                 let existing = d.prefix().and_then(|r| r.as_str()).unwrap_or("").to_owned();
                 let prefix = TablePrefix::with_block(&existing, comment)?;

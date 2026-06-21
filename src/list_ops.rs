@@ -7,6 +7,7 @@ use toml_edit::Value as ValueRs;
 use crate::comments;
 use crate::comments::CommentPreservation;
 use crate::comments::{value_prefix, value_suffix};
+use crate::dict_ops;
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops::{Affected, into_value};
@@ -322,17 +323,8 @@ fn save_aot_entry_prefix(aot: &toml_edit::ArrayOfTables, index: usize) -> String
 /// When entry 0 is removed, the new first entry may have a leading `\n`
 /// separator (left over from being a non-first entry).  Strip it.
 fn fix_first_aot_prefix(aot: &mut toml_edit::ArrayOfTables) {
-    let Some(first) = aot.get_mut(0) else {
-        return;
-    };
-    if let Some(stripped) = first
-        .decor()
-        .prefix()
-        .and_then(|r| r.as_str())
-        .and_then(|s| s.strip_prefix('\n'))
-    {
-        let stripped = stripped.to_owned();
-        first.decor_mut().set_prefix(stripped);
+    if let Some(first) = aot.get_mut(0) {
+        dict_ops::strip_leading_newline(first.decor_mut());
     }
 }
 
@@ -376,11 +368,9 @@ fn entry_indents(t: &toml_edit::Table) -> (String, String) {
 
 /// Ensure `entry`'s prefix starts with (or does not start with) a `\n`.
 fn set_spacing(entry: &mut toml_edit::Table, spaced: bool) {
-    let raw = prefix_str(entry).map(str::to_owned);
-    let current = raw.as_deref().unwrap_or("");
-    if spaced && !current.starts_with('\n') {
-        entry.decor_mut().set_prefix(format!("\n{current}"));
-    } else if !spaced && raw.as_deref().unwrap_or("\n") == "\n" {
+    if spaced {
+        dict_ops::ensure_leading_newline(entry.decor_mut());
+    } else if prefix_str(entry).unwrap_or("\n") == "\n" {
         // Either unset (toml_edit would emit a default `\n`) or just a
         // bare `\n` — clear it to suppress the separator.
         entry.decor_mut().set_prefix("");

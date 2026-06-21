@@ -232,7 +232,7 @@ impl Document {
         };
         let doc = slf.get();
         let mut inner = doc.inner.write_py_attached(slf.py());
-        if inner.remove(&key).is_none() {
+        if dict_ops::remove_from_table(inner.as_table_mut(), &key).is_none() {
             return Err(PyKeyError::new_err(key));
         }
         doc.bump_at(&[Key::Str(key)]);
@@ -258,7 +258,7 @@ impl Document {
         let doc = slf.get();
         let removed = {
             let mut inner = doc.inner.write_py_attached(py);
-            match inner.remove(&key) {
+            match dict_ops::remove_from_table(inner.as_table_mut(), &key) {
                 Some(item) => {
                     doc.bump_at(&[Key::Str(key)]);
                     item

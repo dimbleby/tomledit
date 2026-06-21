@@ -202,7 +202,7 @@ pub(crate) fn set_block_comment(
         ItemRs::Table(table) => {
             let decor = table
                 .get_mut(key)
-                .and_then(crate::dict_ops::header_decor_mut);
+                .and_then(crate::item_ops::header_decor_mut);
             if let Some(d) = decor {
                 let existing = d.prefix().and_then(|r| r.as_str()).unwrap_or("").to_owned();
                 let prefix = TablePrefix::with_block(&existing, comment)?;

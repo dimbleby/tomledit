@@ -7,9 +7,9 @@ use toml_edit::Value as ValueRs;
 use crate::comments;
 use crate::comments::CommentPreservation;
 use crate::comments::{value_prefix, value_suffix};
-use crate::dict_ops;
 use crate::equality;
 use crate::item::Item;
+use crate::item_ops;
 use crate::item_ops::{Affected, into_value};
 
 // ---------------------------------------------------------------------------
@@ -324,7 +324,7 @@ fn save_aot_entry_prefix(aot: &toml_edit::ArrayOfTables, index: usize) -> String
 /// separator (left over from being a non-first entry).  Strip it.
 fn fix_first_aot_prefix(aot: &mut toml_edit::ArrayOfTables) {
     if let Some(first) = aot.get_mut(0) {
-        dict_ops::strip_leading_newline(first.decor_mut());
+        item_ops::strip_leading_newline(first.decor_mut());
     }
 }
 
@@ -369,7 +369,7 @@ fn entry_indents(t: &toml_edit::Table) -> (String, String) {
 /// Ensure `entry`'s prefix starts with (or does not start with) a `\n`.
 fn set_spacing(entry: &mut toml_edit::Table, spaced: bool) {
     if spaced {
-        dict_ops::ensure_leading_newline(entry.decor_mut());
+        item_ops::ensure_leading_newline(entry.decor_mut());
     } else if prefix_str(entry).unwrap_or("\n") == "\n" {
         // Either unset (toml_edit would emit a default `\n`) or just a
         // bare `\n` — clear it to suppress the separator.

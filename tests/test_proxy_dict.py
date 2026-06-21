@@ -357,6 +357,91 @@ class TestInlineTableRemoveFirstKey:
         """)
 
 
+class TestInlineTableRemoveLastKey:
+    """Deleting the last key of an inline table must not drop the structural
+    whitespace that sat immediately before `}`."""
+
+    @staticmethod
+    def _assert(doc: Document, expected: str) -> None:
+        out = doc.as_toml()
+        assert out == expected
+        # The result must re-parse and round-trip unchanged.
+        assert Document.parse(out).as_toml() == out
+
+    def test_del_last_key_spaced(self) -> None:
+        doc = Document.parse("t = { a = 1, b = 2 }\n")
+        del doc["t"]["b"]
+        self._assert(doc, "t = { a = 1 }\n")
+
+    def test_pop_last_key_spaced(self) -> None:
+        doc = Document.parse("t = { a = 1, b = 2 }\n")
+        assert doc["t"].pop("b") == 2
+        self._assert(doc, "t = { a = 1 }\n")
+
+    def test_popitem_last_key_spaced(self) -> None:
+        doc = Document.parse("t = { a = 1, b = 2 }\n")
+        assert doc["t"].popitem() == ("b", 2)
+        self._assert(doc, "t = { a = 1 }\n")
+
+    def test_del_last_key_three_spaced(self) -> None:
+        doc = Document.parse("t = { a = 1, b = 2, c = 3 }\n")
+        del doc["t"]["c"]
+        self._assert(doc, "t = { a = 1, b = 2 }\n")
+
+    def test_del_last_key_compact(self) -> None:
+        doc = Document.parse("t = {a = 1, b = 2}\n")
+        del doc["t"]["b"]
+        self._assert(doc, "t = {a = 1}\n")
+
+    def test_del_last_key_nested_inline(self) -> None:
+        doc = Document.parse("a = [{x = 1, y = 2 }]\n")
+        del doc["a"][0]["y"]
+        self._assert(doc, "a = [{x = 1 }]\n")
+
+    def test_del_only_key_spaced(self) -> None:
+        doc = Document.parse("t = { a = 1 }\n")
+        del doc["t"]["a"]
+        self._assert(doc, "t = {}\n")
+
+    def test_del_last_key_multiline(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            t = {
+                p = 1,
+                q = 2,
+            }
+            """)
+        )
+        del doc["t"]["q"]
+        self._assert(
+            doc,
+            toml_literal("""
+            t = {
+                p = 1,
+            }
+        """),
+        )
+
+    def test_del_last_key_keeps_survivor_inline_comment(self) -> None:
+        # Leading-comma layout: the surviving last entry already carries its own
+        # break and before-`}` inline comment, so the repair must leave its
+        # suffix untouched and emit valid, round-trippable TOML.
+        doc = Document.parse(
+            toml_literal("""
+            t = { a = 1 # keep a
+                , b = 2 }
+            """)
+        )
+        del doc["t"]["b"]
+        self._assert(
+            doc,
+            toml_literal("""
+            t = { a = 1 # keep a
+                }
+        """),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Document-level dict methods (get, pop with defaults, return types)
 # ---------------------------------------------------------------------------

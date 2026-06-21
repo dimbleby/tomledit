@@ -42,15 +42,22 @@ pub(crate) fn inline_table_remove(
 ) -> Option<toml_edit::Value> {
     let mut ic = it.save_inline_comments();
     let pos = it.iter().position(|(k, _)| k == key);
-    // When the first key is removed, the new first key must inherit the removed
-    // key's leaf-decor prefix (the structural whitespace right after `{`);
-    // otherwise it keeps its post-comma separator prefix and renders a spurious
-    // space — or a leaked comment — immediately after `{`.
+    // Removing the first or last key drops the structural whitespace that hugged
+    // `{` or `}` (carried by the removed entry's leaf-decor prefix / value
+    // suffix respectively).  The surviving edge entry keeps its own inner
+    // separator whitespace, so without re-applying that edge whitespace a spaced
+    // table renders `{a = 1 }` (first removed) or `{ a = 1}` (last removed).
     let first_prefix = (pos == Some(0)).then(|| {
         it.key(key)
             .and_then(|k| k.leaf_decor().prefix().and_then(|r| r.as_str()))
             .unwrap_or_default()
             .to_owned()
+    });
+    let last_suffix = (pos == Some(it.len() - 1) && it.len() > 1).then(|| {
+        it.get(key)
+            .and_then(comments::value_suffix)
+            .map(|s| comments::value_suffix_structural(s).to_owned())
+            .unwrap_or_default()
     });
     let removed = it.remove(key)?;
     if let Some(pos) = pos {
@@ -61,6 +68,19 @@ pub(crate) fn inline_table_remove(
         let new_first = it.iter().next().map(|(k, _)| k.to_owned());
         if let Some(mut km) = new_first.and_then(|k| it.key_mut(&k)) {
             km.leaf_decor_mut().set_prefix(prefix);
+        }
+    }
+    if let Some(structural) = last_suffix {
+        let new_last = it.iter().last().map(|(k, _)| k.to_owned());
+        if let Some(v) = new_last.and_then(|k| it.get_mut(&k)) {
+            // Only borrow the removed entry's structural whitespace when the
+            // survivor has none of its own; a survivor that already carries a
+            // break or before-`}` comment (e.g. leading-comma layout) keeps its
+            // suffix, which already positions `}` correctly.
+            let own = comments::value_suffix(v).unwrap_or_default();
+            if !comments::suffix_holds_break(own) {
+                v.decor_mut().set_suffix(structural);
+            }
         }
     }
     Some(removed)

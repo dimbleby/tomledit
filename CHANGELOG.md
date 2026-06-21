@@ -4,6 +4,8 @@
 
 - Deleting the first key of an inline table no longer leaves a stray space
   after `{`.
+- Deleting the last key of a spaced inline table no longer drops the space
+  before `}`.
 - Replacing a table with a value now keeps the space before `=`.
 - New elements added to a leading-comma array now keep the space after the
   comma.

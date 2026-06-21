@@ -93,12 +93,74 @@ pub(crate) fn inline_table_remove(
 /// Ensure a decor prefix starts with `\n` (the structural newline that
 /// separates a `[table]` or `[[aot]]` header from preceding content).
 /// Only needed when the table is not the first entry in its parent.
-fn ensure_leading_newline(decor: &mut Decor) {
+pub(crate) fn ensure_leading_newline(decor: &mut Decor) {
     match decor.prefix().and_then(|r| r.as_str()) {
         Some(s) if s.starts_with('\n') => {}
         Some(s) => decor.set_prefix(format!("\n{s}")),
         None => decor.set_prefix("\n"),
     }
+}
+
+/// Strip a single leading `\n` from a decor prefix (the inverse of
+/// `ensure_leading_newline`).  Used when a header becomes the first entry of
+/// its parent, where the first header carries no structural newline.
+pub(crate) fn strip_leading_newline(decor: &mut Decor) {
+    if let Some(stripped) = decor
+        .prefix()
+        .and_then(|r| r.as_str())
+        .and_then(|s| s.strip_prefix('\n'))
+    {
+        let stripped = stripped.to_owned();
+        decor.set_prefix(stripped);
+    }
+}
+
+/// The decor that holds a header's structural leading newline: a `[table]`'s
+/// own decor, or the first inner table of an `[[aot]]`.  `None` for non-header
+/// items (values, inline tables).
+pub(crate) fn header_decor_mut(item: &mut ItemRs) -> Option<&mut Decor> {
+    if item.is_table() {
+        item.as_table_mut().map(toml_edit::Table::decor_mut)
+    } else if item.is_array_of_tables() {
+        item.as_array_of_tables_mut()
+            .and_then(|aot| aot.iter_mut().next())
+            .map(toml_edit::Table::decor_mut)
+    } else {
+        None
+    }
+}
+
+/// Whether `key` is the first entry of `table`.
+fn is_first_entry(table: &toml_edit::Table, key: &str) -> bool {
+    table.iter().next().is_some_and(|(k, _)| k == key)
+}
+
+/// After removing the *first* entry from a table, strip the structural leading
+/// `\n` from the new first header table/AoT — the first header in a document
+/// (or parent table) carries no leading newline.  Callers must only invoke this
+/// when the removed key was the first entry, so a non-first removal never
+/// disturbs the survivor.
+fn fix_first_header_prefix(table: &mut toml_edit::Table) {
+    let Some(key) = table.iter().next().map(|(k, _)| k.to_owned()) else {
+        return;
+    };
+    if let Some(decor) = table.get_mut(&key).and_then(header_decor_mut) {
+        strip_leading_newline(decor);
+    }
+}
+
+/// Remove `key` from `table`, restoring the "first header carries no leading
+/// newline" invariant when the removed key was the first entry.  This is the
+/// single removal path for standard tables — `__delitem__`, `pop`, and
+/// `table_pop` all go through it.  (`popitem` removes the *last* entry, which
+/// can never be the surviving first header, so it does not need this.)
+pub(crate) fn remove_from_table(table: &mut toml_edit::Table, key: &str) -> Option<ItemRs> {
+    let removing_first = is_first_entry(table, key);
+    let removed = table.remove(key)?;
+    if removing_first {
+        fix_first_header_prefix(table);
+    }
+    Some(removed)
 }
 
 // ---------------------------------------------------------------------------
@@ -145,18 +207,11 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         // A table/AoT that was first in its source document has no leading
         // `\n`.  When inserted after other entries, add the structural
         // newline so the header doesn't run into the preceding content.
-        if let Some(table) = item.as_table_mut() {
-            let is_first = table.iter().next().is_some_and(|(k, _)| k == key);
-            if !is_first && let Some(child) = table.get_mut(key) {
-                if let Some(t) = child.as_table_mut() {
-                    ensure_leading_newline(t.decor_mut());
-                }
-                if let Some(aot) = child.as_array_of_tables_mut()
-                    && let Some(first) = aot.iter_mut().next()
-                {
-                    ensure_leading_newline(first.decor_mut());
-                }
-            }
+        if let Some(table) = item.as_table_mut()
+            && !is_first_entry(table, key)
+            && let Some(decor) = table.get_mut(key).and_then(header_decor_mut)
+        {
+            ensure_leading_newline(decor);
         }
     } else {
         // For new keys in inline tables, preserve sibling inline comments
@@ -305,6 +360,9 @@ pub(crate) fn item_has_key(item: &ItemRs, key: &str) -> PyResult<bool> {
 
 /// Remove and return the last `(key, Item)` pair from a table-like item.
 pub(crate) fn item_popitem(item: &mut ItemRs) -> PyResult<(String, ItemRs)> {
+    // `popitem` removes the *last* entry, which can never be the surviving
+    // first header, so the first-header fixup in `remove_from_table` is not
+    // needed here.
     match item {
         ItemRs::Table(table) => {
             let k = table.iter().last().map(|(k, _)| k.to_owned());
@@ -532,8 +590,7 @@ fn normalize_plain_dict_key<'py>(key: &Bound<'py, PyAny>, py: Python<'py>) -> Py
 /// Remove a key from a table-like item, returning the removed item and key.
 pub(crate) fn table_pop(item: &mut ItemRs, key: &str) -> PyResult<(Item, Key)> {
     match item {
-        ItemRs::Table(table) => table
-            .remove(key)
+        ItemRs::Table(table) => remove_from_table(table, key)
             .map(|v| (Item(v), Key::Str(key.into())))
             .ok_or_else(|| PyKeyError::new_err(key.to_owned())),
         ItemRs::Value(ValueRs::InlineTable(it)) => inline_table_remove(it, key)

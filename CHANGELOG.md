@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Removing the first `[table]` of a document or parent table no longer leaves
+  a stray blank line before the next header.
 - Deleting the first key of an inline table no longer leaves a stray space
   after `{`.
 - Deleting the last key of a spaced inline table no longer drops the space

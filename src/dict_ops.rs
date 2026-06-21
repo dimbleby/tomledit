@@ -1,7 +1,7 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyString, PyTuple};
-use toml_edit::{Decor, Item as ItemRs, TableLike, Value as ValueRs};
+use toml_edit::{Item as ItemRs, TableLike, Value as ValueRs};
 
 use crate::comments;
 use crate::comments::CommentPreservation;
@@ -87,48 +87,8 @@ pub(crate) fn inline_table_remove(
 }
 
 // ---------------------------------------------------------------------------
-// Decor helpers
+// Table removal helpers
 // ---------------------------------------------------------------------------
-
-/// Ensure a decor prefix starts with `\n` (the structural newline that
-/// separates a `[table]` or `[[aot]]` header from preceding content).
-/// Only needed when the table is not the first entry in its parent.
-pub(crate) fn ensure_leading_newline(decor: &mut Decor) {
-    match decor.prefix().and_then(|r| r.as_str()) {
-        Some(s) if s.starts_with('\n') => {}
-        Some(s) => decor.set_prefix(format!("\n{s}")),
-        None => decor.set_prefix("\n"),
-    }
-}
-
-/// Strip a single leading `\n` from a decor prefix (the inverse of
-/// `ensure_leading_newline`).  Used when a header becomes the first entry of
-/// its parent, where the first header carries no structural newline.
-pub(crate) fn strip_leading_newline(decor: &mut Decor) {
-    if let Some(stripped) = decor
-        .prefix()
-        .and_then(|r| r.as_str())
-        .and_then(|s| s.strip_prefix('\n'))
-    {
-        let stripped = stripped.to_owned();
-        decor.set_prefix(stripped);
-    }
-}
-
-/// The decor that holds a header's structural leading newline: a `[table]`'s
-/// own decor, or the first inner table of an `[[aot]]`.  `None` for non-header
-/// items (values, inline tables).
-pub(crate) fn header_decor_mut(item: &mut ItemRs) -> Option<&mut Decor> {
-    if item.is_table() {
-        item.as_table_mut().map(toml_edit::Table::decor_mut)
-    } else if item.is_array_of_tables() {
-        item.as_array_of_tables_mut()
-            .and_then(|aot| aot.iter_mut().next())
-            .map(toml_edit::Table::decor_mut)
-    } else {
-        None
-    }
-}
 
 /// Whether `key` is the first entry of `table`.
 fn is_first_entry(table: &toml_edit::Table, key: &str) -> bool {
@@ -144,8 +104,8 @@ fn fix_first_header_prefix(table: &mut toml_edit::Table) {
     let Some(key) = table.iter().next().map(|(k, _)| k.to_owned()) else {
         return;
     };
-    if let Some(decor) = table.get_mut(&key).and_then(header_decor_mut) {
-        strip_leading_newline(decor);
+    if let Some(decor) = table.get_mut(&key).and_then(item_ops::header_decor_mut) {
+        item_ops::strip_leading_newline(decor);
     }
 }
 
@@ -209,9 +169,9 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
         // newline so the header doesn't run into the preceding content.
         if let Some(table) = item.as_table_mut()
             && !is_first_entry(table, key)
-            && let Some(decor) = table.get_mut(key).and_then(header_decor_mut)
+            && let Some(decor) = table.get_mut(key).and_then(item_ops::header_decor_mut)
         {
-            ensure_leading_newline(decor);
+            item_ops::ensure_leading_newline(decor);
         }
     } else {
         // For new keys in inline tables, preserve sibling inline comments

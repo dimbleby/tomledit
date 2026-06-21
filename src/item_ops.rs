@@ -1,6 +1,7 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDate, PyDateTime, PyDelta, PyDict, PyList, PyTime, PyTzInfo};
+use toml_edit::Decor;
 use toml_edit::DocumentMut as DocumentRs;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
@@ -283,5 +284,49 @@ pub(crate) fn item_fmt(item: &mut ItemRs) {
         tbl.fmt();
     } else if let ItemRs::Value(ValueRs::Array(arr)) = item {
         arr.fmt();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Header decor helpers
+// ---------------------------------------------------------------------------
+
+/// Ensure a decor prefix starts with `\n` (the structural newline that
+/// separates a `[table]` or `[[aot]]` header from preceding content).
+/// Only needed when the header is not the first entry in its parent.
+pub(crate) fn ensure_leading_newline(decor: &mut Decor) {
+    match decor.prefix().and_then(|r| r.as_str()) {
+        Some(s) if s.starts_with('\n') => {}
+        Some(s) => decor.set_prefix(format!("\n{s}")),
+        None => decor.set_prefix("\n"),
+    }
+}
+
+/// Strip a single leading `\n` from a decor prefix (the inverse of
+/// `ensure_leading_newline`).  Used when a header becomes the first entry of
+/// its parent, where the first header carries no structural newline.
+pub(crate) fn strip_leading_newline(decor: &mut Decor) {
+    if let Some(stripped) = decor
+        .prefix()
+        .and_then(|r| r.as_str())
+        .and_then(|s| s.strip_prefix('\n'))
+    {
+        let stripped = stripped.to_owned();
+        decor.set_prefix(stripped);
+    }
+}
+
+/// The decor that holds a header's structural leading newline: a `[table]`'s
+/// own decor, or the first inner table of an `[[aot]]`.  `None` for non-header
+/// items (values, inline tables).
+pub(crate) fn header_decor_mut(item: &mut ItemRs) -> Option<&mut Decor> {
+    if item.is_table() {
+        item.as_table_mut().map(toml_edit::Table::decor_mut)
+    } else if item.is_array_of_tables() {
+        item.as_array_of_tables_mut()
+            .and_then(|aot| aot.iter_mut().next())
+            .map(toml_edit::Table::decor_mut)
+    } else {
+        None
     }
 }

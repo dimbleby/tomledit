@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.2.1 (23 June 2026)
+
 - Removing the first `[table]` of a document or parent table no longer leaves
   a stray blank line before the next header.
 - Deleting the first key of an inline table no longer leaves a stray space

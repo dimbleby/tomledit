@@ -69,14 +69,17 @@ jobs:
       - name: ruff format
         run: ruff format --check .
 
-      - name: pytest
-        run: uv run pytest
+      - name: ty check
+        run: uvx ty check
 
       - name: mypy
         run: uv run mypy
 
-      - name: ty check
-        run: uvx ty check
+      - name: pytest
+        run: uv run pytest
+
+      - name: pytest (slow)
+        run: uv run pytest -m slow
 
   rust:
     name: Rust

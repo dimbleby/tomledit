@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Adding the first element to a whitespace-only-empty array (e.g. `[  ]`) no
+  longer leaves stray padding before `]`.
+
 ## 1.2.1 (23 June 2026)
 
 - Removing the first `[table]` of a document or parent table no longer leaves

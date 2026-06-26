@@ -207,6 +207,18 @@ fn capture_separator(arr: &toml_edit::Array) -> Option<(String, String)> {
     (!arr.is_empty()).then(|| element_separator(arr))
 }
 
+/// Collapse the residual interior whitespace of an array that has just gained
+/// its first element.  An empty array stores the gap between its brackets in
+/// its trailing string (e.g. `"  "` for `[  ]`); once a value precedes `]` that
+/// becomes stray padding, so drop it for a single-line array or keep just the
+/// structural line break for a multiline one.  A trailing comment is preserved.
+fn clear_empty_array_trailing(arr: &mut toml_edit::Array) {
+    let trailing = arr.trailing().as_str().unwrap_or_default();
+    if !trailing.is_empty() && trailing.trim().is_empty() {
+        arr.set_trailing(indent_only(trailing).unwrap_or_default());
+    }
+}
+
 /// The bracket-positioning whitespace in a last element's suffix: the part from
 /// the first newline onward when the suffix holds the element's break,
 /// otherwise the whole suffix.  Any inline comment is excluded.
@@ -849,6 +861,7 @@ pub(crate) fn item_insert(
             let resolved = clamp_index(index, arr.len());
             let at_end = resolved == arr.len();
             let at_start = resolved == 0 && !arr.is_empty();
+            let was_empty = arr.is_empty();
             let mut ic = arr.save_inline_comments();
             let saved_suffix = at_end.then(|| take_last_seam(arr)).flatten();
             let saved_prefix = at_start.then(|| save_first_prefix(arr)).flatten();
@@ -863,6 +876,9 @@ pub(crate) fn item_insert(
             apply_first_prefix(arr, saved_prefix);
             if at_start {
                 demote_old_first(arr, resolved + 1, &sep);
+            }
+            if was_empty {
+                clear_empty_array_trailing(arr);
             }
             Ok((!at_end).then_some(Affected::Range {
                 from: resolved,
@@ -920,6 +936,7 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
             // Validate all values up front.
             let converted: Vec<ValueRs> =
                 items.into_iter().map(into_value).collect::<PyResult<_>>()?;
+            let was_empty = arr.is_empty();
             with_preserved_seam(arr, |arr, ic| {
                 let separator = capture_separator(arr);
                 for mut v in converted {
@@ -930,6 +947,9 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
                     arr.push(v);
                 }
             });
+            if was_empty && !arr.is_empty() {
+                clear_empty_array_trailing(arr);
+            }
             Ok(())
         }
         ArrayLikeMut::Aot(aot) => {

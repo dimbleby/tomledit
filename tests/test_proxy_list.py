@@ -1884,6 +1884,65 @@ class TestBoundarySpacePreservation:
         assert doc.as_toml() == "arr = [ 1, 2, 9 ]\n"
 
 
+class TestEmptyArrayFirstInsert:
+    """The first element added to a whitespace-only-empty array must not leave
+    residual interior whitespace before `]`."""
+
+    def test_append_into_spaced_empty(self) -> None:
+        doc = Document.parse("x = [  ]\n")
+        doc["x"].append(1)
+        assert doc.as_toml() == "x = [1]\n"
+
+    def test_append_into_single_space_empty(self) -> None:
+        doc = Document.parse("x = [ ]\n")
+        doc["x"].append(1)
+        assert doc.as_toml() == "x = [1]\n"
+
+    def test_repeated_appends_stay_clean(self) -> None:
+        doc = Document.parse("x = [  ]\n")
+        doc["x"].append(1)
+        doc["x"].append(2)
+        doc["x"].append(3)
+        assert doc.as_toml() == "x = [1, 2, 3]\n"
+
+    def test_extend_into_spaced_empty(self) -> None:
+        doc = Document.parse("x = [  ]\n")
+        doc["x"].extend([1, 2])
+        assert doc.as_toml() == "x = [1, 2]\n"
+
+    def test_extend_empty_list_leaves_array_untouched(self) -> None:
+        doc = Document.parse("x = [  ]\n")
+        doc["x"].extend([])
+        assert doc.as_toml() == "x = [  ]\n"
+
+    def test_insert_into_spaced_empty(self) -> None:
+        doc = Document.parse("x = [ ]\n")
+        doc["x"].insert(0, 5)
+        assert doc.as_toml() == "x = [5]\n"
+
+    def test_compact_empty_unaffected(self) -> None:
+        doc = Document.parse("x = []\n")
+        doc["x"].append(1)
+        assert doc.as_toml() == "x = [1]\n"
+
+    def test_multiline_empty_keeps_line_break(self) -> None:
+        doc = Document.parse("x = [\n]\n")
+        doc["x"].append(1)
+        assert doc.as_toml() == toml_literal("""
+            x = [1
+            ]
+        """)
+
+    def test_multiline_empty_with_comment_keeps_comment(self) -> None:
+        doc = Document.parse("x = [\n  # note\n]\n")
+        doc["x"].append(1)
+        assert doc.as_toml() == toml_literal("""
+            x = [1
+              # note
+            ]
+        """)
+
+
 class TestCompactArrayFrontInsert:
     """Front insert / head replace on a compact array must keep `[`-hugging
     layout: no spurious space after `[`, no dropped space after the comma."""

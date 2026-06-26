@@ -4,6 +4,8 @@
 
 - Adding the first element to a whitespace-only-empty array (e.g. `[  ]`) no
   longer leaves stray padding before `]`.
+- Adding the first key to a whitespace-only-empty inline table (e.g. `{  }`)
+  no longer leaves stray padding before `}`.
 
 ## 1.2.1 (23 June 2026)
 

@@ -442,6 +442,37 @@ class TestInlineTableRemoveLastKey:
         )
 
 
+class TestEmptyInlineTableFirstInsert:
+    """The first key added to a whitespace-only-empty inline table must not
+    leave residual interior whitespace before `}`."""
+
+    def test_insert_into_spaced_empty(self) -> None:
+        doc = Document.parse("y = {  }\n")
+        doc["y"]["a"] = 1
+        assert doc.as_toml() == "y = { a = 1 }\n"
+
+    def test_insert_into_single_space_empty(self) -> None:
+        doc = Document.parse("y = { }\n")
+        doc["y"]["a"] = 1
+        assert doc.as_toml() == "y = { a = 1 }\n"
+
+    def test_compact_empty_unaffected(self) -> None:
+        doc = Document.parse("y = {}\n")
+        doc["y"]["a"] = 1
+        assert doc.as_toml() == "y = { a = 1 }\n"
+
+    def test_repeated_inserts_stay_clean(self) -> None:
+        doc = Document.parse("y = {  }\n")
+        doc["y"]["a"] = 1
+        doc["y"]["b"] = 2
+        assert doc.as_toml() == "y = { a = 1, b = 2 }\n"
+
+    def test_nested_inline_spaced_empty(self) -> None:
+        doc = Document.parse("a = [{  }]\n")
+        doc["a"][0]["x"] = 1
+        assert doc.as_toml() == "a = [{ x = 1 }]\n"
+
+
 # ---------------------------------------------------------------------------
 # Document-level dict methods (get, pop with defaults, return types)
 # ---------------------------------------------------------------------------

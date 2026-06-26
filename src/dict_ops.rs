@@ -264,7 +264,11 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
                 } else {
                     // The table was empty: drop the residual inter-brace gap
                     // (e.g. the `  ` of `{  }`) now sitting after the new value.
-                    crate::list_ops::clear_empty_inline_table_trailing(it);
+                    if let Some(trailing) = crate::list_ops::collapsed_empty_trailing(
+                        it.trailing().as_str().unwrap_or_default(),
+                    ) {
+                        it.set_trailing(trailing);
+                    }
                 }
                 it.restore_inline_comments(&ic);
                 comments::align_inserted_inline_key(it, key);

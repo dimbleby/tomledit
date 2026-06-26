@@ -1910,6 +1910,16 @@ class TestEmptyArrayFirstInsert:
         doc["x"].extend([1, 2])
         assert doc.as_toml() == "x = [1, 2]\n"
 
+    def test_extend_array_proxy_into_spaced_empty(self) -> None:
+        doc = Document.parse("x = [  ]\nsrc = [1, 2]\n")
+        doc["x"].extend(doc["src"])
+        assert doc.as_toml() == "x = [1, 2]\nsrc = [1, 2]\n"
+
+    def test_iadd_array_proxy_into_spaced_empty(self) -> None:
+        doc = Document.parse("x = [  ]\nsrc = [1, 2]\n")
+        doc["x"] += doc["src"]
+        assert doc.as_toml() == "x = [1, 2]\nsrc = [1, 2]\n"
+
     def test_extend_empty_list_leaves_array_untouched(self) -> None:
         doc = Document.parse("x = [  ]\n")
         doc["x"].extend([])
@@ -1941,6 +1951,13 @@ class TestEmptyArrayFirstInsert:
               # note
             ]
         """)
+
+    def test_pop_keeps_non_empty_spacing(self) -> None:
+        # A non-empty array's whitespace-only trailing is legitimate and must
+        # survive a pop that leaves it non-empty (the `was_empty` guard).
+        doc = Document.parse("x = [ 1, 2, 3 ]\n")
+        doc["x"].pop()
+        assert doc.as_toml() == "x = [ 1, 2 ]\n"
 
 
 class TestCompactArrayFrontInsert:

@@ -213,7 +213,7 @@ fn capture_separator(arr: &toml_edit::Array) -> Option<(String, String)> {
 /// so drop it on a single line or keep just the structural break when
 /// multiline.  Returns `None` (leave as-is) unless the trailing is purely
 /// whitespace, so a trailing comment is always preserved.
-fn collapsed_empty_trailing(trailing: &str) -> Option<String> {
+pub(crate) fn collapsed_empty_trailing(trailing: &str) -> Option<String> {
     (!trailing.is_empty() && trailing.trim().is_empty())
         .then(|| indent_only(trailing).unwrap_or_default())
 }
@@ -223,14 +223,6 @@ fn collapsed_empty_trailing(trailing: &str) -> Option<String> {
 fn clear_empty_array_trailing(arr: &mut toml_edit::Array) {
     if let Some(trailing) = collapsed_empty_trailing(arr.trailing().as_str().unwrap_or_default()) {
         arr.set_trailing(trailing);
-    }
-}
-
-/// Apply [`collapsed_empty_trailing`] to an inline table that has just gained
-/// its first key.
-pub(crate) fn clear_empty_inline_table_trailing(it: &mut toml_edit::InlineTable) {
-    if let Some(trailing) = collapsed_empty_trailing(it.trailing().as_str().unwrap_or_default()) {
-        it.set_trailing(trailing);
     }
 }
 
@@ -282,7 +274,9 @@ fn apply_last_suffix(arr: &mut toml_edit::Array, seam: Option<String>) {
 
 /// Run `body` on `arr` with the last-element seam preserved across the
 /// operation.  The inline comments and the bracket-positioning whitespace are
-/// saved beforehand and re-applied afterwards (see [`take_last_seam`]).
+/// saved beforehand and re-applied afterwards (see [`take_last_seam`]).  When
+/// `arr` starts empty and gains elements, its residual interior whitespace is
+/// cleared (see [`clear_empty_array_trailing`]).
 ///
 /// `body` receives the inline-comment vector and must push one entry per
 /// element it appends so `restore_inline_comments` lands each comment in
@@ -291,11 +285,15 @@ fn with_preserved_seam(
     arr: &mut toml_edit::Array,
     body: impl FnOnce(&mut toml_edit::Array, &mut Vec<String>),
 ) {
+    let was_empty = arr.is_empty();
     let mut inlines = arr.save_inline_comments();
     let saved_suffix = take_last_seam(arr);
     body(arr, &mut inlines);
     arr.restore_inline_comments(&inlines);
     apply_last_suffix(arr, saved_suffix);
+    if was_empty && !arr.is_empty() {
+        clear_empty_array_trailing(arr);
+    }
 }
 
 /// Save the first element's leading prefix (whitespace after `[`).
@@ -951,7 +949,6 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
             // Validate all values up front.
             let converted: Vec<ValueRs> =
                 items.into_iter().map(into_value).collect::<PyResult<_>>()?;
-            let was_empty = arr.is_empty();
             with_preserved_seam(arr, |arr, ic| {
                 let separator = capture_separator(arr);
                 for mut v in converted {
@@ -962,9 +959,6 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
                     arr.push(v);
                 }
             });
-            if was_empty && !arr.is_empty() {
-                clear_empty_array_trailing(arr);
-            }
             Ok(())
         }
         ArrayLikeMut::Aot(aot) => {

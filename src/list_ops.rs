@@ -207,15 +207,30 @@ fn capture_separator(arr: &toml_edit::Array) -> Option<(String, String)> {
     (!arr.is_empty()).then(|| element_separator(arr))
 }
 
-/// Collapse the residual interior whitespace of an array that has just gained
-/// its first element.  An empty array stores the gap between its brackets in
-/// its trailing string (e.g. `"  "` for `[  ]`); once a value precedes `]` that
-/// becomes stray padding, so drop it for a single-line array or keep just the
-/// structural line break for a multiline one.  A trailing comment is preserved.
+/// Collapse the residual interior whitespace a container stores between its
+/// brackets/braces (e.g. `"  "` for `[  ]` or `{  }`) once it has gained its
+/// first element: that gap is now stray padding before the closing delimiter,
+/// so drop it on a single line or keep just the structural break when
+/// multiline.  Returns `None` (leave as-is) unless the trailing is purely
+/// whitespace, so a trailing comment is always preserved.
+fn collapsed_empty_trailing(trailing: &str) -> Option<String> {
+    (!trailing.is_empty() && trailing.trim().is_empty())
+        .then(|| indent_only(trailing).unwrap_or_default())
+}
+
+/// Apply [`collapsed_empty_trailing`] to an array that has just gained its
+/// first element.
 fn clear_empty_array_trailing(arr: &mut toml_edit::Array) {
-    let trailing = arr.trailing().as_str().unwrap_or_default();
-    if !trailing.is_empty() && trailing.trim().is_empty() {
-        arr.set_trailing(indent_only(trailing).unwrap_or_default());
+    if let Some(trailing) = collapsed_empty_trailing(arr.trailing().as_str().unwrap_or_default()) {
+        arr.set_trailing(trailing);
+    }
+}
+
+/// Apply [`collapsed_empty_trailing`] to an inline table that has just gained
+/// its first key.
+pub(crate) fn clear_empty_inline_table_trailing(it: &mut toml_edit::InlineTable) {
+    if let Some(trailing) = collapsed_empty_trailing(it.trailing().as_str().unwrap_or_default()) {
+        it.set_trailing(trailing);
     }
 }
 

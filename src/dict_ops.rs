@@ -261,6 +261,10 @@ pub(crate) fn set_with_decor_preservation(item: &mut ItemRs, key: &str, value: I
                     && let Some(last) = it.get_mut(&last_key)
                 {
                     last.decor_mut().set_suffix("");
+                } else {
+                    // The table was empty: drop the residual inter-brace gap
+                    // (e.g. the `  ` of `{  }`) now sitting after the new value.
+                    crate::list_ops::clear_empty_inline_table_trailing(it);
                 }
                 it.restore_inline_comments(&ic);
                 comments::align_inserted_inline_key(it, key);

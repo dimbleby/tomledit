@@ -118,7 +118,7 @@ invalidation).
 | `views.rs`                                            | `KeysView`, `ValuesView`, `ItemsView`                                                       |
 | `trie.rs`                                             | `MutationTrie` + revision counter for path-precise staleness                                |
 | `py_pairs.rs`                                         | Helper for extracting length-2 iterable pairs                                               |
-| `datetime_compat.rs`                                  | Datetime field accessors compatible with both the full CPython API and abi3                 |
+| `datetime_compat.rs`                                  | Datetime field accessors for the limited API, via Python attribute access  |
 
 ## Key Conventions
 
@@ -137,10 +137,14 @@ values, `PyRuntimeError` for stale proxies.
 
 **Linting:** Ruff `select = ["ALL"]`, `strict = true` mypy, `cargo clippy`.
 
-**Build features:** an `abi3` Cargo feature builds against PyO3's stable ABI
-(`abi3-py310`).
-Code that needs CPython-only datetime accessors must go through
-`datetime_compat`, which provides abi3-safe shims.
+**Build / ABI:** the `pyo3` dependency always enables both `abi3-py310` and
+`abi3t-py315`, so the crate always builds against the stable/limited ABI. The
+wheel maturin produces is chosen by the interpreter it builds against: GIL
+CPython 3.10-3.14 → one `abi3` wheel; CPython 3.15+ (GIL or free-threaded) →
+one `abi3.abi3t` wheel (PEP 803). Free-threaded 3.14t is unsupported (abi3t
+hard-errors on a free-threaded interpreter below 3.15).
+Because every build uses the limited API, the CPython-only datetime accessor
+traits are unavailable; `datetime_compat` supplies attribute-access equivalents.
 
 **Tests** are in `tests/`, split by concern.
 Shared fixtures in `conftest.py`.

@@ -97,12 +97,17 @@ jobs:
           - os: windows-latest
             target: aarch64-pc-windows-msvc
         build:
-          # abi3: one wheel per platform, compatible with CPython 3.10+
+          # The pyo3 dependency enables both abi3-py310 and abi3t-py315, so the
+          # wheel each leg produces is selected by the interpreter it builds
+          # against. Together these cover GIL CPython 3.10+ and all of 3.15+
+          # (including free-threaded).
+          #
+          # GIL CPython 3.10-3.14: one abi3 wheel per platform.
           - name: abi3
-            args: --features abi3
-          # free-threaded: per-version wheels (abi3 is incompatible)
-          - name: free-threaded
-            args: --interpreter 3.14t
+            args: --interpreter 3.14
+          # CPython 3.15+ (GIL and free-threaded): one abi3.abi3t wheel (PEP 803).
+          - name: abi3t
+            args: --interpreter 3.15t
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -165,6 +170,12 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      # The abi3.abi3t wheels are built against a pre-release CPython 3.15, so we
+      # build them (to keep them tested) but do not publish them yet. To start
+      # publishing them once CPython 3.15 is released, delete this step.
+      - name: Exclude pre-release 3.15 (abi3t) wheels from publication
+        run: rm -fv dist/*abi3.abi3t*.whl
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0

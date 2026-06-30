@@ -5,6 +5,7 @@
 //! builds against.  This module provides drop-in replacements that read the
 //! fields through Python attribute access.
 
+use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::{PyDate, PyDateTime, PyDelta, PyTime};
 
@@ -18,17 +19,17 @@ macro_rules! impl_date_access {
     ($ty:ty) => {
         impl PyDateAccess for Bound<'_, $ty> {
             fn get_year(&self) -> i32 {
-                self.getattr("year")
+                self.getattr(intern!(self.py(), "year"))
                     .and_then(|v| v.extract())
                     .expect("date.year")
             }
             fn get_month(&self) -> u8 {
-                self.getattr("month")
+                self.getattr(intern!(self.py(), "month"))
                     .and_then(|v| v.extract())
                     .expect("date.month")
             }
             fn get_day(&self) -> u8 {
-                self.getattr("day")
+                self.getattr(intern!(self.py(), "day"))
                     .and_then(|v| v.extract())
                     .expect("date.day")
             }
@@ -50,22 +51,22 @@ macro_rules! impl_time_access {
     ($ty:ty) => {
         impl PyTimeAccess for Bound<'_, $ty> {
             fn get_hour(&self) -> u8 {
-                self.getattr("hour")
+                self.getattr(intern!(self.py(), "hour"))
                     .and_then(|v| v.extract())
                     .expect("time.hour")
             }
             fn get_minute(&self) -> u8 {
-                self.getattr("minute")
+                self.getattr(intern!(self.py(), "minute"))
                     .and_then(|v| v.extract())
                     .expect("time.minute")
             }
             fn get_second(&self) -> u8 {
-                self.getattr("second")
+                self.getattr(intern!(self.py(), "second"))
                     .and_then(|v| v.extract())
                     .expect("time.second")
             }
             fn get_microsecond(&self) -> u32 {
-                self.getattr("microsecond")
+                self.getattr(intern!(self.py(), "microsecond"))
                     .and_then(|v| v.extract())
                     .expect("time.microsecond")
             }
@@ -83,12 +84,12 @@ pub trait PyDeltaAccess {
 
 impl PyDeltaAccess for Bound<'_, PyDelta> {
     fn get_days(&self) -> i32 {
-        self.getattr("days")
+        self.getattr(intern!(self.py(), "days"))
             .and_then(|v| v.extract())
             .expect("timedelta.days")
     }
     fn get_seconds(&self) -> i32 {
-        self.getattr("seconds")
+        self.getattr(intern!(self.py(), "seconds"))
             .and_then(|v| v.extract())
             .expect("timedelta.seconds")
     }

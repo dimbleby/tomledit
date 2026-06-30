@@ -222,9 +222,7 @@ pub(crate) fn datetime_to_py(dt: &toml_edit::Datetime, py: Python<'_>) -> PyResu
             toml_edit::Offset::Custom { minutes } => i32::from(*minutes),
         };
         let td = PyDelta::new(py, 0, minutes * 60, 0, true)?;
-        let datetime_mod = py.import("datetime")?;
-        let tz = datetime_mod.getattr("timezone")?.call1((&td,))?;
-        Ok(tz.cast::<PyTzInfo>()?.to_owned())
+        PyTzInfo::fixed_offset(py, td)
     };
 
     match (&dt.date, &dt.time) {

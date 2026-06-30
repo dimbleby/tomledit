@@ -9,7 +9,8 @@ use std::collections::HashSet;
 
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyIterator, PyList, PySet, PyTuple};
+use pyo3::sync::PyOnceLock;
+use pyo3::types::{PyIterator, PyList, PySet, PyTuple, PyType};
 
 use crate::dict_ops;
 use crate::document::Document;
@@ -496,8 +497,9 @@ impl ItemsView {
     fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         // ItemsView uses set semantics: only equal to Set-like objects
         // (sets, frozensets, other views registered as Set ABCs).
-        let set_abc = py.import("collections.abc")?.getattr("Set")?;
-        if !other.is_instance(&set_abc)? {
+        static SET_ABC: PyOnceLock<Py<PyType>> = PyOnceLock::new();
+        let set_abc = SET_ABC.import(py, "collections.abc", "Set")?;
+        if !other.is_instance(set_abc.as_any())? {
             return Ok(false);
         }
 

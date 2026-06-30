@@ -1,6 +1,7 @@
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyString, PyTuple};
+use pyo3::sync::PyOnceLock;
+use pyo3::types::{PyDict, PyString, PyTuple, PyType};
 use toml_edit::{Item as ItemRs, TableLike, Value as ValueRs};
 
 use crate::comments;
@@ -515,10 +516,10 @@ pub(crate) fn is_mapping_like(other: &Bound<'_, PyAny>) -> bool {
 }
 
 fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> bool {
-    let py = obj.py();
-    py.import("collections.abc")
-        .and_then(|m| m.getattr("Mapping"))
-        .and_then(|cls| obj.is_instance(&cls))
+    static MAPPING: PyOnceLock<Py<PyType>> = PyOnceLock::new();
+    MAPPING
+        .import(obj.py(), "collections.abc", "Mapping")
+        .and_then(|cls| obj.is_instance(cls.as_any()))
         .unwrap_or(false)
 }
 

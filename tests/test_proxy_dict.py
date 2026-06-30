@@ -14,7 +14,7 @@ from types import MappingProxyType
 import pytest
 
 import tomledit
-from tests.conftest import ItemsMapping, toml_literal
+from tests.conftest import ItemsMapping, RaisingClassAttr, toml_literal
 from tomledit import Document
 
 # ---------------------------------------------------------------------------
@@ -1759,6 +1759,33 @@ class TestMergeOperators:
         doc = Document.parse("[t]\na = 1\n")
         with pytest.raises(TypeError, match="unsupported operand"):
             42 | doc["t"]
+
+    # -- Errors from the mapping-type check propagate (not swallowed) --
+
+    def test_document_or_propagates_type_check_error(self) -> None:
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(ValueError, match="boom from __class__"):
+            doc | RaisingClassAttr()  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+
+    def test_document_ror_propagates_type_check_error(self) -> None:
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(ValueError, match="boom from __class__"):
+            RaisingClassAttr() | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+
+    def test_dict_item_or_propagates_type_check_error(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(ValueError, match="boom from __class__"):
+            doc["t"] | RaisingClassAttr()
+
+    def test_dict_item_ror_propagates_type_check_error(self) -> None:
+        doc = Document.parse("[t]\na = 1\n")
+        with pytest.raises(ValueError, match="boom from __class__"):
+            RaisingClassAttr() | doc["t"]
+
+    def test_update_propagates_type_check_error(self) -> None:
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(ValueError, match="boom from __class__"):
+            doc.update(RaisingClassAttr())  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
 
     # -- |= replaces existing keys --
 

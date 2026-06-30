@@ -282,7 +282,7 @@ impl Document {
     }
 
     pub fn __or__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        if !dict_ops::is_mapping_like(other) {
+        if !dict_ops::is_mapping_like(other)? {
             return Ok(py.NotImplemented());
         }
         let mut new_inner = self.inner.read_py_attached(py).clone();
@@ -292,7 +292,7 @@ impl Document {
     }
 
     pub fn __ror__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        if !dict_ops::is_mapping_like(other) {
+        if !dict_ops::is_mapping_like(other)? {
             return Ok(py.NotImplemented());
         }
         let dict = dict_ops::copy_mapping_to_pydict(other, py)?;

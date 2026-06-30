@@ -216,7 +216,7 @@ impl DictProxy {
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        if !dict_ops::is_mapping_like(other) {
+        if !dict_ops::is_mapping_like(other)? {
             return Ok(py.NotImplemented());
         }
         let base = slf.as_super().get();
@@ -236,7 +236,7 @@ impl DictProxy {
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        if !dict_ops::is_mapping_like(other) {
+        if !dict_ops::is_mapping_like(other)? {
             return Ok(py.NotImplemented());
         }
         let dict = dict_ops::copy_mapping_to_pydict(other, py)?;

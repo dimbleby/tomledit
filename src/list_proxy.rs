@@ -249,7 +249,7 @@ impl ListProxy {
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        if !list_ops::is_list_like(other, py) {
+        if !list_ops::is_list_like(other, py)? {
             return Ok(py.NotImplemented());
         }
         let mut new_doc = DocumentRs::new();
@@ -265,7 +265,7 @@ impl ListProxy {
         py: Python<'_>,
         other: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        if !list_ops::is_list_like(other, py) {
+        if !list_ops::is_list_like(other, py)? {
             return Ok(py.NotImplemented());
         }
         // Resolve `other` before taking self's read lock, so any Python

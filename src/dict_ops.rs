@@ -377,7 +377,7 @@ pub(crate) fn extract_update_pairs(other: &Bound<'_, PyAny>) -> PyResult<Vec<(St
     }
 
     // Mapping .items() or bare iterable of pairs — same extraction logic.
-    let iter = if is_mapping_like(other) {
+    let iter = if is_mapping_like(other)? {
         other.call_method0("items")?.try_iter()?
     } else {
         other.try_iter()?
@@ -508,19 +508,17 @@ pub(crate) fn merge_other_into(
 
 /// Returns `true` if `other` is a `Mapping` (the `collections.abc` ABC),
 /// or a TOML-aware mapping type (`Document` or `DictItem`).
-pub(crate) fn is_mapping_like(other: &Bound<'_, PyAny>) -> bool {
-    other.is_instance_of::<crate::dict_proxy::DictProxy>()
+pub(crate) fn is_mapping_like(other: &Bound<'_, PyAny>) -> PyResult<bool> {
+    Ok(other.is_instance_of::<crate::dict_proxy::DictProxy>()
         || other.is_instance_of::<Document>()
         || other.is_instance_of::<PyDict>()
-        || is_abc_mapping(other)
+        || is_abc_mapping(other)?)
 }
 
-fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> bool {
+fn is_abc_mapping(obj: &Bound<'_, PyAny>) -> PyResult<bool> {
     static MAPPING: PyOnceLock<Py<PyType>> = PyOnceLock::new();
-    MAPPING
-        .import(obj.py(), "collections.abc", "Mapping")
-        .and_then(|cls| obj.is_instance(cls.as_any()))
-        .unwrap_or(false)
+    let cls = MAPPING.import(obj.py(), "collections.abc", "Mapping")?;
+    obj.is_instance(cls.as_any())
 }
 
 /// Copy entries from a Python mapping into a new `PyDict`, preserving the

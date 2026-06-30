@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import toml_literal
+from tests.conftest import RaisingClassAttr, toml_literal
 from tomledit import Document, ListItem
 
 # ---------------------------------------------------------------------------
@@ -836,6 +836,16 @@ class TestAdd:
         doc = Document({"a": [1, 2]})
         with pytest.raises(TypeError):
             _ = 42 + doc["a"]
+
+    def test_add_propagates_type_check_error(self) -> None:
+        doc = Document({"a": [1, 2]})
+        with pytest.raises(ValueError, match="boom from __class__"):
+            _ = doc["a"] + RaisingClassAttr()
+
+    def test_radd_propagates_type_check_error(self) -> None:
+        doc = Document({"a": [1, 2]})
+        with pytest.raises(ValueError, match="boom from __class__"):
+            _ = RaisingClassAttr() + doc["a"]
 
     def test_add_preserves_formatting(self) -> None:
         doc = Document.parse(

@@ -6,6 +6,7 @@ import textwrap
 from collections.abc import Mapping
 
 import pytest
+from typing_extensions import override
 
 from tomledit import Document
 
@@ -77,6 +78,23 @@ class ItemsMapping:
 
 
 Mapping.register(ItemsMapping)  # ty: ignore[unresolved-attribute]
+
+
+class RaisingClassAttr:
+    """Object whose ``__class__`` access raises.
+
+    ``isinstance`` consults ``__class__`` (real proxy/mock objects override it),
+    so an ``isinstance`` probe against this object raises rather than returning a
+    boolean. Operators that type-check an argument this way must propagate the
+    error instead of swallowing it into ``NotImplemented`` / a wrong branch.
+    """
+
+    error_message = "boom from __class__"
+
+    @property  # type: ignore[misc]
+    @override
+    def __class__(self) -> type:
+        raise ValueError(self.error_message)
 
 
 @pytest.fixture

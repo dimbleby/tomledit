@@ -2,6 +2,7 @@
 
 use crate::item::Item;
 use pyo3::exceptions::PyTypeError;
+use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::{
     PyBool, PyDate, PyDateTime, PyDelta, PyFloat, PyInt, PyList, PyMapping, PySequence, PyString,
@@ -46,7 +47,7 @@ impl<'py> FromPyObject<'_, 'py> for Datetime {
         // TOML only supports minute-precision UTC offsets; any sub-minute
         // component of the Python tzinfo is truncated by integer division.
         let offset = py_datetime
-            .call_method0("utcoffset")?
+            .call_method0(intern!(py_datetime.py(), "utcoffset"))?
             .extract::<Option<Bound<'py, PyDelta>>>()?
             .map(|delta| {
                 let days = delta.get_days();
@@ -95,7 +96,7 @@ impl<'py> FromPyObject<'_, 'py> for Time {
         let py_time = obj.cast::<PyTime>()?;
         let microsecond = py_time.get_microsecond();
         if py_time
-            .call_method0("utcoffset")?
+            .call_method0(intern!(py_time.py(), "utcoffset"))?
             .extract::<Option<Bound<'py, PyDelta>>>()?
             .is_some()
         {

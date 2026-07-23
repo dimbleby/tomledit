@@ -485,7 +485,7 @@ mutations = st.one_of(
 # ---------------------------------------------------------------------------
 
 
-CommentTree = dict[str, "str | None | CommentTree"]
+CommentTree = dict[str, "str | CommentTree | None"]
 
 
 def _children(item: Document | Item) -> list[tuple[str, Item]]:

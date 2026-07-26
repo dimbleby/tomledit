@@ -2,6 +2,7 @@
 name = "tomledit"
 description = "Format-preserving TOML parser"
 readme = "README.md"
+requires-python = ">=3.10"
 authors = [
   { name = "David Hotham" },
 ]
@@ -11,7 +12,6 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
 ]
-requires-python = ">=3.10"
 dependencies = []
 dynamic = [
   "license",
@@ -19,9 +19,9 @@ dynamic = [
 ]
 
 [project.urls]
-Repository = "https://github.com/dimbleby/tomledit"
-Issues = "https://github.com/dimbleby/tomledit/issues"
 Changelog = "https://github.com/dimbleby/tomledit/blob/main/CHANGELOG.md"
+Issues = "https://github.com/dimbleby/tomledit/issues"
+Repository = "https://github.com/dimbleby/tomledit"
 
 [dependency-groups]
 dev = [
@@ -51,6 +51,11 @@ enable_error_code = [
   "unused-awaitable",
 ]
 warn_unreachable = true
+
+[tool.pytest]
+addopts = ["-m", "not slow"]
+markers = ["slow: slow property-based tests (run with -m slow)"]
+strict = true
 
 [tool.ruff]
 extend-exclude = ["*.md"]
@@ -86,8 +91,3 @@ strict = true
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
-
-[tool.pytest]
-addopts = ["-m", "not slow"]
-markers = ["slow: slow property-based tests (run with -m slow)"]
-strict = true

@@ -427,6 +427,53 @@ class TestProxyListMethods:
             name = "c"
         """)
 
+    def test_insert_aot_beginning_preceded_by_content(self) -> None:
+        """Inserting at 0 of a compact (un-spaced) AoT that is *not* the
+        first item in the document must not introduce a blank line before
+        the new front entry, matching the array's un-spaced convention."""
+        doc = Document.parse(
+            toml_literal("""
+            y = 1
+            [[a]]
+            x = 1
+            [[a]]
+            x = 2
+        """)
+        )
+        doc["a"].insert(0, {"x": 0})
+        assert doc.as_toml() == toml_literal("""
+            y = 1
+            [[a]]
+            x = 0
+            [[a]]
+            x = 1
+            [[a]]
+            x = 2
+        """)
+
+    def test_insert_aot_beginning_preceded_by_content_nested(self) -> None:
+        """Same as above but for a nested, unindented AoT preceded by a
+        sibling table."""
+        doc = Document.parse(
+            toml_literal("""
+            [tbl]
+            [[tbl.a]]
+            x = 1
+            [[tbl.a]]
+            x = 2
+        """)
+        )
+        doc["tbl"]["a"].insert(0, {"x": 0})
+        assert doc.as_toml() == toml_literal("""
+            [tbl]
+            [[tbl.a]]
+            x = 0
+            [[tbl.a]]
+            x = 1
+            [[tbl.a]]
+            x = 2
+        """)
+
     def test_insert_aot_middle(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -1691,6 +1738,30 @@ class TestSliceIndexing:
 
             [[items]]
             name = "c"
+        """)
+
+    def test_aot_setitem_slice_insert_at_front_preceded_by_content(self) -> None:
+        """Inserting via a zero-width front slice on a compact AoT that is
+        *not* the first item in the document must not introduce a blank
+        line before the new front entry."""
+        doc = Document.parse(
+            toml_literal("""
+            y = 1
+            [[a]]
+            x = 1
+            [[a]]
+            x = 2
+        """)
+        )
+        doc["a"][0:0] = [{"x": 0}]
+        assert doc.as_toml() == toml_literal("""
+            y = 1
+            [[a]]
+            x = 0
+            [[a]]
+            x = 1
+            [[a]]
+            x = 2
         """)
 
     # ---- additional edge cases ----

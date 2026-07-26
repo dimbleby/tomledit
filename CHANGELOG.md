@@ -6,6 +6,9 @@
   insert, extend or `+=` no longer leaves stray padding before `]`.
 - Adding the first key to a whitespace-only-empty inline table (e.g. `{  }`)
   no longer leaves stray padding before `}`.
+- Inserting a new first element into an array of tables no longer inserts a
+  spurious blank line before it when the array's existing entries are
+  un-spaced.
 
 ## 1.2.1 (23 June 2026)
 

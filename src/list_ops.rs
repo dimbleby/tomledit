@@ -480,16 +480,19 @@ fn fix_inserted_aot_decor(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
         set_body_indent(entry, &body_indent);
     }
 
-    // Insert-at-front: also fix the new entry at position 0.  When the
-    // survivor was indented (so `header_indent` is non-empty), we are in
-    // a nested-AoT context — the new front entry needs both a leading
-    // `\n` and the header indent.  Otherwise (top-level AoT) it stays at
-    // column 0 with just body indent.
+    // Insert-at-front: also fix the new entry at position 0, which has no
+    // decor yet.  `toml_edit`'s default rendering of an unset prefix is
+    // already correct for a flat (non-nested), spaced array — no
+    // separator when the array is genuinely the first thing in the
+    // document, a blank line otherwise — so we leave it alone in that
+    // case.  Otherwise we must set the prefix explicitly: nested arrays
+    // need the header indent applied (which the default never does), and
+    // an unspaced array needs `toml_edit`'s default blank line suppressed.
     if pos == 0
         && let Some(entry) = aot.get_mut(0)
     {
-        if !header_indent.is_empty() {
-            set_spacing(entry, true);
+        if !header_indent.is_empty() || !spaced {
+            set_spacing(entry, spaced);
             set_header_indent(entry, &header_indent);
         }
         set_body_indent(entry, &body_indent);
@@ -740,11 +743,13 @@ fn aot_setitem_slice(
         for (offset, table) in tables.into_iter().enumerate() {
             aot.insert(start_idx + offset, table);
         }
-        // fix_inserted_aot_decor(aot, 0) targets index 1.  When that is
-        // an old survivor (tables_count <= 1) rather than a newly inserted
-        // entry, skip — its prefix is already correct, and the spacing
-        // detector can't infer the style from index 0 alone.
-        let spacing_start = if start_idx == 0 && tables_count <= 1 {
+        // fix_inserted_aot_decor(aot, 0) targets index 1 (a pushed-down
+        // survivor).  Skip that call only when the front table's own prefix
+        // was already carried over from an old first entry (`saved`, i.e. a
+        // same-position replace of exactly one entry) — a genuine
+        // insert-at-front still leaves both the new entry and the survivor
+        // needing the usual pos == 0 handling.
+        let spacing_start = if removes_first && tables_count <= 1 {
             1
         } else {
             start_idx

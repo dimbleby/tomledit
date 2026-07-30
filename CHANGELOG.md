@@ -9,6 +9,8 @@
 - Inserting a new first element into an array of tables no longer inserts a
   spurious blank line before it when the array's existing entries are
   un-spaced.
+- Fix a proxy item (e.g. from another document) nested inside a plain list
+  failing to convert wherever that list is accepted as a value.
 
 ## 1.2.1 (23 June 2026)
 

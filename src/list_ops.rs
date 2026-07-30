@@ -10,7 +10,7 @@ use crate::comments::{value_prefix, value_suffix};
 use crate::equality;
 use crate::item::Item;
 use crate::item_ops;
-use crate::item_ops::{Affected, into_value};
+use crate::item_ops::{Affected, into_table, into_value};
 
 // ---------------------------------------------------------------------------
 // Array-like enum — constrains list operations to valid item types
@@ -499,24 +499,6 @@ fn fix_inserted_aot_decor(aot: &mut toml_edit::ArrayOfTables, pos: usize) {
     }
 }
 
-fn require_table(item: Item) -> PyResult<toml_edit::Table> {
-    let mut table = match item.0 {
-        ItemRs::Table(t) => t,
-        ItemRs::Value(ValueRs::InlineTable(it)) => it.into_table(),
-        other => {
-            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "cannot append {} to array of tables (expected a table/dict)",
-                other.type_name()
-            )));
-        }
-    };
-    // Clear any source position — when a table is cloned from another
-    // document, its span would otherwise cause toml_edit to interleave the
-    // rendering of AoT entries in span order rather than push order.
-    table.set_position(None);
-    Ok(table)
-}
-
 /// Clamp a signed index to `0..len` (negative counts from end, out-of-range clamps).
 fn clamp_index(index: i64, len: usize) -> usize {
     let resolved = if index < 0 {
@@ -720,7 +702,7 @@ fn aot_setitem_slice(
     // in a partially-mutated state.
     let mut tables: Vec<toml_edit::Table> = values
         .into_iter()
-        .map(require_table)
+        .map(into_table)
         .collect::<PyResult<_>>()?;
 
     if step == 1 {
@@ -904,7 +886,7 @@ pub(crate) fn item_insert(
         ArrayLikeMut::Aot(aot) => {
             let resolved = clamp_index(index, aot.len());
             let at_end = resolved == aot.len();
-            let table = require_table(value)?;
+            let table = into_table(value)?;
             aot.insert(resolved, table);
             fix_inserted_aot_decor(aot, resolved);
             Ok((!at_end).then_some(Affected::Range {
@@ -966,10 +948,8 @@ pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResul
         }
         ArrayLikeMut::Aot(aot) => {
             // Validate all values up front.
-            let tables: Vec<toml_edit::Table> = items
-                .into_iter()
-                .map(require_table)
-                .collect::<PyResult<_>>()?;
+            let tables: Vec<toml_edit::Table> =
+                items.into_iter().map(into_table).collect::<PyResult<_>>()?;
             for table in tables {
                 aot.push(table);
                 fix_inserted_aot_decor(aot, aot.len() - 1);
@@ -1211,7 +1191,7 @@ pub(crate) fn item_setitem_int(
         }
         ArrayLikeMut::Aot(aot) => {
             let idx = resolve_index(idx_raw, aot.len())?;
-            let mut table = require_table(value)?;
+            let mut table = into_table(value)?;
             let saved = save_aot_entry_prefix(aot, idx);
             table.decor_mut().set_prefix(&saved);
             aot.replace(idx, table);

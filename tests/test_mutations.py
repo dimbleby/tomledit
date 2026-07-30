@@ -167,6 +167,30 @@ class TestSetNewKeys:
         assert doc["mix"][2] == "three"
         assert doc.as_toml() == 'mix = [1, { a = 2 }, "three"]\n'
 
+    def test_add_list_with_scalar_proxy_element(self) -> None:
+        """A ScalarItem proxy nested inside a plain list literal converts."""
+        source = Document.parse("x = 1\n")
+        doc = Document()
+        doc["mix"] = [source["x"], 2]
+        assert doc["mix"][0] == 1
+        assert doc["mix"][1] == 2
+
+    def test_add_list_with_list_proxy_element(self) -> None:
+        """A ListItem proxy nested inside a plain list literal converts."""
+        source = Document.parse("y = [1, 2, 3]\n")
+        doc = Document()
+        doc["mix"] = [source["y"], 4]
+        assert doc["mix"][0] == [1, 2, 3]
+        assert doc["mix"][1] == 4
+
+    def test_add_list_with_dict_proxy_element(self) -> None:
+        """A DictItem proxy nested inside a plain list literal converts."""
+        source = Document.parse("z = { a = 1 }\n")
+        doc = Document()
+        doc["mix"] = [source["z"], 4]
+        assert doc["mix"][0]["a"] == 1
+        assert doc["mix"][1] == 4
+
     def test_add_datetime(self) -> None:
         doc = Document()
         chicago = zoneinfo.ZoneInfo("America/Chicago")

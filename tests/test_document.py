@@ -70,6 +70,12 @@ class TestDocumentConstructor:
         doc = Document({base["key"]: 1})  # type: ignore[dict-item]  # ty: ignore[invalid-argument-type]
         assert doc == {"a": 1}
 
+    def test_from_mapping_with_list_containing_proxy_element(self) -> None:
+        """A proxy element nested inside a list value converts, not just alone."""
+        base = Document.parse('x = "a"\n')
+        doc = Document({"list": [base["x"]]})
+        assert doc == {"list": ["a"]}
+
     def test_none_is_empty(self) -> None:
         doc = Document(None)
         assert len(doc) == 0

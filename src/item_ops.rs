@@ -162,6 +162,26 @@ pub(crate) fn into_value(item: Item) -> PyResult<ValueRs> {
     })
 }
 
+/// Convert an `Item` wrapper to a `toml_edit::Table` (accepting a
+/// table or an inline table), or raise `TypeError`. Clears any source
+/// span, since a table cloned from another document would otherwise carry a
+/// span that causes `toml_edit` to interleave rendering of array-of-tables
+/// entries in span order rather than insertion order.
+pub(crate) fn into_table(item: Item) -> PyResult<toml_edit::Table> {
+    let mut table = match item.0 {
+        ItemRs::Table(t) => t,
+        ItemRs::Value(ValueRs::InlineTable(it)) => it.into_table(),
+        other => {
+            return Err(PyTypeError::new_err(format!(
+                "cannot append {} to array of tables (expected a table/dict)",
+                other.type_name()
+            )));
+        }
+    };
+    table.set_position(None);
+    Ok(table)
+}
+
 /// Convert a `toml_edit` table's entries to a Python dict.
 pub(crate) fn table_to_pydict<'a>(
     iter: impl Iterator<Item = (&'a str, &'a ItemRs)>,

@@ -12,11 +12,10 @@ use pyo3::types::{
 use crate::datetime_compat::{PyDateAccess, PyDeltaAccess, PyTimeAccess};
 use toml_edit::{
     Array as ArrayRs, ArrayOfTables as ArrayOfTablesRs, Date as DateRs, Datetime as DatetimeRs,
-    InlineTable as InlineTableRs, Offset as OffsetRs, Table as TableRs, Time as TimeRs,
-    Value as ValueRs,
+    Offset as OffsetRs, Table as TableRs, Time as TimeRs, Value as ValueRs,
 };
 
-use crate::item_ops;
+use crate::item_ops::{self, into_value};
 use crate::py_pairs::extract_pair;
 
 // ---------------------------------------------------------------------------
@@ -127,16 +126,19 @@ impl<'py> FromPyObject<'_, 'py> for Array {
         let py_sequence = obj.cast::<PySequence>()?;
         let len = py_sequence.len()?;
         let mut values: Vec<ValueRs> = Vec::with_capacity(len);
-        for py_value in py_sequence.try_iter()? {
-            let value: Value = py_value?.extract()?;
-            values.push(value.0);
+        for py_element in py_sequence.try_iter()? {
+            // Extract via `Item` (not `Value` directly) so that an `ItemProxy`
+            // element (e.g. a `ScalarItem`/`ListItem` pulled from another
+            // document) is unwrapped the same way it is everywhere else.
+            let item: Item = py_element?.extract()?;
+            values.push(into_value(item)?);
         }
         Ok(Self(ArrayRs::from_iter(values)))
     }
 }
 
 // ---------------------------------------------------------------------------
-// InlineTable / Table (shared helper)
+// Table (shared mapping-extraction helper)
 // ---------------------------------------------------------------------------
 
 fn extract_mapping_pairs<'py, V>(py_mapping: &Bound<'py, PyMapping>) -> PyResult<Vec<(String, V)>>
@@ -153,23 +155,6 @@ where
         pairs.push((key, value));
     }
     Ok(pairs)
-}
-
-pub(crate) struct InlineTable(pub(crate) InlineTableRs);
-
-impl<'py> FromPyObject<'_, 'py> for InlineTable {
-    type Error = PyErr;
-
-    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let py_mapping = obj.cast::<PyMapping>()?;
-        let pairs: Vec<(String, Value)> = extract_mapping_pairs(&py_mapping)?;
-        Ok(Self(
-            pairs
-                .into_iter()
-                .map(|(k, v)| (k, v.0))
-                .collect::<InlineTableRs>(),
-        ))
-    }
 }
 
 pub(crate) struct Table(pub(crate) TableRs);
@@ -201,9 +186,12 @@ impl<'py> FromPyObject<'_, 'py> for ArrayOfTables {
         let py_sequence = obj.cast::<PySequence>()?;
         let len = py_sequence.len()?;
         let mut tables: Vec<TableRs> = Vec::with_capacity(len);
-        for py_table in py_sequence.try_iter()? {
-            let table: Table = py_table?.extract()?;
-            tables.push(table.0);
+        for py_element in py_sequence.try_iter()? {
+            // Extract via `Item` (not `Table` directly) so that an `ItemProxy`
+            // element (e.g. a `DictItem` pulled from another document) is
+            // unwrapped the same way it is everywhere else.
+            let item: Item = py_element?.extract()?;
+            tables.push(item_ops::into_table(item)?);
         }
         Ok(Self(ArrayOfTablesRs::from_iter(tables)))
     }
@@ -262,11 +250,6 @@ impl<'py> FromPyObject<'_, 'py> for Value {
         if let Ok(py_float) = obj.cast::<PyFloat>() {
             let f: f64 = py_float.extract()?;
             return Ok(Self(ValueRs::from(f)));
-        }
-
-        if let Ok(py_mapping) = obj.cast::<PyMapping>() {
-            let inline_table: InlineTable = py_mapping.extract()?;
-            return Ok(Self(ValueRs::from(inline_table.0)));
         }
 
         // Only accept list as TOML arrays.  Tuples and other sequence types

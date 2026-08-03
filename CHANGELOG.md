@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.2.2 (3 August 2026)
+
 - Adding elements to a whitespace-only-empty array (e.g. `[  ]`) via append,
   insert, extend or `+=` no longer leaves stray padding before `]`.
 - Adding the first key to a whitespace-only-empty inline table (e.g. `{  }`)

@@ -1,9 +1,11 @@
-//! Datetime field accessors for the limited API (abi3 / abi3t).
+//! Datetime field accessors that work under the limited API (abi3 / abi3t).
 //!
 //! `PyO3`'s native [`PyDateAccess`], [`PyTimeAccess`], and [`PyDeltaAccess`]
-//! traits are unavailable under the stable/limited API that this crate always
-//! builds against.  This module provides drop-in replacements that read the
-//! fields through Python attribute access.
+//! traits are unavailable under the stable/limited API, which is what this
+//! crate builds against for every interpreter except free-threaded 3.14t.
+//! This module provides drop-in replacements that read the fields through
+//! Python attribute access, used unconditionally so there is a single code
+//! path.
 
 use pyo3::intern;
 use pyo3::prelude::*;

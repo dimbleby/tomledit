@@ -99,12 +99,16 @@ jobs:
         build:
           # The pyo3 dependency enables both abi3-py310 and abi3t-py315, so the
           # wheel each leg produces is selected by the interpreter it builds
-          # against. Together these cover GIL CPython 3.10+ and all of 3.15+
-          # (including free-threaded).
+          # against. Together these cover GIL CPython 3.10+ and all
+          # free-threaded builds from 3.14t up.
           #
           # GIL CPython 3.10-3.14: one abi3 wheel per platform.
           - name: abi3
             args: --interpreter 3.14
+          # Free-threaded CPython 3.14t: version-specific wheel, since abi3t
+          # starts at 3.15.
+          - name: free-threaded
+            args: --interpreter 3.14t
           # CPython 3.15+ (GIL and free-threaded): one abi3.abi3t wheel (PEP 803).
           - name: abi3t
             args: --interpreter 3.15t

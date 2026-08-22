@@ -77,7 +77,7 @@ class ItemsMapping:
         return iter(self._data)
 
 
-Mapping.register(ItemsMapping)  # ty: ignore[unresolved-attribute]
+Mapping.register(ItemsMapping)
 
 
 class RaisingClassAttr:

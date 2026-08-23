@@ -123,18 +123,33 @@ impl<'py> FromPyObject<'_, 'py> for Array {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let py_sequence = obj.cast::<PySequence>()?;
-        let len = py_sequence.len()?;
-        let mut values: Vec<ValueRs> = Vec::with_capacity(len);
-        for py_element in py_sequence.try_iter()? {
-            // Extract via `Item` (not `Value` directly) so that an `ItemProxy`
-            // element (e.g. a `ScalarItem`/`ListItem` pulled from another
-            // document) is unwrapped the same way it is everywhere else.
-            let item: Item = py_element?.extract()?;
-            values.push(into_value(item)?);
-        }
-        Ok(Self(ArrayRs::from_iter(values)))
+        Ok(Self(items_into_array(extract_sequence_items(obj)?)?))
     }
+}
+
+/// Extract the elements of a Python sequence.
+///
+/// Elements are extracted as `Item`s (not `Value`s) so that an `ItemProxy`
+/// element (e.g. a `ScalarItem`/`ListItem` pulled from another document) is
+/// unwrapped the same way it is everywhere else.  A list can become either an
+/// array or an array of tables, and the caller decides which by inspecting the
+/// items: extracting them here just once keeps that decision from costing a
+/// second traversal of the whole subtree.
+pub(crate) fn extract_sequence_items(obj: Borrowed<'_, '_, PyAny>) -> PyResult<Vec<Item>> {
+    let py_sequence = obj.cast::<PySequence>()?;
+    let mut items = Vec::with_capacity(py_sequence.len()?);
+    for py_element in py_sequence.try_iter()? {
+        items.push(py_element?.extract()?);
+    }
+    Ok(items)
+}
+
+pub(crate) fn items_into_array(items: Vec<Item>) -> PyResult<ArrayRs> {
+    items.into_iter().map(into_value).collect()
+}
+
+pub(crate) fn items_into_array_of_tables(items: Vec<Item>) -> PyResult<ArrayOfTablesRs> {
+    items.into_iter().map(item_ops::into_table).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -170,30 +185,6 @@ impl<'py> FromPyObject<'_, 'py> for Table {
             .map(|(k, v)| (k, v.0))
             .collect::<TableRs>();
         Ok(Self(table))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ArrayOfTables
-// ---------------------------------------------------------------------------
-
-pub(crate) struct ArrayOfTables(pub(crate) ArrayOfTablesRs);
-
-impl<'py> FromPyObject<'_, 'py> for ArrayOfTables {
-    type Error = PyErr;
-
-    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let py_sequence = obj.cast::<PySequence>()?;
-        let len = py_sequence.len()?;
-        let mut tables: Vec<TableRs> = Vec::with_capacity(len);
-        for py_element in py_sequence.try_iter()? {
-            // Extract via `Item` (not `Table` directly) so that an `ItemProxy`
-            // element (e.g. a `DictItem` pulled from another document) is
-            // unwrapped the same way it is everywhere else.
-            let item: Item = py_element?.extract()?;
-            tables.push(item_ops::into_table(item)?);
-        }
-        Ok(Self(ArrayOfTablesRs::from_iter(tables)))
     }
 }
 

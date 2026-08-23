@@ -162,6 +162,14 @@ pub(crate) fn into_value(item: Item) -> PyResult<ValueRs> {
     })
 }
 
+/// Whether `into_table` will accept this item.
+pub(crate) fn is_table(item: &Item) -> bool {
+    matches!(
+        item.0,
+        ItemRs::Table(_) | ItemRs::Value(ValueRs::InlineTable(_))
+    )
+}
+
 /// Convert an `Item` wrapper to a `toml_edit::Table` (accepting a
 /// table or an inline table), or raise `TypeError`. Clears any source
 /// span, since a table cloned from another document would otherwise carry a

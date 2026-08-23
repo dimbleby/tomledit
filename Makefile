@@ -19,9 +19,9 @@ rust-test:
 
 RUST_SOURCES := $(shell find src -name '*.rs')
 
-build: .build-stamp ## Build and install (no-op if up to date)
+build: .build-stamp ## Build and install, dev profile (no-op if up to date)
 .build-stamp: $(RUST_SOURCES) Cargo.toml Cargo.lock pyproject.toml uv.lock
-	uv sync --reinstall-package tomledit
+	MATURIN_PEP517_ARGS="--profile dev" uv sync --reinstall-package tomledit
 	@rm -f .coverage-stamp
 	@touch $@
 
@@ -46,7 +46,7 @@ ty:
 coverage-build: .coverage-stamp
 .coverage-stamp: $(RUST_SOURCES) Cargo.toml Cargo.lock pyproject.toml uv.lock
 	eval "$$(cargo llvm-cov show-env --sh)" && \
-		uv sync --reinstall-package tomledit
+		MATURIN_PEP517_ARGS="--profile coverage" uv sync --reinstall-package tomledit
 	@rm -f .build-stamp
 	@touch $@
 
@@ -54,7 +54,7 @@ coverage: coverage-build ## Instrumented build + coverage report
 	eval "$$(cargo llvm-cov show-env --sh)" && \
 		cargo llvm-cov clean --profraw-only && \
 		pytest -q && \
-		LLVM_COV_FLAGS="--show-branch-summary=false" cargo llvm-cov report --release
+		LLVM_COV_FLAGS="--show-branch-summary=false" cargo llvm-cov report --profile coverage
 
 clean: ## Remove build artifacts and caches
 	cargo clean

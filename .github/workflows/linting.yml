@@ -132,12 +132,16 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       - name: Build with coverage instrumentation and run tests
+        env:
+          MATURIN_PEP517_ARGS: --profile coverage
         run: |
           source <(cargo llvm-cov show-env --sh)
           cargo llvm-cov clean --workspace
           uv run --reinstall-package tomledit pytest -q
 
       - name: Generate coverage report
+        env:
+          LLVM_COV_FLAGS: --show-branch-summary=false
         run: |
           source <(cargo llvm-cov show-env --sh)
-          LLVM_COV_FLAGS="--show-branch-summary=false" cargo llvm-cov report --release
+          cargo llvm-cov report --profile coverage

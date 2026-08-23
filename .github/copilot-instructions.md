@@ -20,7 +20,7 @@ described below.
 ## Build, Test, and Lint
 
 ```sh
-make build          # Build and install the package (no-op if up to date)
+make build          # Build and install, dev profile (no-op if up to date)
 make test           # Rust unit tests + Python tests (builds first)
 make lint           # All linters: fmt, clippy, ruff, mypy, ty
 make coverage       # Instrumented build + llvm-cov report
@@ -158,7 +158,10 @@ Use `from __future__ import annotations` (enforced by ruff).
 
 - **Forgetting `--reinstall-package tomledit`.** After touching any `.rs` file,
   `uv run pytest` runs stale code.
-  Use `make build` or `uv sync --reinstall-package tomledit`.
+  Use `make build`, which builds the dev profile: much faster than the release
+  profile's fat LTO, and it keeps the plain and instrumented builds from being
+  mistaken for each other. Bare `uv sync --reinstall-package tomledit` builds
+  release, so don't mix the two — and don't benchmark a `make build` artifact.
 - **Using `str(doc)` for TOML output.** Use `doc.as_toml()`.
 - **Forgetting to bump.** Every mutation must record itself in the trie.
   `bump_self` for structural changes (insert/remove/clear), `bump_child` for

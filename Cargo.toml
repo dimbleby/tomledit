@@ -20,3 +20,6 @@ features = ["abi3-py310", "abi3t-py315", "parking_lot"]
 codegen-units = 1
 lto = "fat"
 strip = "symbols"
+
+[profile.coverage]
+inherits = "dev"

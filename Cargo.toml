@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 parking_lot = "0.12"
 toml_edit = "0.25.9"
 
-[dependencies.mimalloc]
+[target.'cfg(not(any(target_arch = "arm", target_arch = "powerpc64", target_arch = "s390x")))'.dependencies.mimalloc]
 version = "=0.1.52"
 optional = true
 features = ["v2"]

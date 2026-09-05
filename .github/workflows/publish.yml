@@ -35,6 +35,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           command: sdist
+          maturin-version: v1.15.0
           args: --out dist
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -52,50 +53,69 @@ jobs:
           # Linux x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            manylinux: auto
+            manylinux: "2_17"
+            pgo: true
           # Linux aarch64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            manylinux: auto
+            manylinux: "2_17"
+            pgo: true
           # Linux i686
           - os: ubuntu-latest
             target: i686-unknown-linux-gnu
-            manylinux: auto
+            manylinux: "2_17"
+            pgo: true
           # Linux armv7
           - os: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
-            manylinux: auto
+            manylinux: "2_17"
+            pgo: false
           # Linux s390x
           - os: ubuntu-latest
             target: s390x-unknown-linux-gnu
-            manylinux: auto
+            manylinux: "2_17"
+            pgo: false
           # Linux ppc64le
           - os: ubuntu-latest
             target: powerpc64le-unknown-linux-gnu
-            manylinux: auto
+            manylinux: "2_17"
+            pgo: false
           # musllinux x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            manylinux: musllinux_1_1
+            manylinux: musllinux_1_2
+            pgo: false
           # musllinux aarch64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            manylinux: musllinux_1_1
+            manylinux: musllinux_1_2
+            pgo: false
           # macOS x86_64
-          - os: macos-latest
+          - os: macos-15-intel
             target: x86_64-apple-darwin
+            python-architecture: x64
+            pgo: true
           # macOS aarch64 (Apple Silicon)
-          - os: macos-latest
+          - os: macos-15
             target: aarch64-apple-darwin
+            python-architecture: arm64
+            pgo: true
           # Windows x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            python-architecture: x64
+            pgo: true
           # Windows i686
           - os: windows-latest
             target: i686-pc-windows-msvc
+            python-architecture: x86
+            pgo: true
           # Windows aarch64
-          - os: windows-latest
+          - os: windows-11-arm
             target: aarch64-pc-windows-msvc
+            python-architecture: arm64
+            # Re-enable once rust-lang/rust#156675 is fixed.
+            pgo: false
         build:
           # The pyo3 dependency enables both abi3-py311 and abi3t-py315, so the
           # wheel each leg produces is selected by the interpreter it builds
@@ -104,30 +124,44 @@ jobs:
           #
           # GIL CPython 3.11-3.14: one abi3 wheel per platform.
           - name: abi3
-            args: --interpreter 3.14
+            python-version: "3.14"
           # Free-threaded CPython 3.14t: version-specific wheel, since abi3t
           # starts at 3.15.
           - name: free-threaded
-            args: --interpreter 3.14t
+            python-version: "3.14t"
           # CPython 3.15+ (GIL and free-threaded): one abi3.abi3t wheel (PEP 803).
           - name: abi3t
-            args: --interpreter 3.15t
+            python-version: "3.15t"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # Linux builds run inside target-specific containers, which provide
+      # their own interpreters.
+      - if: runner.os != 'Linux'
+        id: setup-python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
+          python-version: ${{ matrix.build.python-version }}
+          architecture: ${{ matrix.platform.python-architecture }}
+          allow-prereleases: true
 
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        env:
+          MATURIN_PGO: ${{ matrix.platform.pgo }}
         with:
+          maturin-version: v1.15.0
           target: ${{ matrix.platform.target }}
           manylinux: ${{ matrix.platform.manylinux || 'auto' }}
-          args: --release --out dist ${{ matrix.build.args }}
+          rustup-components: ${{ matrix.platform.pgo && 'llvm-tools-preview' || '' }}
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          args: >-
+            --release --locked --compatibility pypi --out dist
+            --interpreter
+            ${{ runner.os == 'Linux' && matrix.build.python-version || steps.setup-python.outputs.python-path }}
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

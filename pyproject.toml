@@ -32,11 +32,13 @@ dev = [
 ]
 
 [build-system]
-requires = ["maturin>=1.14.1,<2.0"]
+requires = ["maturin>=1.15.0,<2.0"]
 build-backend = "maturin"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+pgo-command = "python tools/pgo_workload.py"
+include = [{ path = "tools/pgo_workload.py", format = "sdist" }]
 
 [tool.mypy]
 files = "."

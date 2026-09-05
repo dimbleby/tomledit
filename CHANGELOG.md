@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Build native release wheels with profile-guided optimisation.
+
 ## 1.2.3 (5 September 2026)
 
 - Publish python 3.15 wheels

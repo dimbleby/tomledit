@@ -3,6 +3,20 @@
   "extends": [
     "config:recommended"
   ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/\\.github/workflows/.*\\.yml$/"
+      ],
+      "matchStrings": [
+        "maturin-version: (?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "maturin",
+      "packageNameTemplate": "PyO3/maturin",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
   "lockFileMaintenance": {
     "enabled": true
   }

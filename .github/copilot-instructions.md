@@ -147,6 +147,12 @@ for the 3.14t case, which earlier versions rejected when the interpreter was
 resolved from a config file rather than queried live.
 Because the datetime accessor traits are unavailable under the limited API,
 `datetime_compat` supplies attribute-access equivalents.
+Release wheels use maturin's PGO build on native glibc Linux and native macOS
+and Windows x86/x64 jobs. Cross-compiled Linux and musllinux targets use the
+ordinary release profile because their instrumented wheels cannot run during
+profile training. Windows ARM64 is also non-PGO because its Rust-generated
+instrumentation profiles cannot currently be merged by `llvm-profdata`; track
+rust-lang/rust#156675 before re-enabling it.
 
 **Tests** are in `tests/`, split by concern.
 Shared fixtures in `conftest.py`.

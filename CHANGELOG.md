@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.2.3 (5 September 2026)
+
+- Publish python 3.15 wheels
+
 ## 1.2.2 (3 August 2026)
 
 - Adding elements to a whitespace-only-empty array (e.g. `[  ]`) via append,

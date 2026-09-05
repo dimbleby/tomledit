@@ -16,7 +16,10 @@ mod trie;
 mod value;
 mod views;
 
-#[cfg(feature = "mimalloc")]
+#[cfg(all(
+    feature = "mimalloc",
+    not(any(target_arch = "arm", target_arch = "powerpc64", target_arch = "s390x"))
+))]
 #[global_allocator]
 static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

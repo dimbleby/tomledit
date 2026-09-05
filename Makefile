@@ -12,10 +12,10 @@ fmt:
 	cargo fmt --check
 
 clippy:
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --all-targets --all-features -- -D warnings
 
 rust-test:
-	LD_LIBRARY_PATH="$$(python3 -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" cargo test
+	LD_LIBRARY_PATH="$$(python3 -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" cargo test --all-features
 
 RUST_SOURCES := $(shell find src -name '*.rs')
 

@@ -12,9 +12,18 @@ crate-type = ["cdylib"]
 parking_lot = "0.12"
 toml_edit = "0.25.9"
 
+[dependencies.mimalloc]
+version = "=0.1.52"
+optional = true
+features = ["v2"]
+
 [dependencies.pyo3]
 version = "0.29.1"
 features = ["abi3-py311", "abi3t-py315", "parking_lot"]
+
+[features]
+default = []
+mimalloc = ["dep:mimalloc"]
 
 [profile.release]
 codegen-units = 1

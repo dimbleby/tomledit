@@ -137,10 +137,10 @@ values, `PyRuntimeError` for stale proxies.
 
 **Linting:** Ruff `select = ["ALL"]`, `strict = true` mypy, `cargo clippy`.
 
-**Build / ABI:** the `pyo3` dependency always enables both `abi3-py310` and
+**Build / ABI:** the `pyo3` dependency always enables both `abi3-py311` and
 `abi3t-py315`, so the crate builds against the stable/limited ABI wherever one
 applies. The wheel maturin produces is chosen by the interpreter it builds
-against: GIL CPython 3.10-3.14 → one `abi3` wheel; free-threaded 3.14t → a
+against: GIL CPython 3.11-3.14 → one `abi3` wheel; free-threaded 3.14t → a
 version-specific `cp314-cp314t` wheel (abi3t starts at 3.15); CPython 3.15+ (GIL
 or free-threaded) → one `abi3.abi3t` wheel (PEP 803). pyo3 >= 0.29.1 is required
 for the 3.14t case, which earlier versions rejected when the interpreter was

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Iterator, Mapping
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
@@ -45,12 +45,12 @@ class TestEquality:
 
     def test_datetime_proxy_eq(self) -> None:
         doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
-        expected = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+        expected = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
         assert doc["dt"] == expected
 
     def test_datetime_ne(self) -> None:
         doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
-        wrong = datetime(2000, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        wrong = datetime(2000, 1, 1, 0, 0, 0, tzinfo=UTC)
         assert doc["dt"] != wrong
 
     def test_array_equals_list(self) -> None:
@@ -473,7 +473,7 @@ class TestEqualityEdgeCases:
     def test_datetime_equality_same_instant_different_offset(self) -> None:
         """Aware datetimes that represent the same instant should compare equal."""
         doc = Document.parse("dt = 2024-01-15T10:30:00+01:00\n")
-        expected = datetime(2024, 1, 15, 9, 30, 0, tzinfo=timezone.utc)
+        expected = datetime(2024, 1, 15, 9, 30, 0, tzinfo=UTC)
         assert doc["dt"] == expected
 
     def test_proxy_date_only_ne_proxy_full_datetime(self) -> None:
@@ -548,12 +548,12 @@ class TestTimeZoneEquality:
 
     def test_local_time_not_equal_to_aware_time(self) -> None:
         doc = Document.parse("t = 12:30:15\n")
-        aware = time(12, 30, 15, tzinfo=timezone.utc)
+        aware = time(12, 30, 15, tzinfo=UTC)
         assert doc["t"] != aware
 
     def test_local_time_not_equal_to_aware_time_reverse(self) -> None:
         doc = Document.parse("t = 12:30:15\n")
-        aware = time(12, 30, 15, tzinfo=timezone.utc)
+        aware = time(12, 30, 15, tzinfo=UTC)
         assert aware != doc["t"]
 
     def test_local_time_equal_to_naive_time(self) -> None:

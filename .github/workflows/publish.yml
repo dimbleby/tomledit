@@ -97,12 +97,12 @@ jobs:
           - os: windows-latest
             target: aarch64-pc-windows-msvc
         build:
-          # The pyo3 dependency enables both abi3-py310 and abi3t-py315, so the
+          # The pyo3 dependency enables both abi3-py311 and abi3t-py315, so the
           # wheel each leg produces is selected by the interpreter it builds
-          # against. Together these cover GIL CPython 3.10+ and all
+          # against. Together these cover GIL CPython 3.11+ and all
           # free-threaded builds from 3.14t up.
           #
-          # GIL CPython 3.10-3.14: one abi3 wheel per platform.
+          # GIL CPython 3.11-3.14: one abi3 wheel per platform.
           - name: abi3
             args: --interpreter 3.14
           # Free-threaded CPython 3.14t: version-specific wheel, since abi3t

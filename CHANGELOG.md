@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.2.4 (5 September 2026)
 
 - Build native release wheels with profile-guided optimisation.
+- Use mimalloc on supported targets
+- Drop python 3.10 support
 
 ## 1.2.3 (5 September 2026)
 

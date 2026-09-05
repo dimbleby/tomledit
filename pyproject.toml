@@ -37,8 +37,8 @@ build-backend = "maturin"
 
 [tool.maturin]
 features = ["pyo3/extension-module", "mimalloc"]
-pgo-command = "python tools/pgo_workload.py"
 include = [{ path = "tools/pgo_workload.py", format = "sdist" }]
+pgo-command = "python tools/pgo_workload.py"
 
 [tool.mypy]
 files = "."

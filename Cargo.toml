@@ -1,34 +1,34 @@
 [package]
 name = "tomledit"
-license = "Apache-2.0 OR MIT"
-version = "1.2.3"
+version = "1.2.4"
 edition = "2024"
+license = "Apache-2.0 OR MIT"
 
 [lib]
-name = "tomledit"
 crate-type = ["cdylib"]
+name = "tomledit"
 
 [dependencies]
 parking_lot = "0.12"
 toml_edit = "0.25.9"
 
-[target.'cfg(not(any(target_arch = "arm", target_arch = "powerpc64", target_arch = "s390x")))'.dependencies.mimalloc]
-version = "=0.1.52"
-optional = true
-features = ["v2"]
-
 [dependencies.pyo3]
 version = "0.29.1"
 features = ["abi3-py311", "abi3t-py315", "parking_lot"]
+
+[target.'cfg(not(any(target_arch = "arm", target_arch = "powerpc64", target_arch = "s390x")))'.dependencies.mimalloc]
+version = "=0.1.52"
+features = ["v2"]
+optional = true
 
 [features]
 default = []
 mimalloc = ["dep:mimalloc"]
 
 [profile.release]
-codegen-units = 1
-lto = "fat"
 strip = "symbols"
+lto = "fat"
+codegen-units = 1
 
 [profile.coverage]
 inherits = "dev"

@@ -16,6 +16,10 @@ mod trie;
 mod value;
 mod views;
 
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use dict_proxy::DictProxy;
 use document::Document;
 use item_proxy::ItemProxy;

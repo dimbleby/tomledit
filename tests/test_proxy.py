@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import MutableMapping, MutableSequence
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 
 import pytest
 
@@ -462,7 +462,7 @@ y = 2
     def test_datetime(self) -> None:
         doc = Document.parse("dt = 2024-01-15T10:30:00Z\n")
         v = doc["dt"].value
-        assert v == datetime(2024, 1, 15, 10, 30, tzinfo=timezone.utc)
+        assert v == datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
         assert type(v) is datetime
 
     def test_date(self) -> None:

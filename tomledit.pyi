@@ -14,9 +14,9 @@ from collections.abc import (
 from collections.abc import (
     ValuesView as _ValuesView,
 )
-from typing import IO, Any, SupportsIndex, TypeVar, overload
+from typing import IO, Any, Self, SupportsIndex, TypeVar, overload
 
-from typing_extensions import Self, override
+from typing_extensions import override
 
 _T = TypeVar("_T")
 

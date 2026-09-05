@@ -168,12 +168,6 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # The abi3.abi3t wheels are built against a pre-release CPython 3.15, so we
-      # build them (to keep them tested) but do not publish them yet. To start
-      # publishing them once CPython 3.15 is released, delete this step.
-      - name: Exclude pre-release 3.15 (abi3t) wheels from publication
-        run: rm -fv dist/*abi3.abi3t*.whl
-
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:

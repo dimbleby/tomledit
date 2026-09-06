@@ -31,6 +31,10 @@ impl<'py> FromPyObject<'_, 'py> for Item {
             ));
         }
 
+        if let Some(value) = value::extract_exact_builtin(obj)? {
+            return Ok(Self(ItemRs::Value(value)));
+        }
+
         if obj.cast::<PyMapping>().is_ok() {
             let table = Table::extract(obj)?;
             return Ok(Self(ItemRs::Table(table.0)));

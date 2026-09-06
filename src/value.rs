@@ -5,8 +5,8 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::{
-    PyBool, PyDate, PyDateTime, PyDelta, PyFloat, PyInt, PyList, PyMapping, PySequence, PyString,
-    PyTime,
+    PyBool, PyDate, PyDateTime, PyDelta, PyDict, PyFloat, PyInt, PyList, PyMapping, PySequence,
+    PyString, PyTime,
 };
 
 use crate::datetime_compat::{PyDateAccess, PyDeltaAccess, PyTimeAccess};
@@ -113,20 +113,6 @@ impl<'py> FromPyObject<'_, 'py> for Time {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Array
-// ---------------------------------------------------------------------------
-
-pub(crate) struct Array(pub(crate) ArrayRs);
-
-impl<'py> FromPyObject<'_, 'py> for Array {
-    type Error = PyErr;
-
-    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        Ok(Self(items_into_array(extract_sequence_items(obj)?)?))
-    }
-}
-
 /// Extract the elements of a Python sequence.
 ///
 /// Elements are extracted as `Item`s (not `Value`s) so that an `ItemProxy`
@@ -136,6 +122,14 @@ impl<'py> FromPyObject<'_, 'py> for Array {
 /// items: extracting them here just once keeps that decision from costing a
 /// second traversal of the whole subtree.
 pub(crate) fn extract_sequence_items(obj: Borrowed<'_, '_, PyAny>) -> PyResult<Vec<Item>> {
+    if let Ok(py_list) = obj.cast_exact::<PyList>() {
+        let mut items = Vec::with_capacity(py_list.len());
+        for py_element in py_list.iter() {
+            items.push(py_element.extract()?);
+        }
+        return Ok(items);
+    }
+
     let py_sequence = obj.cast::<PySequence>()?;
     let mut items = Vec::with_capacity(py_sequence.len()?);
     for py_element in py_sequence.try_iter()? {
@@ -156,10 +150,21 @@ pub(crate) fn items_into_array_of_tables(items: Vec<Item>) -> PyResult<ArrayOfTa
 // Table (shared mapping-extraction helper)
 // ---------------------------------------------------------------------------
 
-fn extract_mapping_pairs<'py, V>(py_mapping: &Bound<'py, PyMapping>) -> PyResult<Vec<(String, V)>>
+fn extract_mapping_pairs<'py, V>(obj: Borrowed<'_, 'py, PyAny>) -> PyResult<Vec<(String, V)>>
 where
     for<'a> V: FromPyObject<'a, 'py, Error = PyErr>,
 {
+    if let Ok(py_dict) = obj.cast_exact::<PyDict>() {
+        let mut pairs = Vec::with_capacity(py_dict.len());
+        for (key, value) in py_dict.iter() {
+            let key = item_ops::extract_key_str(&key)?
+                .ok_or_else(|| PyTypeError::new_err("keys must be strings"))?;
+            pairs.push((key, value.extract()?));
+        }
+        return Ok(pairs);
+    }
+
+    let py_mapping = obj.cast::<PyMapping>()?;
     let len = py_mapping.len()?;
     let mut pairs = Vec::with_capacity(len);
     for pair in py_mapping.items()? {
@@ -178,8 +183,7 @@ impl<'py> FromPyObject<'_, 'py> for Table {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let py_mapping = obj.cast::<PyMapping>()?;
-        let pairs: Vec<(String, Item)> = extract_mapping_pairs(&py_mapping)?;
+        let pairs: Vec<(String, Item)> = extract_mapping_pairs(obj)?;
         let table = pairs
             .into_iter()
             .map(|(k, v)| (k, v.0))
@@ -193,6 +197,22 @@ impl<'py> FromPyObject<'_, 'py> for Table {
 // ---------------------------------------------------------------------------
 
 pub(crate) struct Value(pub(crate) ValueRs);
+
+pub(crate) fn extract_exact_builtin(obj: Borrowed<'_, '_, PyAny>) -> PyResult<Option<ValueRs>> {
+    if let Ok(py_str) = obj.cast_exact::<PyString>() {
+        return Ok(Some(ValueRs::from(py_str.extract::<&str>()?)));
+    }
+    if let Ok(py_bool) = obj.cast_exact::<PyBool>() {
+        return Ok(Some(ValueRs::from(py_bool.extract::<bool>()?)));
+    }
+    if let Ok(py_int) = obj.cast_exact::<PyInt>() {
+        return Ok(Some(ValueRs::from(py_int.extract::<i64>()?)));
+    }
+    if let Ok(py_float) = obj.cast_exact::<PyFloat>() {
+        return Ok(Some(ValueRs::from(py_float.extract::<f64>()?)));
+    }
+    Ok(None)
+}
 
 impl<'py> FromPyObject<'_, 'py> for Value {
     type Error = PyErr;
@@ -227,12 +247,6 @@ impl<'py> FromPyObject<'_, 'py> for Value {
             return Ok(Self(ValueRs::from(s)));
         }
 
-        // Check bool before int (Python bool is a subclass of int)
-        if let Ok(py_bool) = obj.cast::<PyBool>() {
-            let b: bool = py_bool.extract()?;
-            return Ok(Self(ValueRs::from(b)));
-        }
-
         if let Ok(py_int) = obj.cast::<PyInt>() {
             let i: i64 = py_int.extract()?;
             return Ok(Self(ValueRs::from(i)));
@@ -241,15 +255,6 @@ impl<'py> FromPyObject<'_, 'py> for Value {
         if let Ok(py_float) = obj.cast::<PyFloat>() {
             let f: f64 = py_float.extract()?;
             return Ok(Self(ValueRs::from(f)));
-        }
-
-        // Only accept list as TOML arrays.  Tuples and other sequence types
-        // (bytes, bytearray, memoryview, range, …) don't have obvious TOML
-        // semantics.  Users can wrap them with list() if needed.
-        if obj.is_instance_of::<PyList>() {
-            let py_sequence = obj.cast::<PySequence>()?;
-            let array: Array = py_sequence.extract()?;
-            return Ok(Self(ValueRs::from(array.0)));
         }
 
         let name = obj.get_type().name()?;

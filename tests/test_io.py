@@ -6,13 +6,14 @@ import io
 from typing import TYPE_CHECKING
 
 import pytest
+from typing_extensions import override
 
 import tomledit
 from tests.conftest import SAMPLE, toml_literal
 from tomledit import Document
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
 
 class TestLoads:
@@ -80,6 +81,41 @@ class TestDumps:
 
         out = tomledit.dumps(MyDict({"x": 1}))
         assert out == "x = 1\n"
+
+    def test_dict_subclass_items_override_is_honoured(self) -> None:
+        class MyDict(dict[str, object]):
+            @override
+            def items(  # type: ignore[override]  # ty: ignore[invalid-method-override]
+                self,
+            ) -> object:
+                return [("override", 7)]
+
+        out = tomledit.dumps(MyDict({"original": 1}))
+        assert out == "override = 7\n"
+
+    def test_list_subclass_iteration_override_is_honoured(self) -> None:
+        class MyList(list[int]):
+            @override
+            def __iter__(self) -> Iterator[int]:
+                return iter([7, 8])
+
+        out = tomledit.dumps({"values": MyList([1, 2])})
+        assert out == "values = [7, 8]\n"
+
+    def test_scalar_subclasses_are_accepted(self) -> None:
+        class MyStr(str):
+            __slots__ = ()
+
+        class MyInt(int):
+            pass
+
+        class MyFloat(float):
+            pass
+
+        out = tomledit.dumps(
+            {"string": MyStr("value"), "integer": MyInt(7), "float": MyFloat(1.5)}
+        )
+        assert out == 'string = "value"\ninteger = 7\nfloat = 1.5\n'
 
 
 class TestDump:

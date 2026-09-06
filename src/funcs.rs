@@ -2,6 +2,7 @@
 
 use pyo3::exceptions::{PyTypeError, PyUnicodeDecodeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::pybacked::PyBackedStr;
 use pyo3::types::PyBytes;
 
 use toml_edit::DocumentMut as DocumentRs;
@@ -11,9 +12,9 @@ use crate::value::Table;
 
 /// Parse a TOML string into a `Document`, preserving formatting.
 #[pyfunction]
-pub(crate) fn loads(text: &str) -> PyResult<Document> {
-    let document_rs = text
-        .parse::<DocumentRs>()
+pub(crate) fn loads(py: Python<'_>, text: PyBackedStr) -> PyResult<Document> {
+    let document_rs = py
+        .detach(|| text.as_str().parse::<DocumentRs>())
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(Document::from_inner(document_rs))
 }
@@ -31,7 +32,10 @@ pub(crate) fn load(py: Python<'_>, fp: &Bound<'_, PyAny>) -> PyResult<Document> 
     let text = std::str::from_utf8(raw).map_err(|e| {
         PyUnicodeDecodeError::new_utf8(py, raw, e).map_or_else(PyErr::from, PyErr::from)
     })?;
-    loads(text)
+    let document_rs = py
+        .detach(|| text.parse::<DocumentRs>())
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(Document::from_inner(document_rs))
 }
 
 /// Serialise a `Document` or `Mapping` to a TOML string.
@@ -44,7 +48,7 @@ pub(crate) fn dumps(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<String> 
         return Ok(doc.get().as_toml(py));
     }
     let table: Table = obj.extract()?;
-    Ok(DocumentRs::from(table.0).to_string())
+    Ok(py.detach(|| DocumentRs::from(table.0).to_string()))
 }
 
 /// Serialise a `Document` or `Mapping` to a file.

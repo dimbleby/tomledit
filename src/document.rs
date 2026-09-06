@@ -2,6 +2,7 @@ use parking_lot::RwLock;
 
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::RwLockExt;
 use pyo3::types::{PyDict, PyIterator, PyList, PyTuple};
 
@@ -133,9 +134,9 @@ impl Document {
     /// comments, whitespace, and style are retained so that only the
     /// values you change are affected when you call ``doc.as_toml()``.
     #[staticmethod]
-    fn parse(text: &str) -> PyResult<Self> {
-        let document_rs = text
-            .parse::<DocumentRs>()
+    fn parse(py: Python<'_>, text: PyBackedStr) -> PyResult<Self> {
+        let document_rs = py
+            .detach(|| text.as_str().parse::<DocumentRs>())
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self::from_inner(document_rs))
     }

@@ -19,6 +19,10 @@ impl<'py> FromPyObject<'_, 'py> for Item {
             return Ok(Self(item_rs));
         }
 
+        if let Some(value) = value::extract_exact_builtin(obj)? {
+            return Ok(Self(ItemRs::Value(value)));
+        }
+
         if let Ok(doc) = obj.cast::<Document>() {
             let doc = doc.get();
             let inner = doc.inner.read_py_attached(obj.py());
@@ -29,10 +33,6 @@ impl<'py> FromPyObject<'_, 'py> for Item {
             return Err(PyTypeError::new_err(
                 "None is not a valid TOML value (TOML has no null type)",
             ));
-        }
-
-        if let Some(value) = value::extract_exact_builtin(obj)? {
-            return Ok(Self(ItemRs::Value(value)));
         }
 
         if obj.cast::<PyMapping>().is_ok() {

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+## 1.2.5 (6 September 2026)
+
+- rebalance the profile-guided optimisation for improved performance.
+
 ## 1.2.4 (5 September 2026)
 
 - Build native release wheels with profile-guided optimisation.

@@ -329,6 +329,7 @@ dependencies = [
  "parking_lot",
  "pyo3",
  "toml_edit",
+ "toml_parser",
 ]
 
 [[package]]

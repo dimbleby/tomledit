@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import io
+import subprocess
+import sys
 from datetime import UTC, date, datetime, time
 
 from tomledit import Document, dump, dumps, load, loads
 
 SECTION_COUNT = 180
+WORKER_COUNT = 4
+WORKER_FLAG = "--worker"
 
 
 def make_fixture() -> str:
@@ -47,6 +51,7 @@ def make_fixture() -> str:
 
 
 FIXTURE = make_fixture()
+SMALL_FIXTURE = 'name = "package"\nenabled = true\ncount = 42\n'
 NATIVE_DATA: dict[str, object] = {
     f"package_{package}": {
         "name": f"Package {package}",
@@ -67,9 +72,13 @@ NATIVE_DATA["dates"] = {
 
 def train_parsing() -> int:
     checksum = 0
-    for _ in range(600):
+    for _ in range(8_000 // WORKER_COUNT):
+        checksum += len(loads(SMALL_FIXTURE))
+    for _ in range(1_800 // WORKER_COUNT):
         checksum += len(Document.parse(FIXTURE))
-    for _ in range(400):
+    for _ in range(1_200 // WORKER_COUNT):
+        checksum += len(loads(FIXTURE))
+    for _ in range(300 // WORKER_COUNT):
         checksum += len(Document.parse(FIXTURE).as_toml())
     return checksum
 
@@ -77,7 +86,7 @@ def train_parsing() -> int:
 def train_reads() -> int:
     doc = Document.parse(FIXTURE)
     checksum = 0
-    for repetition in range(16_000):
+    for repetition in range(4_000 // WORKER_COUNT):
         section_number = repetition % SECTION_COUNT
         section = doc[f"section_{section_number}"]
         read_kind = repetition % 4
@@ -101,14 +110,14 @@ def train_reads() -> int:
             checksum += int(bool(section["enabled"]))
             checksum += int(float(section["ratio"]) * 1_000)
             checksum += len(section.items())
-    for _ in range(1_600):
+    for _ in range(400 // WORKER_COUNT):
         checksum += len(doc.value)
     return checksum
 
 
 def train_mutations() -> int:
     checksum = 0
-    for repetition in range(240):
+    for repetition in range(80 // WORKER_COUNT):
         doc = Document.parse(FIXTURE)
         for section_number in range(0, SECTION_COUNT, 9):
             section = doc[f"section_{section_number}"]
@@ -148,7 +157,7 @@ def train_mutations() -> int:
 
 def train_io() -> int:
     checksum = 0
-    for _ in range(300):
+    for _ in range(2_000 // WORKER_COUNT):
         text = dumps(NATIVE_DATA)
         checksum += len(loads(text))
 
@@ -159,7 +168,7 @@ def train_io() -> int:
     return checksum
 
 
-def main() -> None:
+def train() -> None:
     checksum = train_parsing()
     checksum += train_reads()
     checksum += train_mutations()
@@ -167,8 +176,15 @@ def main() -> None:
     if checksum <= 0:
         msg = "PGO workload did not exercise tomledit"
         raise RuntimeError(msg)
-    print(f"PGO training complete: {checksum}")
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == [WORKER_FLAG]:
+        train()
+    else:
+        for _ in range(WORKER_COUNT):
+            subprocess.run(  # noqa: S603
+                [sys.executable, __file__, WORKER_FLAG],
+                check=True,
+            )
+        print("PGO training complete")

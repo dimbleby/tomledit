@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.2.6 (15 September 2026)
+
+- upgrade dependencies
+
 ## 1.2.5 (6 September 2026)
 
 - rebalance the profile-guided optimisation for improved performance.

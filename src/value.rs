@@ -5,11 +5,10 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::{
-    PyBool, PyDate, PyDateTime, PyDelta, PyDict, PyFloat, PyInt, PyList, PyMapping, PySequence,
-    PyString, PyTime,
+    PyBool, PyDate, PyDateAccess, PyDateTime, PyDelta, PyDeltaAccess, PyDict, PyFloat, PyInt,
+    PyList, PyMapping, PySequence, PyString, PyTime, PyTimeAccess,
 };
 
-use crate::datetime_compat::{PyDateAccess, PyDeltaAccess, PyTimeAccess};
 use toml_edit::{
     Array as ArrayRs, ArrayOfTables as ArrayOfTablesRs, Date as DateRs, Datetime as DatetimeRs,
     Offset as OffsetRs, Table as TableRs, Time as TimeRs, Value as ValueRs,

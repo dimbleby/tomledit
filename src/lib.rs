@@ -1,5 +1,4 @@
 mod comments;
-mod datetime_compat;
 mod dict_ops;
 mod dict_proxy;
 mod document;

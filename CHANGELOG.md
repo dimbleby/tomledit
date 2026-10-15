@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- upgrade dependencies
+
 ## 1.2.7 (9 October 2026)
 
 - upgrade dependencies

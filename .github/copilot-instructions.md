@@ -118,7 +118,6 @@ invalidation).
 | `views.rs`                                            | `KeysView`, `ValuesView`, `ItemsView`                                                       |
 | `trie.rs`                                             | `MutationTrie` + revision counter for path-precise staleness                                |
 | `py_pairs.rs`                                         | Helper for extracting length-2 iterable pairs                                               |
-| `datetime_compat.rs`                                  | Datetime field accessors for the limited API, via Python attribute access  |
 
 ## Key Conventions
 
@@ -142,11 +141,7 @@ values, `PyRuntimeError` for stale proxies.
 applies. The wheel maturin produces is chosen by the interpreter it builds
 against: GIL CPython 3.11-3.14 → one `abi3` wheel; free-threaded 3.14t → a
 version-specific `cp314-cp314t` wheel (abi3t starts at 3.15); CPython 3.15+ (GIL
-or free-threaded) → one `abi3.abi3t` wheel (PEP 803). pyo3 >= 0.29.1 is required
-for the 3.14t case, which earlier versions rejected when the interpreter was
-resolved from a config file rather than queried live.
-Because the datetime accessor traits are unavailable under the limited API,
-`datetime_compat` supplies attribute-access equivalents.
+or free-threaded) → one `abi3.abi3t` wheel (PEP 803).
 Release wheels use maturin's PGO build on native glibc Linux and native macOS
 and Windows x86/x64 jobs. Cross-compiled Linux and musllinux targets use the
 ordinary release profile because their instrumented wheels cannot run during

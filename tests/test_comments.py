@@ -1566,6 +1566,10 @@ class TestAotEntryComments:
     The same should work for each ``[[array-of-tables]]`` entry.
     """
 
+    def test_constructed_later_entry_has_no_block_comment(self) -> None:
+        doc = Document({"items": [{"x": 1}, {"x": 2}]})
+        assert doc["items"][1].comment is None
+
     def test_read_comment_after_clearing_aot(self) -> None:
         doc = Document.parse("# entries\n[[items]]\nx = 1\n")
         doc["items"].clear()

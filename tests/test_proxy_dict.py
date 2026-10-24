@@ -2071,6 +2071,14 @@ class TestViewContainsProxy:
     objects the view itself produces.
     """
 
+    def test_values_contains_document(self) -> None:
+        doc = Document({"t": {"x": 1}})
+        assert Document({"x": 1}) in doc.values()
+
+    def test_items_contains_document(self) -> None:
+        doc = Document({"t": {"x": 1}})
+        assert ("t", Document({"x": 1})) in doc.items()  # type: ignore[comparison-overlap]
+
     def test_values_contains_string_proxy(self) -> None:
         doc = Document.parse('name = "Alice"\n')
         assert doc["name"] in doc.values()

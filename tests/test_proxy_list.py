@@ -1321,6 +1321,11 @@ class TestCount:
 
 
 class TestIndex:
+    def test_index_table_proxy_from_other_document(self) -> None:
+        source = Document({"t": {"x": 2}})
+        doc = Document({"items": [{"x": 1}, {"x": 2}]})
+        assert doc["items"].index(source["t"]) == 1
+
     def test_index_first_occurrence(self) -> None:
         doc = Document.parse("arr = [1, 2, 2, 3]\n")
         assert doc["arr"].index(2) == 1

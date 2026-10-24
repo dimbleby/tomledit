@@ -51,6 +51,13 @@ class TestProxyListMethods:
         doc["arr"].pop(0)
         assert doc["arr"][0] == 2
 
+    def test_pop_rejects_string_proxy_index(self) -> None:
+        text = 'index = "wrong"\narr = [1, 2]\n'
+        doc = Document.parse(text)
+        with pytest.raises(TypeError):
+            doc["arr"].pop(doc["index"])
+        assert doc.as_toml() == text
+
     def test_pop_empty_raises(self) -> None:
         doc = Document.parse("arr = []\n")
         with pytest.raises(IndexError):

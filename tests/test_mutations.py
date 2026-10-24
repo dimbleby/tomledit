@@ -88,6 +88,13 @@ class TestWriteScalars:
 
 
 class TestWriteArrayElements:
+    def test_out_of_range_assignment_preserves_document(self) -> None:
+        text = "arr = [1, 2]\n"
+        doc = Document.parse(text)
+        with pytest.raises(IndexError, match="out of range"):
+            doc["arr"][9] = 5
+        assert doc.as_toml() == text
+
     def test_replace_array_element(self, doc: Document) -> None:
         doc["database"]["ports"][0] = 9999
         assert doc["database"]["ports"][0] == 9999
@@ -414,6 +421,13 @@ class TestListConversionErrors:
 
 
 class TestArrayOfTablesMutation:
+    def test_out_of_range_assignment_preserves_document(self) -> None:
+        text = "[[items]]\nx = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(IndexError, match="out of range"):
+            doc["items"][9] = {"x": 2}
+        assert doc.as_toml() == text
+
     def test_set_element_to_scalar_raises(self) -> None:
         doc = Document()
         doc["d"] = [{"a": 1}, {"b": 2}]

@@ -61,6 +61,13 @@ class TestParseErrors:
 
 
 class TestDatetimeConversionErrors:
+    def test_document_value_conversion_error(self) -> None:
+        text = "x = 0000-01-01\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="year"):
+            _ = doc.value
+        assert doc.as_toml() == text
+
     def test_document_string_conversion_error(self) -> None:
         text = "x = 0000-01-01\n"
         doc = Document.parse(text)

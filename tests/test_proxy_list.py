@@ -844,6 +844,13 @@ class TestIadd:
 
 
 class TestAdd:
+    def test_reflected_add_rejects_invalid_element(self) -> None:
+        text = "arr = [1, 2]\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError, match="TOML has no null type"):
+            _ = [None] + doc["arr"]
+        assert doc.as_toml() == text
+
     """list + list returns a new ListItem (non-mutating, format-preserving)."""
 
     def test_add_two_arrays(self) -> None:
@@ -1244,6 +1251,10 @@ class TestMul:
 
 
 class TestCount:
+    def test_unsupported_value_returns_zero(self) -> None:
+        doc = Document({"arr": [1, 2]})
+        assert doc["arr"].count(object()) == 0
+
     def test_count_integers(self) -> None:
         doc = Document.parse("arr = [1, 2, 2, 3, 2]\n")
         assert doc["arr"].count(2) == 3
@@ -1514,6 +1525,12 @@ class TestSliceIndexing:
     """Slice support on arrays via __getitem__, __setitem__, __delitem__."""
 
     TOML = "arr = [1, 2, 3, 4, 5]\n"
+
+    def test_noniterable_assignment_preserves_document(self) -> None:
+        doc = Document.parse(self.TOML)
+        with pytest.raises(TypeError, match="not iterable"):
+            doc["arr"][:] = 1
+        assert doc.as_toml() == self.TOML
 
     def test_getitem_zero_step_raises(self) -> None:
         doc = Document.parse(self.TOML)

@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import zoneinfo
 from datetime import date, datetime, time, tzinfo
+from typing import TYPE_CHECKING
 
 import pytest
 from typing_extensions import override
 
 from tests.conftest import ItemsMapping, toml_literal
 from tomledit import Document, Item
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class FailingTimezone(tzinfo):
@@ -121,6 +125,33 @@ class TestSetNewKeys:
         assert doc["items"][0] == 1
         assert doc["items"][2] == 3
 
+    def test_list_iteration_error_preserves_document(self) -> None:
+        class FailingList(list[int]):
+            @override
+            def __iter__(self) -> Iterator[int]:
+                yield 2
+                msg = "iteration failed"
+                raise RuntimeError(msg)
+
+        text = "items = [1]\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="iteration failed"):
+            doc["items"] = FailingList([2, 3])
+        assert doc.as_toml() == text
+
+    def test_list_length_error_preserves_document(self) -> None:
+        class FailingList(list[int]):
+            @override
+            def __len__(self) -> int:
+                msg = "length failed"
+                raise RuntimeError(msg)
+
+        text = "items = [1]\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="length failed"):
+            doc["items"] = FailingList([2, 3])
+        assert doc.as_toml() == text
+
     def test_add_dict(self) -> None:
         doc = Document()
         doc["meta"] = {"key": "value"}
@@ -136,6 +167,19 @@ class TestSetNewKeys:
         doc = Document()
         doc["meta"] = ItemsMapping({"key": "value"}, [["key", "value"]])
         assert doc["meta"]["key"] == "value"
+
+    def test_mapping_length_error_preserves_document(self) -> None:
+        class FailingMapping(ItemsMapping):
+            @override
+            def __len__(self) -> int:
+                msg = "length failed"
+                raise RuntimeError(msg)
+
+        text = "meta = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="length failed"):
+            doc["meta"] = FailingMapping({"key": "value"})
+        assert doc.as_toml() == text
 
     def test_add_inline_table_mapping_with_list_pairs(self) -> None:
         doc = Document.parse("dst = { a = 1 }\n")

@@ -218,6 +218,12 @@ class TestProxyDictMethods:
         with pytest.raises(TypeError, match="TOML has no null type"):
             doc["owner"].setdefault("email")
 
+    def test_setdefault_non_string_key_rejected(self, doc: Document) -> None:
+        before = doc.as_toml()
+        with pytest.raises(TypeError, match="keys must be strings"):
+            doc["owner"].setdefault(42, "value")
+        assert doc.as_toml() == before
+
     # -- clear --
 
     def test_clear_table(self, doc: Document) -> None:
@@ -779,6 +785,12 @@ class TestDocumentDictMethods:
         doc = Document.parse("x = 1\n")
         with pytest.raises(TypeError, match="TOML has no null type"):
             doc.setdefault("y")
+
+    def test_setdefault_non_string_key_rejected(self) -> None:
+        doc = Document.parse("x = 1\n")
+        with pytest.raises(TypeError, match="keys must be strings"):
+            doc.setdefault(42, "value")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        assert doc.as_toml() == "x = 1\n"
 
     # -- clear --
 
@@ -1387,6 +1399,12 @@ class TestPopitem:
         assert key == "b"
         assert val == 2
         assert list(doc["t"]) == ["a"]
+
+    def test_inline_table_popitem_empty_raises(self) -> None:
+        doc = Document.parse("t = {}\n")
+        with pytest.raises(KeyError, match="dictionary is empty"):
+            doc["t"].popitem()
+        assert doc.as_toml() == "t = {}\n"
 
     def test_inline_table_popitem_preserves_comments(self) -> None:
         doc = Document.parse("t = {a = 1, b = 2, c = 3}\n")

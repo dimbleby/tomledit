@@ -772,6 +772,20 @@ class TestComment:
         with pytest.raises(ValueError, match="invalid character"):
             doc["key"].comment = "# hello\x07"
 
+    def test_invalid_table_comment_preserves_toml(self) -> None:
+        text = "[key]\nx = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="start with '#'"):
+            doc["key"].comment = "no hash"
+        assert doc.as_toml() == text
+
+    def test_invalid_inline_table_key_comment_preserves_toml(self) -> None:
+        text = "t = {key = 1}\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="start with '#'"):
+            doc["t"]["key"].comment = "no hash"
+        assert doc.as_toml() == text
+
     def test_tab_in_comment_allowed(self) -> None:
         doc = Document.parse("key = 42\n")
         doc["key"].inline_comment = "#\tindented"
@@ -2141,6 +2155,15 @@ class TestLeadingCommaLayout:
                  ,4
                 ]
         """)
+
+    def test_append_preserves_last_leading_comma_comment(self) -> None:
+        doc = Document.parse("a = [\n  1\n ,2 # last\n]\n")
+        doc["a"].append(3)
+        expected = "a = [\n  1\n ,2 # last\n ,3\n]\n"
+        assert doc.as_toml() == expected
+        assert doc["a"][1].inline_comment == "# last"
+        assert doc["a"][2].inline_comment is None
+        assert Document.parse(expected)["a"] == [1, 2, 3]
 
     def test_extend_keeps_style(self) -> None:
         doc = Document.parse(self.A)

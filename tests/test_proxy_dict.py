@@ -742,6 +742,44 @@ class TestDocumentDictMethods:
         doc.update()
         assert doc["x"] == 1
 
+    def test_update_rejects_noniterable_without_mutation(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError):
+            doc.update(42)  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
+        assert doc.as_toml() == text
+
+    def test_update_rejects_noniterable_pair_without_mutation(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError):
+            doc.update([42])  # type: ignore[list-item]  # ty: ignore[no-matching-overload]
+        assert doc.as_toml() == text
+
+    def test_update_pair_key_error_preserves_document(self) -> None:
+        def failing_pair() -> Iterator[str]:
+            yield from ()
+            msg = "cannot read key"
+            raise RuntimeError(msg)
+
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="cannot read key"):
+            doc.update([failing_pair()])  # type: ignore[list-item]  # ty: ignore[no-matching-overload]
+        assert doc.as_toml() == text
+
+    def test_update_pair_value_error_preserves_document(self) -> None:
+        def failing_pair() -> Iterator[str]:
+            yield "x"
+            msg = "cannot read value"
+            raise RuntimeError(msg)
+
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="cannot read value"):
+            doc.update([failing_pair()])  # type: ignore[list-item]  # ty: ignore[no-matching-overload]
+        assert doc.as_toml() == text
+
     def test_update_rejects_scalar_proxy_without_mutation(self) -> None:
         text = "x = 1\n"
         doc = Document.parse(text)
@@ -2068,6 +2106,11 @@ class TestImplicitProperty:
 
 class TestViewSetOpsWithIterables:
     """Set ops on views accept any iterable, not just sets."""
+
+    def test_keys_intersection_rejects_noniterable(self) -> None:
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(TypeError):
+            _ = doc.keys() & 42  # type: ignore[operator]  # ty: ignore[unsupported-operator]
 
     def test_keys_or_with_list(self) -> None:
         doc = Document.parse("[t]\na = 1\n")

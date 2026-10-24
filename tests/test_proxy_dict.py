@@ -2367,6 +2367,10 @@ class TestKeysViewNonStringElements:
 
 
 class TestItemsViewContainsEdges:
+    def test_unsupported_value_returns_false(self) -> None:
+        doc = Document({"t": {"x": 1}})
+        assert ("x", object()) not in doc["t"].items()
+
     def test_non_tuple_returns_false(self) -> None:
         doc = Document.parse("[t]\na = 1\n")
         assert "a" not in doc["t"].items()

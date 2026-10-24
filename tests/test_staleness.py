@@ -459,6 +459,38 @@ class TestStaleProxyAsListIndex:
 
 
 class TestStaleProxyOperands:
+    def test_reflected_union_rejects_stale_dict_key(self) -> None:
+        doc = Document({"key": "x", "x": 1})
+        key = doc["key"]
+        mapping = {key: 2}
+        del doc["key"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = mapping | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+        assert doc.as_toml() == text
+
+    def test_equality_rejects_stale_operand(self) -> None:
+        doc = Document({"value": 1, "t": {"x": 1}})
+        value = doc["value"]
+        del doc["value"]
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = doc["t"] == value
+
+    def test_equality_rejects_stale_operand_from_other_document(self) -> None:
+        source = Document({"value": 1})
+        value = source["value"]
+        del source["value"]
+        doc = Document({"t": {"x": 1}})
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = doc["t"] == value
+
+    def test_items_contains_rejects_stale_value(self) -> None:
+        doc = Document({"value": 1, "t": {"x": 1}})
+        value = doc["value"]
+        del doc["value"]
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = ("x", value) in doc["t"].items()
+
     def test_dict_union_rejects_stale_mapping(self) -> None:
         doc = Document({"src": {"x": 1}, "dst": {"y": 2}})
         source = doc["src"]
@@ -580,6 +612,42 @@ class TestStaleProxyOperands:
         doc = Document({"arr": [1, 2]})
         with pytest.raises(RuntimeError, match="stale"):
             doc["arr"].index(value)
+
+
+class TestStaleProxyAccess:
+    def test_as_toml_rejects_stale_proxy(self) -> None:
+        doc = Document({"value": 1})
+        value = doc["value"]
+        del doc["value"]
+        with pytest.raises(RuntimeError, match="stale"):
+            value.as_toml()
+
+    def test_set_comment_rejects_stale_proxy(self) -> None:
+        doc = Document({"value": 1})
+        value = doc["value"]
+        doc["value"] = 2
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            value.comment = "# note"
+        assert doc.as_toml() == text
+
+    def test_set_inline_comment_rejects_stale_proxy(self) -> None:
+        doc = Document({"value": 1})
+        value = doc["value"]
+        doc["value"] = 2
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            value.inline_comment = "# note"
+        assert doc.as_toml() == text
+
+    def test_clear_rejects_stale_proxy(self) -> None:
+        doc = Document({"value": 1})
+        value = doc["value"]
+        doc["value"] = 2
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            value.clear()
+        assert doc.as_toml() == text
 
 
 class TestCommentMutationsPreserveProxies:

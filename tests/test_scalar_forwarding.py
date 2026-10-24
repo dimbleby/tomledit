@@ -337,6 +337,13 @@ class TestFormatting:
 class TestScalarContainsProxy:
     """ScalarProxy.__contains__ should resolve proxy value arguments."""
 
+    def test_stale_proxy_in_string_raises(self) -> None:
+        doc = Document({"msg": "hello world", "part": "hello"})
+        part = doc["part"]
+        doc["part"] = "world"
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = part in doc["msg"]
+
     def test_proxy_in_string_proxy(self) -> None:
         doc = Document.parse('msg = "hello world"\npart = "hello"')
         assert doc["part"] in doc["msg"]
@@ -353,6 +360,13 @@ class TestScalarContainsProxy:
 
 class TestPowModuloProxy:
     """pow() with proxy modulo should resolve the proxy before calling builtins.pow."""
+
+    def test_stale_proxy_modulo_raises(self) -> None:
+        doc = Document({"base": 5, "mod": 3})
+        modulo = doc["mod"]
+        doc["mod"] = 7
+        with pytest.raises(RuntimeError, match="stale"):
+            pow(doc["base"], 2, modulo)
 
     def test_pow_with_proxy_modulo(self) -> None:
         doc = Document.parse("base = 5\nmod = 3")

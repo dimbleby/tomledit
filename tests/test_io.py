@@ -142,6 +142,12 @@ class TestDump:
         with pytest.raises(TypeError, match="binary mode"):
             tomledit.dump({"a": 1}, io.StringIO())  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
+    def test_closed_stream_error_propagates(self) -> None:
+        buf = io.BytesIO()
+        buf.close()
+        with pytest.raises(ValueError, match="closed file"):
+            tomledit.dump({"a": 1}, buf)
+
     def test_unicode_round_trip(self) -> None:
         original: Mapping[str, object] = {"greeting": "héllo 🌍"}
         buf = io.BytesIO()

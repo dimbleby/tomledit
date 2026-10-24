@@ -23,6 +23,29 @@ class TestParseErrors:
             )
 
 
+class TestDatetimeConversionErrors:
+    def test_datetime_leap_second_conversion_error(self) -> None:
+        text = "x = 1979-05-27T07:32:60Z\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="second"):
+            _ = doc["x"].value
+        assert doc.as_toml() == text
+
+    def test_time_leap_second_conversion_error(self) -> None:
+        text = "x = 07:32:60\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="second"):
+            _ = doc["x"].value
+        assert doc.as_toml() == text
+
+    def test_date_year_zero_conversion_error(self) -> None:
+        text = "x = 0000-01-01\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="year"):
+            _ = doc["x"].value
+        assert doc.as_toml() == text
+
+
 # ---------------------------------------------------------------------------
 # Unsupported Python types assigned to TOML keys
 # ---------------------------------------------------------------------------

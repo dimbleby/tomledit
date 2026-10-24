@@ -41,6 +41,10 @@ class TestFloatForwarding:
 
 
 class TestBoolForwarding:
+    def test_false_string(self) -> None:
+        doc = Document({"enabled": False})
+        assert str(doc["enabled"]) == "False"
+
     def test_bit_length(self, doc: Document) -> None:
         assert doc["enabled"].bit_length() == 1
 

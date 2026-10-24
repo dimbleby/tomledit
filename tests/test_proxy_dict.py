@@ -13,6 +13,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import pytest
+from typing_extensions import override
 
 import tomledit
 from tests.conftest import ItemsMapping, RaisingClassAttr, toml_literal
@@ -525,6 +526,33 @@ class TestReplaceTableWithValue:
 
 
 class TestDocumentDictMethods:
+    def test_update_items_error_preserves_document(self) -> None:
+        class FailingMapping(ItemsMapping):
+            @override
+            def items(self) -> object:
+                msg = "items unavailable"
+                raise RuntimeError(msg)
+
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="items unavailable"):
+            doc.update(FailingMapping({"x": 2}))  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
+        assert doc.as_toml() == text
+
+    def test_update_noniterable_items_preserves_document(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError):
+            doc.update(ItemsMapping({"x": 2}, 42))  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
+        assert doc.as_toml() == text
+
+    def test_update_pair_conversion_error_preserves_document(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError, match="TOML has no null type"):
+            doc.update([("x", None)])
+        assert doc.as_toml() == text
+
     # -- contains / len / iter / keys --
 
     def test_contains(self, doc: Document) -> None:
@@ -1269,6 +1297,33 @@ class TestViews:
 class TestItemsViewSetEquality:
     """ItemsView.__eq__ should be set-like (order independent), per Python spec."""
 
+    def test_other_length_error_propagates(self) -> None:
+        class FailingSet(set[tuple[str, int]]):
+            @override
+            def __len__(self) -> int:
+                msg = "length failed"
+                raise RuntimeError(msg)
+
+        doc = Document({"x": 1})
+        with pytest.raises(RuntimeError, match="length failed"):
+            _ = doc.items() == FailingSet({("x", 1)})
+
+    def test_other_contains_error_propagates(self) -> None:
+        class FailingSet(set[tuple[str, int]]):
+            @override
+            def __contains__(self, item: object) -> bool:
+                msg = "membership failed"
+                raise RuntimeError(msg)
+
+        doc = Document({"x": 1})
+        with pytest.raises(RuntimeError, match="membership failed"):
+            _ = doc.items() == FailingSet({("x", 1)})
+
+    def test_date_conversion_error_propagates(self) -> None:
+        doc = Document.parse("x = 0000-01-01\n")
+        with pytest.raises(ValueError, match="year"):
+            _ = doc.items() == {("x", 1)}
+
     def test_items_view_eq_different_order(self) -> None:
         doc = Document.parse("a = 1\nb = 2\n")
         # Same pairs as a set — order should not matter.
@@ -1287,6 +1342,11 @@ class TestItemsViewSetEquality:
 
 class TestItemsViewSetOps:
     """ItemsView should support set operators like dict_items does."""
+
+    def test_date_conversion_error_propagates(self) -> None:
+        doc = Document.parse("x = 0000-01-01\n")
+        with pytest.raises(ValueError, match="year"):
+            _ = doc.items() | set()
 
     def test_or(self) -> None:
         doc = Document.parse("a = 1\nb = 2\n")
@@ -1489,6 +1549,32 @@ class TestPopitem:
 
 class TestMergeOperators:
     """| and |= operators (PEP 584)."""
+
+    def test_reflected_union_propagates_items_error(self) -> None:
+        class FailingMapping(ItemsMapping):
+            @override
+            def items(self) -> object:
+                msg = "items unavailable"
+                raise RuntimeError(msg)
+
+        doc = Document({"x": 1})
+        with pytest.raises(RuntimeError, match="items unavailable"):
+            _ = FailingMapping({"x": 2}) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+
+    def test_reflected_union_propagates_items_iteration_error(self) -> None:
+        def failing_items() -> Iterator[tuple[str, int]]:
+            yield ("x", 2)
+            msg = "items iteration failed"
+            raise RuntimeError(msg)
+
+        doc = Document({"x": 1})
+        with pytest.raises(RuntimeError, match="items iteration failed"):
+            _ = ItemsMapping({"x": 2}, failing_items()) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
+
+    def test_reflected_union_rejects_unhashable_key(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(TypeError, match="unhashable"):
+            _ = ItemsMapping({"x": 2}, [([], 1)]) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
 
     # -- Document | other --
 

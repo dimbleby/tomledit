@@ -33,6 +33,12 @@ class TestLoads:
 
 
 class TestLoad:
+    def test_closed_stream_error_propagates(self) -> None:
+        buf = io.BytesIO()
+        buf.close()
+        with pytest.raises(ValueError, match="closed file"):
+            tomledit.load(buf)
+
     def test_round_trip(self) -> None:
         buf = io.BytesIO(SAMPLE.encode("utf-8"))
         doc = tomledit.load(buf)
@@ -119,6 +125,12 @@ class TestDumps:
 
 
 class TestDump:
+    def test_invalid_value_does_not_write(self) -> None:
+        buf = io.BytesIO()
+        with pytest.raises(TypeError, match="TOML has no null type"):
+            tomledit.dump({"x": None}, buf)
+        assert buf.getvalue() == b""
+
     def test_writes_utf8_bytes(self) -> None:
         doc = tomledit.loads(SAMPLE)
         buf = io.BytesIO()

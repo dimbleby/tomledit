@@ -99,6 +99,46 @@ class TestWriteArrayElements:
 
 
 class TestSetNewKeys:
+    def test_string_surrogate_preserves_document(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(UnicodeEncodeError):
+            doc["x"] = "\ud800"
+        assert doc.as_toml() == text
+
+    def test_string_subclass_surrogate_preserves_document(self) -> None:
+        class CustomString(str):
+            __slots__ = ()
+
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(UnicodeEncodeError):
+            doc["x"] = CustomString("\ud800")
+        assert doc.as_toml() == text
+
+    def test_integer_subclass_overflow_preserves_document(self) -> None:
+        class CustomInt(int):
+            pass
+
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(OverflowError):
+            doc["x"] = CustomInt(1 << 100)
+        assert doc.as_toml() == text
+
+    def test_list_iteration_start_error_preserves_document(self) -> None:
+        class FailingList(list[int]):
+            @override
+            def __iter__(self) -> Iterator[int]:
+                msg = "cannot iterate"
+                raise RuntimeError(msg)
+
+        text = "items = [1]\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="cannot iterate"):
+            doc["items"] = FailingList([2, 3])
+        assert doc.as_toml() == text
+
     def test_add_string(self) -> None:
         doc = Document()
         doc["name"] = "hello"

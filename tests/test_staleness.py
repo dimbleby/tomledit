@@ -297,6 +297,90 @@ class TestMutatorProxyStaysValid:
 class TestStaleProxyAsMappingKey:
     """A stale ScalarItem string used as a key should still raise RuntimeError."""
 
+    def test_document_lookup_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document({"key": "x", "x": 1})
+        key = doc["key"]
+        del doc["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = doc[key]  # type: ignore[index]  # ty: ignore[invalid-argument-type]
+
+    def test_document_delete_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document({"key": "x", "x": 1})
+        key = doc["key"]
+        del doc["key"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            del doc[key]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        assert doc.as_toml() == text
+
+    def test_document_pop_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document({"key": "x", "x": 1})
+        key = doc["key"]
+        del doc["key"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            doc.pop(key)  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
+        assert doc.as_toml() == text
+
+    def test_document_setdefault_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document({"key": "x", "x": 1})
+        key = doc["key"]
+        del doc["key"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            doc.setdefault(key, 2)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        assert doc.as_toml() == text
+
+    def test_dict_lookup_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document({"key": "x", "t": {"x": 1}})
+        key = doc["key"]
+        del doc["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = doc["t"][key]  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
+
+    def test_dict_setitem_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document({"key": "x", "t": {"x": 1}})
+        key = doc["key"]
+        del doc["key"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["t"][key] = 2  # type: ignore[index]  # ty: ignore[invalid-assignment]
+        assert doc.as_toml() == text
+
+    def test_dict_delete_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document({"key": "x", "t": {"x": 1}})
+        key = doc["key"]
+        del doc["key"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            del doc["t"][key]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        assert doc.as_toml() == text
+
+    def test_dict_contains_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document({"key": "x", "t": {"x": 1}})
+        key = doc["key"]
+        del doc["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = key in doc["t"]
+
+    def test_dict_pop_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document({"key": "x", "t": {"x": 1}})
+        key = doc["key"]
+        del doc["key"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["t"].pop(key)
+        assert doc.as_toml() == text
+
+    def test_dict_setdefault_raises_for_stale_string_proxy_key(self) -> None:
+        doc = Document({"key": "x", "t": {"x": 1}})
+        key = doc["key"]
+        del doc["key"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["t"].setdefault(key, 2)
+        assert doc.as_toml() == text
+
     def test_document_contains_raises_for_stale_string_proxy_key(self) -> None:
         doc = Document.parse('key = "x"\nx = 1\n')
         key = doc["key"]
@@ -354,6 +438,24 @@ class TestStaleProxyAsMappingKey:
         del doc["src"]
         with pytest.raises(RuntimeError, match="stale"):
             doc["dst"].update(source)
+
+
+class TestStaleProxyAsListIndex:
+    def test_lookup_raises_for_stale_index(self) -> None:
+        doc = Document({"index": 0, "arr": [1, 2]})
+        index = doc["index"]
+        del doc["index"]
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = doc["arr"][index]  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
+
+    def test_pop_raises_for_stale_index(self) -> None:
+        doc = Document({"index": 0, "arr": [1, 2]})
+        index = doc["index"]
+        del doc["index"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["arr"].pop(index)
+        assert doc.as_toml() == text
 
 
 class TestCommentMutationsPreserveProxies:

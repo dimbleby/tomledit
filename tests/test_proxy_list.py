@@ -1515,6 +1515,23 @@ class TestSliceIndexing:
 
     TOML = "arr = [1, 2, 3, 4, 5]\n"
 
+    def test_getitem_zero_step_raises(self) -> None:
+        doc = Document.parse(self.TOML)
+        with pytest.raises(ValueError, match="slice step cannot be zero"):
+            _ = doc["arr"][::0]
+
+    def test_setitem_zero_step_preserves_document(self) -> None:
+        doc = Document.parse(self.TOML)
+        with pytest.raises(ValueError, match="slice step cannot be zero"):
+            doc["arr"][::0] = [3]
+        assert doc.as_toml() == self.TOML
+
+    def test_delitem_zero_step_preserves_document(self) -> None:
+        doc = Document.parse(self.TOML)
+        with pytest.raises(ValueError, match="slice step cannot be zero"):
+            del doc["arr"][::0]
+        assert doc.as_toml() == self.TOML
+
     # ---- __getitem__ slices ----
 
     def test_basic_slice(self) -> None:

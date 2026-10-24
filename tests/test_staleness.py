@@ -458,6 +458,98 @@ class TestStaleProxyAsListIndex:
         assert doc.as_toml() == text
 
 
+class TestStaleProxyOperands:
+    def test_assignment_rejects_stale_value(self) -> None:
+        doc = Document({"value": 1, "target": 2})
+        value = doc["value"]
+        del doc["value"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["target"] = value
+        assert doc.as_toml() == text
+
+    def test_list_remove_rejects_stale_value(self) -> None:
+        doc = Document({"value": 1, "arr": [1, 2]})
+        value = doc["value"]
+        del doc["value"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["arr"].remove(value)
+        assert doc.as_toml() == text
+
+    def test_list_add_rejects_stale_source(self) -> None:
+        doc = Document({"src": [1, 2], "dst": [3]})
+        source = doc["src"]
+        del doc["src"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = doc["dst"] + source
+        assert doc.as_toml() == text
+
+    def test_constructor_rejects_stale_dict_key(self) -> None:
+        source = Document({"key": "x"})
+        key = source["key"]
+        mapping = {key: 2}
+        del source["key"]
+        with pytest.raises(RuntimeError, match="stale"):
+            Document(mapping)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+    def test_update_rejects_stale_dict_key(self) -> None:
+        doc = Document({"key": "x", "x": 1})
+        key = doc["key"]
+        mapping = {key: 2}
+        del doc["key"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            doc.update(mapping)  # type: ignore[arg-type]  # ty: ignore[no-matching-overload]
+        assert doc.as_toml() == text
+
+    def test_list_contains_rejects_stale_value(self) -> None:
+        doc = Document({"value": 1, "arr": [1, 2]})
+        value = doc["value"]
+        del doc["value"]
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = value in doc["arr"]
+
+    def test_list_count_rejects_stale_value(self) -> None:
+        doc = Document({"value": 1, "arr": [1, 2]})
+        value = doc["value"]
+        del doc["value"]
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["arr"].count(value)
+
+    def test_list_index_rejects_stale_value(self) -> None:
+        doc = Document({"value": 1, "arr": [1, 2]})
+        value = doc["value"]
+        del doc["value"]
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["arr"].index(value)
+
+    def test_list_contains_rejects_stale_value_from_other_document(self) -> None:
+        source = Document({"value": 1})
+        value = source["value"]
+        del source["value"]
+        doc = Document({"arr": [1, 2]})
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = value in doc["arr"]
+
+    def test_list_count_rejects_stale_value_from_other_document(self) -> None:
+        source = Document({"value": 1})
+        value = source["value"]
+        del source["value"]
+        doc = Document({"arr": [1, 2]})
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["arr"].count(value)
+
+    def test_list_index_rejects_stale_value_from_other_document(self) -> None:
+        source = Document({"value": 1})
+        value = source["value"]
+        del source["value"]
+        doc = Document({"arr": [1, 2]})
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["arr"].index(value)
+
+
 class TestCommentMutationsPreserveProxies:
     """Setting comments is decoration-only, so proxies stay valid."""
 

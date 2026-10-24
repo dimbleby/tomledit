@@ -99,6 +99,10 @@ class TestWriteArrayElements:
 
 
 class TestSetNewKeys:
+    def test_nested_dict_rejects_non_string_key(self) -> None:
+        with pytest.raises(TypeError, match="keys must be strings"):
+            Document({"nested": {1: 2}})
+
     def test_list_subclass_element_error_preserves_document(self) -> None:
         class CustomList(list[object]):
             pass

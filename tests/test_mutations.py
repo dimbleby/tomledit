@@ -99,6 +99,37 @@ class TestWriteArrayElements:
 
 
 class TestSetNewKeys:
+    def test_mapping_value_error_preserves_document(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError, match="TOML has no null type"):
+            doc["x"] = ItemsMapping({"key": None})
+        assert doc.as_toml() == text
+
+    def test_datetime_invalid_offset_preserves_document(self) -> None:
+        class InvalidDatetime(datetime):
+            @override
+            def utcoffset(self) -> int:  # type: ignore[override]  # ty: ignore[invalid-method-override]
+                return 42
+
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError):
+            doc["x"] = InvalidDatetime(2026, 1, 1)
+        assert doc.as_toml() == text
+
+    def test_time_invalid_offset_preserves_document(self) -> None:
+        class InvalidTime(time):
+            @override
+            def utcoffset(self) -> int:  # type: ignore[override]  # ty: ignore[invalid-method-override]
+                return 42
+
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError):
+            doc["x"] = InvalidTime(12)
+        assert doc.as_toml() == text
+
     def test_string_surrogate_preserves_document(self) -> None:
         text = "x = 1\n"
         doc = Document.parse(text)

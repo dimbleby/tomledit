@@ -23,6 +23,11 @@ if TYPE_CHECKING:
 
 
 class TestEquality:
+    def test_aware_datetime_proxies_equal_across_month_boundary(self) -> None:
+        local = Document.parse("x = 2026-03-01T00:30:00+01:00\n")
+        utc = Document.parse("x = 2026-02-28T23:30:00Z\n")
+        assert local["x"] == utc["x"]
+
     def test_int_eq(self, doc: Document) -> None:
         assert doc["owner"]["age"] == 30
         assert doc["owner"]["age"] != 31

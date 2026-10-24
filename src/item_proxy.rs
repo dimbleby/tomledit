@@ -664,7 +664,7 @@ impl ItemProxy {
             }
         }
         let item = self.navigate_mut(&mut inner)?;
-        comments::set_inline_comment(item, value)?;
+        comments::set_inline_comment(item, &raw)?;
         Ok(())
     }
 

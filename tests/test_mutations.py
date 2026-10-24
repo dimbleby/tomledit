@@ -99,6 +99,26 @@ class TestWriteArrayElements:
 
 
 class TestSetNewKeys:
+    def test_list_subclass_element_error_preserves_document(self) -> None:
+        class CustomList(list[object]):
+            pass
+
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError, match="TOML has no null type"):
+            doc["x"] = CustomList([None])
+        assert doc.as_toml() == text
+
+    def test_mapping_stale_key_preserves_document(self) -> None:
+        source = Document({"key": "x"})
+        key = source["key"]
+        source["key"] = "y"
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="stale"):
+            doc["x"] = ItemsMapping({}, [(key, 2)])
+        assert doc.as_toml() == text
+
     def test_mapping_value_error_preserves_document(self) -> None:
         text = "x = 1\n"
         doc = Document.parse(text)

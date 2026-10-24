@@ -28,6 +28,20 @@ if TYPE_CHECKING:
 
 
 class TestProxyDictMethods:
+    def test_update_invalid_keyword_preserves_document(self) -> None:
+        text = "[t]\nx = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError, match="TOML has no null type"):
+            doc["t"].update(x=None)
+        assert doc.as_toml() == text
+
+    def test_update_scalar_proxy_preserves_document(self) -> None:
+        text = "x = 1\n[t]\ny = 2\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError):
+            doc["t"].update(doc["x"])
+        assert doc.as_toml() == text
+
     # -- keys / values / items --
 
     def test_keys(self, doc: Document) -> None:
@@ -526,6 +540,13 @@ class TestReplaceTableWithValue:
 
 
 class TestDocumentDictMethods:
+    def test_update_invalid_keyword_preserves_document(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError, match="TOML has no null type"):
+            doc.update(x=None)
+        assert doc.as_toml() == text
+
     def test_update_items_error_preserves_document(self) -> None:
         class FailingMapping(ItemsMapping):
             @override
@@ -1297,6 +1318,11 @@ class TestViews:
 class TestItemsViewSetEquality:
     """ItemsView.__eq__ should be set-like (order independent), per Python spec."""
 
+    def test_other_class_check_error_propagates(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(ValueError, match="boom from __class__"):
+            _ = doc.items() == RaisingClassAttr()
+
     def test_other_length_error_propagates(self) -> None:
         class FailingSet(set[tuple[str, int]]):
             @override
@@ -1549,6 +1575,18 @@ class TestPopitem:
 
 class TestMergeOperators:
     """| and |= operators (PEP 584)."""
+
+    def test_union_invalid_value_preserves_document(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError, match="TOML has no null type"):
+            _ = doc | {"y": None}
+        assert doc.as_toml() == text
+
+    def test_reflected_union_rejects_noniterable_items(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(TypeError):
+            _ = ItemsMapping({"x": 2}, 42) | doc  # type: ignore[operator]  # ty: ignore[unsupported-operator]
 
     def test_reflected_union_propagates_items_error(self) -> None:
         class FailingMapping(ItemsMapping):

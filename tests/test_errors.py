@@ -24,6 +24,65 @@ class TestParseErrors:
 
 
 class TestDatetimeConversionErrors:
+    def test_document_string_conversion_error(self) -> None:
+        text = "x = 0000-01-01\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="year"):
+            str(doc)
+        assert doc.as_toml() == text
+
+    def test_item_string_conversion_error(self) -> None:
+        text = "x = 0000-01-01\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="year"):
+            str(doc["x"])
+        assert doc.as_toml() == text
+
+    def test_array_value_conversion_error(self) -> None:
+        text = "x = [0000-01-01]\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="year"):
+            _ = doc["x"].value
+        assert doc.as_toml() == text
+
+    def test_inline_table_value_conversion_error(self) -> None:
+        text = "x = {y = 0000-01-01}\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="year"):
+            _ = doc["x"].value
+        assert doc.as_toml() == text
+
+    def test_array_of_tables_value_conversion_error(self) -> None:
+        text = "[[x]]\ny = 0000-01-01\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="year"):
+            _ = doc["x"].value
+        assert doc.as_toml() == text
+
+    def test_document_popitem_conversion_error(self) -> None:
+        doc = Document.parse("x = 0000-01-01\n")
+        with pytest.raises(ValueError, match="year"):
+            doc.popitem()
+
+    def test_dict_item_popitem_conversion_error(self) -> None:
+        doc = Document.parse("[t]\nx = 0000-01-01\n")
+        with pytest.raises(ValueError, match="year"):
+            doc["t"].popitem()
+
+    def test_document_reflected_union_conversion_error(self) -> None:
+        text = "x = 0000-01-01\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="year"):
+            _ = {} | doc
+        assert doc.as_toml() == text
+
+    def test_dict_item_reflected_union_conversion_error(self) -> None:
+        text = "[t]\nx = 0000-01-01\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="year"):
+            _ = {} | doc["t"]
+        assert doc.as_toml() == text
+
     def test_datetime_leap_second_conversion_error(self) -> None:
         text = "x = 1979-05-27T07:32:60Z\n"
         doc = Document.parse(text)

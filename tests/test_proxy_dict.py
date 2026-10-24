@@ -713,6 +713,13 @@ class TestDocumentDictMethods:
         doc.update()
         assert doc["x"] == 1
 
+    def test_update_rejects_scalar_proxy_without_mutation(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(TypeError):
+            doc.update(doc["x"])
+        assert doc.as_toml() == text
+
     def test_update_mapping_with_keys(self) -> None:
         doc = Document.parse("x = 1\n")
         doc.update(MappingProxyType({"x": 10, "y": 20}))

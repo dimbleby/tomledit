@@ -1369,6 +1369,26 @@ class TestItemsViewSetEquality:
 class TestItemsViewSetOps:
     """ItemsView should support set operators like dict_items does."""
 
+    def test_intersection_date_conversion_error_propagates(self) -> None:
+        doc = Document.parse("x = 0000-01-01\n")
+        with pytest.raises(ValueError, match="year"):
+            _ = doc.items() & set()
+
+    def test_difference_date_conversion_error_propagates(self) -> None:
+        doc = Document.parse("x = 0000-01-01\n")
+        with pytest.raises(ValueError, match="year"):
+            _ = doc.items() - set()
+
+    def test_symmetric_difference_date_conversion_error_propagates(self) -> None:
+        doc = Document.parse("x = 0000-01-01\n")
+        with pytest.raises(ValueError, match="year"):
+            _ = doc.items() ^ set()
+
+    def test_reflected_difference_date_conversion_error_propagates(self) -> None:
+        doc = Document.parse("x = 0000-01-01\n")
+        with pytest.raises(ValueError, match="year"):
+            _ = set() - doc.items()
+
     def test_date_conversion_error_propagates(self) -> None:
         doc = Document.parse("x = 0000-01-01\n")
         with pytest.raises(ValueError, match="year"):
@@ -2230,6 +2250,36 @@ class TestImplicitProperty:
 
 class TestViewSetOpsWithIterables:
     """Set ops on views accept any iterable, not just sets."""
+
+    def test_keys_symmetric_difference_rejects_unhashable_element(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(TypeError, match="unhashable"):
+            _ = doc.keys() ^ [[]]
+
+    def test_keys_reflected_difference_rejects_unhashable_element(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(TypeError, match="unhashable"):
+            _ = [[]] - doc.keys()
+
+    def test_items_intersection_rejects_unhashable_element(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(TypeError, match="unhashable"):
+            _ = doc.items() & [[]]
+
+    def test_items_difference_rejects_unhashable_element(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(TypeError, match="unhashable"):
+            _ = doc.items() - [[]]
+
+    def test_items_symmetric_difference_rejects_unhashable_element(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(TypeError, match="unhashable"):
+            _ = doc.items() ^ [[]]
+
+    def test_items_reflected_difference_rejects_unhashable_element(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(TypeError, match="unhashable"):
+            _ = [[]] - doc.items()
 
     def test_keys_intersection_rejects_noniterable(self) -> None:
         doc = Document.parse("a = 1\n")

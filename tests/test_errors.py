@@ -3,9 +3,46 @@
 from __future__ import annotations
 
 import pytest
+from typing_extensions import override
 
 from tests.conftest import toml_literal
 from tomledit import Document
+
+
+class FailingRepr:
+    @override
+    def __repr__(self) -> str:
+        msg = "repr unavailable"
+        raise RuntimeError(msg)
+
+
+class TestKeyReprErrors:
+    def test_document_lookup_propagates_repr_error(self) -> None:
+        doc = Document({"x": 1})
+        with pytest.raises(RuntimeError, match="repr unavailable"):
+            _ = doc[FailingRepr()]  # type: ignore[index]  # ty: ignore[invalid-argument-type]
+
+    def test_document_delete_propagates_repr_error(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="repr unavailable"):
+            del doc[FailingRepr()]  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        assert doc.as_toml() == text
+
+    def test_document_pop_propagates_repr_error(self) -> None:
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="repr unavailable"):
+            doc.pop(FailingRepr())  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]
+        assert doc.as_toml() == text
+
+    def test_dict_item_pop_propagates_repr_error(self) -> None:
+        text = "[t]\nx = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="repr unavailable"):
+            doc["t"].pop(FailingRepr())
+        assert doc.as_toml() == text
+
 
 # ---------------------------------------------------------------------------
 # Parse errors

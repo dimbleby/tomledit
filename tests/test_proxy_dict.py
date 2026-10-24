@@ -2079,6 +2079,16 @@ class TestViewContainsProxy:
         doc = Document({"t": {"x": 1}})
         assert ("t", Document({"x": 1})) in doc.items()  # type: ignore[comparison-overlap]
 
+    def test_values_contains_table_proxy_from_other_document(self) -> None:
+        source = Document({"t": {"x": 1}})
+        doc = Document({"t": {"x": 1}})
+        assert source["t"] in doc.values()
+
+    def test_items_contains_table_proxy_from_other_document(self) -> None:
+        source = Document({"t": {"x": 1}})
+        doc = Document({"t": {"x": 1}})
+        assert ("t", source["t"]) in doc.items()
+
     def test_values_contains_string_proxy(self) -> None:
         doc = Document.parse('name = "Alice"\n')
         assert doc["name"] in doc.values()

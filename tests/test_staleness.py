@@ -1435,6 +1435,26 @@ class TestStaleScalarOperators:
 
 
 class TestStaleListMethods:
+    def test_integer_get(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_list[0]
+
+    def test_integer_set(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            stale_list[0] = 99
+
+    def test_len(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            len(stale_list)
+
+    def test_iter(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            iter(stale_list)
+
+    def test_mul_zero(self, stale_list: Item) -> None:
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = stale_list * 0
+
     @pytest.fixture
     def stale_list(self) -> Item:
         doc = Document.parse("arr = [1, 2, 3]\n")

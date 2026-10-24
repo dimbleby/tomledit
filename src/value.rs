@@ -149,10 +149,7 @@ pub(crate) fn items_into_array_of_tables(items: Vec<Item>) -> PyResult<ArrayOfTa
 // Table (shared mapping-extraction helper)
 // ---------------------------------------------------------------------------
 
-fn extract_mapping_pairs<'py, V>(obj: Borrowed<'_, 'py, PyAny>) -> PyResult<Vec<(String, V)>>
-where
-    for<'a> V: FromPyObject<'a, 'py, Error = PyErr>,
-{
+fn extract_mapping_pairs(obj: Borrowed<'_, '_, PyAny>) -> PyResult<Vec<(String, Item)>> {
     if let Ok(py_dict) = obj.cast_exact::<PyDict>() {
         let mut pairs = Vec::with_capacity(py_dict.len());
         for (key, value) in py_dict.iter() {
@@ -170,7 +167,7 @@ where
         let (key, value) = extract_pair(&pair)?;
         let key = item_ops::extract_key_str(&key)?
             .ok_or_else(|| PyTypeError::new_err("keys must be strings"))?;
-        let value: V = value.extract()?;
+        let value = value.extract()?;
         pairs.push((key, value));
     }
     Ok(pairs)
@@ -182,7 +179,7 @@ impl<'py> FromPyObject<'_, 'py> for Table {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let pairs: Vec<(String, Item)> = extract_mapping_pairs(obj)?;
+        let pairs = extract_mapping_pairs(obj)?;
         let table = pairs
             .into_iter()
             .map(|(k, v)| (k, v.0))

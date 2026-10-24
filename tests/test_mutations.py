@@ -3,12 +3,29 @@
 from __future__ import annotations
 
 import zoneinfo
-from datetime import date, datetime, time
+from datetime import date, datetime, time, tzinfo
 
 import pytest
+from typing_extensions import override
 
 from tests.conftest import ItemsMapping, toml_literal
 from tomledit import Document, Item
+
+
+class FailingTimezone(tzinfo):
+    @override
+    def utcoffset(self, dt: datetime | None) -> None:
+        msg = "timezone unavailable"
+        raise RuntimeError(msg)
+
+    @override
+    def dst(self, dt: datetime | None) -> None:
+        return None
+
+    @override
+    def tzname(self, dt: datetime | None) -> None:
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Navigation (reading deeply nested paths and array indices)
@@ -198,6 +215,14 @@ class TestSetNewKeys:
         doc["ts"] = now
         assert "2026-01-15" in str(doc["ts"])
 
+    def test_datetime_timezone_error_preserves_document(self) -> None:
+        text = "ts = 1\n"
+        doc = Document.parse(text)
+        value = datetime(2026, 1, 1, tzinfo=FailingTimezone())
+        with pytest.raises(RuntimeError, match="timezone unavailable"):
+            doc["ts"] = value
+        assert doc.as_toml() == text
+
     def test_add_date(self) -> None:
         doc = Document()
         value = date(2024, 1, 15)
@@ -211,6 +236,14 @@ class TestSetNewKeys:
         doc["t"] = value
         assert doc["t"].value == value
         assert doc.as_toml() == "t = 10:30:45\n"
+
+    def test_time_timezone_error_preserves_document(self) -> None:
+        text = "t = 1\n"
+        doc = Document.parse(text)
+        value = time(12, tzinfo=FailingTimezone())
+        with pytest.raises(RuntimeError, match="timezone unavailable"):
+            doc["t"] = value
+        assert doc.as_toml() == text
 
     def test_add_time_with_tzinfo_raises(self) -> None:
         doc = Document()

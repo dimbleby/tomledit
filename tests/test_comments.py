@@ -19,6 +19,10 @@ class TestComment:
         doc = Document.parse("key = 42\n")
         assert doc["key"].inline_comment is None
 
+    def test_read_no_inline_comment_on_constructed_value(self) -> None:
+        doc = Document({"key": 42})
+        assert doc["key"].inline_comment is None
+
     def test_read_inline_on_table_value(self) -> None:
         doc = Document.parse(
             toml_literal("""
@@ -1561,6 +1565,18 @@ class TestAotEntryComments:
     Regular ``[table]`` comments are readable and settable via ``.comment``.
     The same should work for each ``[[array-of-tables]]`` entry.
     """
+
+    def test_read_comment_after_clearing_aot(self) -> None:
+        doc = Document.parse("# entries\n[[items]]\nx = 1\n")
+        doc["items"].clear()
+        assert doc["items"].comment is None
+
+    def test_invalid_comment_on_later_entry_preserves_document(self) -> None:
+        text = "[[items]]\nx = 1\n[[items]]\nx = 2\n"
+        doc = Document.parse(text)
+        with pytest.raises(ValueError, match="comment"):
+            doc["items"][1].comment = "invalid"
+        assert doc.as_toml() == text
 
     def test_read_comment_on_aot_entry(self) -> None:
         """A comment above an AoT entry header should be readable."""

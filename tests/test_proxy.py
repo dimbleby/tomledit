@@ -718,6 +718,18 @@ class TestSubclassTypes:
         assert isinstance(item, DictItem)
         assert item.value == {"a": 1}
 
+    def test_dict_item_parse_invalid_toml(self) -> None:
+        with pytest.raises(ValueError, match="unclosed inline table"):
+            DictItem.parse("{")
+
+    def test_list_item_parse_invalid_toml(self) -> None:
+        with pytest.raises(ValueError, match="unclosed array"):
+            ListItem.parse("[")
+
+    def test_scalar_item_parse_invalid_toml(self) -> None:
+        with pytest.raises(ValueError, match="string values must be quoted"):
+            ScalarItem.parse("???")
+
     def test_list_item_parse_array(self) -> None:
         item = ListItem.parse("[1, 2]")
         assert isinstance(item, ListItem)

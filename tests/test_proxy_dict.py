@@ -10,12 +10,16 @@ from collections.abc import (
 )
 from datetime import datetime
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 import pytest
 
 import tomledit
 from tests.conftest import ItemsMapping, RaisingClassAttr, toml_literal
 from tomledit import Document
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # ---------------------------------------------------------------------------
 # Proxy dict-like methods (keys, values, items, get, pop, update, etc.)
@@ -707,6 +711,18 @@ class TestDocumentDictMethods:
         doc.update([("x", 10), ("y", 20)])
         assert doc["x"] == 10
         assert doc["y"] == 20
+
+    def test_update_iterator_error_preserves_document(self) -> None:
+        def failing_pairs() -> Iterator[tuple[str, int]]:
+            yield ("x", 10)
+            msg = "iteration failed"
+            raise RuntimeError(msg)
+
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="iteration failed"):
+            doc.update(failing_pairs())
+        assert doc.as_toml() == text
 
     def test_update_no_args(self) -> None:
         doc = Document.parse("x = 1\n")

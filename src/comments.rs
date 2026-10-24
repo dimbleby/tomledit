@@ -147,8 +147,8 @@ pub(crate) fn get_inline_comment(item: &ItemRs) -> Option<String> {
     value_suffix_inline(decor.suffix()?.as_str()?).map(str::to_owned)
 }
 
-/// Set the inline comment on an item's value decor (the `# ...` after the value).
-pub(crate) fn set_inline_comment(item: &mut ItemRs, comment: Option<&str>) -> PyResult<()> {
+/// Set an item's inline comment using a validated decor suffix.
+pub(crate) fn set_inline_comment(item: &mut ItemRs, suffix: &str) -> PyResult<()> {
     let decor = match item {
         ItemRs::Value(v) => v.decor_mut(),
         ItemRs::Table(t) => t.decor_mut(),
@@ -159,10 +159,7 @@ pub(crate) fn set_inline_comment(item: &mut ItemRs, comment: Option<&str>) -> Py
             )));
         }
     };
-    match comment {
-        Some(text) => decor.set_suffix(validate_inline_comment(text)?),
-        None => decor.set_suffix(""),
-    }
+    decor.set_suffix(suffix);
     Ok(())
 }
 

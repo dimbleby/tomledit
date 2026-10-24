@@ -398,6 +398,16 @@ class TestSetNewKeys:
         assert doc.as_toml() == "ts = 2024-01-15T12:00:00\n"
 
 
+class TestListConversionErrors:
+    def test_remove_propagates_timezone_error(self) -> None:
+        text = "arr = [1, 2]\n"
+        doc = Document.parse(text)
+        value = datetime(2026, 1, 1, tzinfo=FailingTimezone())
+        with pytest.raises(RuntimeError, match="timezone unavailable"):
+            doc["arr"].remove(value)
+        assert doc.as_toml() == text
+
+
 # ---------------------------------------------------------------------------
 # Chained mutation on array-of-tables
 # ---------------------------------------------------------------------------

@@ -459,6 +459,38 @@ class TestStaleProxyAsListIndex:
 
 
 class TestStaleProxyOperands:
+    def test_dict_union_rejects_stale_mapping(self) -> None:
+        doc = Document({"src": {"x": 1}, "dst": {"y": 2}})
+        source = doc["src"]
+        del doc["src"]
+        text = doc.as_toml()
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = doc["dst"] | source
+        assert doc.as_toml() == text
+
+    def test_values_contains_rejects_stale_value(self) -> None:
+        doc = Document({"value": 1, "x": 1})
+        value = doc["value"]
+        del doc["value"]
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = value in doc.values()
+
+    def test_values_contains_rejects_stale_value_from_other_document(self) -> None:
+        source = Document({"value": 1})
+        value = source["value"]
+        del source["value"]
+        doc = Document({"x": 1})
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = value in doc.values()
+
+    def test_items_contains_rejects_stale_value_from_other_document(self) -> None:
+        source = Document({"value": 1})
+        value = source["value"]
+        del source["value"]
+        doc = Document({"t": {"x": 1}})
+        with pytest.raises(RuntimeError, match="stale"):
+            _ = ("x", value) in doc["t"].items()
+
     def test_assignment_rejects_stale_value(self) -> None:
         doc = Document({"value": 1, "target": 2})
         value = doc["value"]

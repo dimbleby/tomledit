@@ -24,6 +24,13 @@ class TestProxyListMethods:
         assert doc["arr"][0] == 1
         assert len(doc["arr"]) == 3
 
+    def test_insert_aot_into_array(self) -> None:
+        source = Document.parse("[[items]]\nx = 1\n[[items]]\nx = 2\n")
+        doc = Document({"arr": [1, 2]})
+        doc["arr"].insert(0, source["items"])
+        assert doc["arr"].value == [[{"x": 1}, {"x": 2}], 1, 2]
+        assert Document.parse(doc.as_toml()).value == doc.value
+
     def test_insert_at_end(self) -> None:
         doc = Document.parse("arr = [1, 2]\n")
         doc["arr"].insert(2, 3)

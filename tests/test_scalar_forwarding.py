@@ -376,6 +376,13 @@ class TestPowModuloProxy:
         doc = Document.parse("n = 3\nmod = 5")
         assert pow(2, doc["n"], doc["mod"]) == pow(2, 3, 5)  # type: ignore[misc]  # ty: ignore[no-matching-overload]
 
+    def test_rpow_with_stale_proxy_modulo_raises(self) -> None:
+        doc = Document({"n": 3, "mod": 5})
+        modulo = doc["mod"]
+        del doc["mod"]
+        with pytest.raises(RuntimeError, match="stale"):
+            pow(2, doc["n"], modulo)  # type: ignore[misc]  # ty: ignore[no-matching-overload]
+
     def test_pow_all_proxies(self) -> None:
         doc = Document.parse("a = 5\nb = 3\nm = 7")
         assert pow(doc["a"], doc["b"], doc["m"]) == pow(5, 3, 7)

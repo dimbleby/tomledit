@@ -724,6 +724,19 @@ class TestDocumentDictMethods:
             doc.update(failing_pairs())
         assert doc.as_toml() == text
 
+    def test_update_pair_iterator_error_preserves_document(self) -> None:
+        def failing_pair() -> Iterator[str | int]:
+            yield "x"
+            yield 10
+            msg = "pair iteration failed"
+            raise RuntimeError(msg)
+
+        text = "x = 1\n"
+        doc = Document.parse(text)
+        with pytest.raises(RuntimeError, match="pair iteration failed"):
+            doc.update([failing_pair()])  # type: ignore[list-item]  # ty: ignore[no-matching-overload]
+        assert doc.as_toml() == text
+
     def test_update_no_args(self) -> None:
         doc = Document.parse("x = 1\n")
         doc.update()
@@ -2060,6 +2073,21 @@ class TestViewSetOpsWithIterables:
         doc = Document.parse("[t]\na = 1\n")
         result = doc["t"].keys() | ["b", "c"]
         assert result == {"a", "b", "c"}
+
+    def test_keys_union_rejects_unhashable_element(self) -> None:
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(TypeError, match="unhashable"):
+            _ = doc.keys() | [[]]
+
+    def test_keys_intersection_propagates_iterator_error(self) -> None:
+        def failing_keys() -> Iterator[str]:
+            yield "a"
+            msg = "iteration failed"
+            raise RuntimeError(msg)
+
+        doc = Document.parse("a = 1\n")
+        with pytest.raises(RuntimeError, match="iteration failed"):
+            _ = doc.keys() & failing_keys()
 
     def test_keys_xor_with_list(self) -> None:
         doc = Document.parse("[t]\na = 1\nb = 2\n")

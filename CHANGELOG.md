@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.2.9 (5 November 2026)
+
+- upgrade dependencies
+
 ## 1.2.8 (15 October 2026)
 
 - upgrade dependencies

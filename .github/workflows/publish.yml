@@ -32,7 +32,7 @@ jobs:
           python-version: "3.x"
 
       - name: Build sdist
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        uses: dimbleby/maturin-action@7fcc2e2f1181bd492069dd4b6a51021cf3d48bdb # sccache-github-releases
         with:
           command: sdist
           maturin-version: v1.16.0
@@ -152,7 +152,7 @@ jobs:
           allow-prereleases: true
 
       - name: Build wheels
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        uses: dimbleby/maturin-action@7fcc2e2f1181bd492069dd4b6a51021cf3d48bdb # sccache-github-releases
         env:
           MATURIN_PGO: ${{ matrix.platform.pgo }}
         with:

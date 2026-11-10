@@ -140,7 +140,7 @@ class TestSetNewKeys:
     def test_datetime_invalid_offset_preserves_document(self) -> None:
         class InvalidDatetime(datetime):
             @override
-            def utcoffset(self) -> int:  # type: ignore[override]  # ty: ignore[invalid-method-override]
+            def utcoffset(self) -> int:  # type: ignore[override]  # ty: ignore[incompatible-method-override]
                 return 42
 
         text = "x = 1\n"
@@ -152,7 +152,7 @@ class TestSetNewKeys:
     def test_time_invalid_offset_preserves_document(self) -> None:
         class InvalidTime(time):
             @override
-            def utcoffset(self) -> int:  # type: ignore[override]  # ty: ignore[invalid-method-override]
+            def utcoffset(self) -> int:  # type: ignore[override]  # ty: ignore[incompatible-method-override]
                 return 42
 
         text = "x = 1\n"

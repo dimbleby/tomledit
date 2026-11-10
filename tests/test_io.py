@@ -91,7 +91,7 @@ class TestDumps:
     def test_dict_subclass_items_override_is_honoured(self) -> None:
         class MyDict(dict[str, object]):
             @override
-            def items(  # type: ignore[override]  # ty: ignore[invalid-method-override]
+            def items(  # type: ignore[override]  # ty: ignore[incompatible-method-override]
                 self,
             ) -> object:
                 return [("override", 7)]

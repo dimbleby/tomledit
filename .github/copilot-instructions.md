@@ -28,6 +28,12 @@ make coverage       # Instrumented build + llvm-cov report
 
 To run a single test: `make build && pytest tests/test_comments.py::TestComment::test_set_comment -v`
 
+## GitHub Actions
+
+Use full version tags in workflows and run `gh actions-lock` after changing
+actions. Commit `.github/workflows/actions.lock`; do not edit it by hand.
+Verify with `gh actions-lock --verify`.
+
 ## Architecture
 
 ### Frozen classes with `RwLock`

@@ -185,4 +185,6 @@ Use `from __future__ import annotations` (enforced by ruff).
   Adjust the resolved bounds against the current length under the lock.
   Reflected mapping unions snapshot the TOML entries before merging into a
   Python dict, whose existing keys can run equality callbacks.
+  Module initialization warms PyO3's datetime caches so conversions do not
+  lazily import Python modules while holding document locks.
 - **`from __future__ import annotations`** is required in every Python file.

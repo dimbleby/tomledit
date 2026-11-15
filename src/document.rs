@@ -297,10 +297,8 @@ impl Document {
             return Ok(py.NotImplemented());
         }
         let dict = dict_ops::copy_mapping_to_pydict(other, py)?;
-        let inner = self.inner.read_py_attached(py);
-        for (k, v) in inner.iter() {
-            dict.set_item(k, item_ops::item_to_py(v, py)?)?;
-        }
+        let snapshot = self.inner.read_py_attached(py).as_item().clone();
+        dict_ops::extend_pydict(&dict, snapshot)?;
         Ok(dict.into_any().unbind())
     }
 

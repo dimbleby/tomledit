@@ -183,4 +183,6 @@ Use `from __future__ import annotations` (enforced by ruff).
   Nested read locks can deadlock behind queued writers.
   Unpack slice bounds before locking; `__index__` can re-enter the document.
   Adjust the resolved bounds against the current length under the lock.
+  Reflected mapping unions snapshot the TOML entries before merging into a
+  Python dict, whose existing keys can run equality callbacks.
 - **`from __future__ import annotations`** is required in every Python file.

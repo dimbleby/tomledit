@@ -547,6 +547,13 @@ pub(crate) fn copy_mapping_to_pydict<'py>(
     Ok(dict)
 }
 
+/// Merge a TOML snapshot into a Python dict without holding document locks.
+pub(crate) fn extend_pydict(dict: &Bound<'_, PyDict>, snapshot: ItemRs) -> PyResult<()> {
+    for_each_entry(&snapshot, |key, item| {
+        dict.set_item(key, item_ops::item_to_py(item, dict.py())?)
+    })
+}
+
 fn normalize_plain_dict_key<'py>(key: &Bound<'py, PyAny>, py: Python<'py>) -> PyResult<Py<PyAny>> {
     if let Some(key) = item_ops::extract_key_str(key)? {
         return Ok(PyString::new(py, &key).into_any().unbind());

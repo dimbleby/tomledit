@@ -82,6 +82,9 @@ impl Document {
 
     /// Acquire `inner.read()` and then verify the proxy is still fresh.
     ///
+    /// For fixed revisions such as views. Live proxies must load their
+    /// current revision after acquiring the lock.
+    ///
     /// Locking first closes the TOCTOU window between the freshness check
     /// and the read: mutations take `inner.write()` while they stamp the
     /// trie, so once we hold `inner.read()` the trie has already recorded
@@ -98,20 +101,6 @@ impl Document {
         revision: u64,
     ) -> PyResult<parking_lot::RwLockReadGuard<'_, DocumentRs>> {
         let guard = self.inner.read_py_attached(py);
-        self.check_fresh(path, revision)?;
-        Ok(guard)
-    }
-
-    /// Acquire `inner.write()` and then verify the proxy is still fresh.
-    ///
-    /// See `read_checked` for why we use the `_py_attached` variant.
-    pub(crate) fn write_checked(
-        &self,
-        py: Python<'_>,
-        path: &[Key],
-        revision: u64,
-    ) -> PyResult<parking_lot::RwLockWriteGuard<'_, DocumentRs>> {
-        let guard = self.inner.write_py_attached(py);
         self.check_fresh(path, revision)?;
         Ok(guard)
     }

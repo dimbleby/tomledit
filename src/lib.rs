@@ -27,11 +27,20 @@ use document::Document;
 use item_proxy::ItemProxy;
 use list_proxy::ListProxy;
 use pyo3::prelude::*;
+use pyo3::types::{PyDate, PyDateTime, PyDelta, PyTime, PyTzInfo};
 use scalar_proxy::ScalarProxy;
 use views::{ItemsView, KeysView, ValuesView};
 
 #[pymodule]
 fn tomledit(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let py = m.py();
+    // Initialize PyO3's datetime caches before any document locks can be held.
+    py.import("datetime")?;
+    py.get_type::<PyDate>();
+    py.get_type::<PyDateTime>();
+    py.get_type::<PyTime>();
+    PyTzInfo::fixed_offset(py, PyDelta::new(py, 0, 0, 0, true)?)?;
+
     m.add_class::<Document>()?;
     m.add_class::<ItemProxy>()?;
     m.add_class::<DictProxy>()?;

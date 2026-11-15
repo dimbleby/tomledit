@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.2.10 (15 November 2026)
+
 - Fix several locking and thread-safety bugs, including on free-threaded Python.
 
 ## 1.2.9 (5 November 2026)

@@ -96,7 +96,7 @@ impl ListProxy {
                     let (doc, inner) = base.read_checked(py)?;
                     let item = base.navigate(&inner)?;
                     let target = list_ops::as_array_like(item, "slicing")?;
-                    let si = slice.indices(target.len() as isize)?;
+                    let si = slice.indices(target.len() as isize);
                     let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
                     indices
                         .into_iter()
@@ -138,7 +138,7 @@ impl ListProxy {
                 let (doc, mut inner) = base.write_checked(py)?;
                 let item = base.navigate_mut(&mut inner)?;
                 let target = list_ops::as_array_like_mut(item, "slice assignment")?;
-                let si = slice.indices(target.len() as isize)?;
+                let si = slice.indices(target.len() as isize);
                 let old_len = target.len();
                 let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
                 let new_count = values.len();
@@ -178,7 +178,7 @@ impl ListProxy {
         match resolved {
             SubscriptKey::Slice(slice) => {
                 let target = list_ops::as_array_like_mut(item, "slice deletion")?;
-                let si = slice.indices(target.len() as isize)?;
+                let si = slice.indices(target.len() as isize);
                 let indices = list_ops::collect_slice_indices(si.start, si.stop, si.step);
                 if let Some(&min_idx) = indices.iter().min() {
                     let old_len = target.len();

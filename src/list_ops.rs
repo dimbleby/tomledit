@@ -1,6 +1,7 @@
 use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PySlice;
+use pyo3::types::slice::PySliceIndices;
 use toml_edit::Item as ItemRs;
 use toml_edit::Value as ValueRs;
 
@@ -1133,9 +1134,51 @@ pub(crate) fn list_pop(target: ArrayLikeMut<'_>, index: Option<i64>) -> PyResult
 ///
 /// Proxy values are resolved to their plain Python equivalents so that
 /// `extract()` works without locking the document.
-pub(crate) enum SubscriptKey<'py> {
+pub(crate) enum SubscriptKey {
     Int(i64),
-    Slice(Bound<'py, PySlice>),
+    Slice(ResolvedSlice),
+}
+
+pub(crate) struct ResolvedSlice {
+    start: isize,
+    stop: isize,
+    step: isize,
+}
+
+impl ResolvedSlice {
+    fn unpack(slice: &Bound<'_, PySlice>) -> PyResult<Self> {
+        let mut result = Self {
+            start: 0,
+            stop: 0,
+            step: 0,
+        };
+        // SAFETY: slice is a valid Python slice and the output pointers refer to live fields.
+        let status = unsafe {
+            pyo3::ffi::PySlice_Unpack(
+                slice.as_ptr(),
+                &mut result.start,
+                &mut result.stop,
+                &mut result.step,
+            )
+        };
+        if status < 0 {
+            return Err(PyErr::fetch(slice.py()));
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn indices(mut self, length: isize) -> PySliceIndices {
+        // SAFETY: unpacking guarantees a nonzero step. Adjustment cannot call Python.
+        let slice_len = unsafe {
+            pyo3::ffi::PySlice_AdjustIndices(length, &mut self.start, &mut self.stop, self.step)
+        };
+        PySliceIndices {
+            start: self.start,
+            stop: self.stop,
+            step: self.step,
+            slicelength: slice_len as usize,
+        }
+    }
 }
 
 /// Resolve a `__getitem__`/`__setitem__`/`__delitem__` key to a typed enum.
@@ -1146,9 +1189,9 @@ pub(crate) enum SubscriptKey<'py> {
 pub(crate) fn resolve_subscript_key<'py>(
     py: Python<'py>,
     key: &Bound<'py, PyAny>,
-) -> PyResult<SubscriptKey<'py>> {
+) -> PyResult<SubscriptKey> {
     if let Ok(slice) = key.cast::<PySlice>() {
-        return Ok(SubscriptKey::Slice(slice.clone()));
+        return ResolvedSlice::unpack(slice).map(SubscriptKey::Slice);
     }
     let resolved = crate::item_proxy::resolve_proxy(key)?;
     let resolved_key = resolved.as_ref().map_or(key, |v| v.bind(py));

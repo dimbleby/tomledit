@@ -2393,6 +2393,16 @@ class TestWriteLockDeadlocks:
         assert val == 3
         assert doc["arr"] == [1, 2]
 
+    def test_slice_assignment_with_proxy_bounds(self) -> None:
+        doc = Document({"arr": [1, 2, 3], "start": 1, "stop": 3, "step": 1})
+        doc["arr"][doc["start"] : doc["stop"] : doc["step"]] = [9]
+        assert doc["arr"] == [1, 9]
+
+    def test_slice_deletion_with_proxy_bounds(self) -> None:
+        doc = Document({"arr": [1, 2, 3], "start": 1, "stop": 3, "step": 1})
+        del doc["arr"][doc["start"] : doc["stop"] : doc["step"]]
+        assert doc["arr"] == [1]
+
 
 # ---------------------------------------------------------------------------
 # Multiply / repeat with edge counts

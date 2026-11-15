@@ -178,4 +178,7 @@ Use `from __future__ import annotations` (enforced by ruff).
   `inner.write()` — otherwise the write lock can deadlock with a nested read.
   Use `resolve_proxy()` or `.extract::<Item>()` first.
   See `ListProxy::remove` for the two-phase (read then write) pattern.
+  Comparisons use `with_resolved_item`: reuse the guard for same-document
+  operands, but snapshot cross-document operands before locking the destination.
+  Nested read locks can deadlock behind queued writers.
 - **`from __future__ import annotations`** is required in every Python file.

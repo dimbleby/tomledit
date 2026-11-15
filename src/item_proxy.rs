@@ -37,15 +37,11 @@ use crate::scalar_proxy::ScalarProxy;
 //                               or any TOML-convertible Python value.  No
 //                               source lock is retained, so the caller can
 //                               then take a write lock on the same document.
-// * `with_resolved_item`      — borrow the `Item` behind a value while a
-//                               destination read guard is held.  Reuses
-//                               the destination guard for same-document
-//                               proxies/Documents — this is a correctness
-//                               requirement, not just an optimisation:
-//                               `parking_lot::RwLock` reads are not
-//                               reentrant, and under free-threaded Python
-//                               a writer queued between the two reads
-//                               would deadlock.
+// * `with_resolved_item`      — reuse the destination read guard for
+//                               same-document proxies/Documents; snapshot
+//                               other operands before taking that guard.
+//                               Recursive reads or cross-document nested
+//                               reads can deadlock behind queued writers.
 //
 // The four "no dest lock" helpers above (`with_proxy_item`,
 // `with_proxy_or_doc_item`, `extract_owned_item`, and the proxy arm of
@@ -116,11 +112,9 @@ pub(crate) fn extract_owned_item(value: &Bound<'_, PyAny>) -> PyResult<Option<It
 /// Borrow the `Item` behind `value` while a destination read guard is held,
 /// reusing the guard for same-document proxies/Documents.
 ///
-/// Fast path: if `value` is a proxy or `Document`, `f` runs without cloning.
-/// For same-document needles the destination's existing guard is reused
-/// (avoiding a recursive read that could deadlock under a queued writer).
-/// Slow path: the value is extracted to an owned `Item` (no lock held), then
-/// `f` runs under a fresh destination read lock.
+/// Same-document operands reuse the destination guard without cloning.
+/// Other operands are extracted to an owned `Item` with no destination lock
+/// held, so locks on different documents are never nested.
 ///
 /// `check_fresh` is invoked **under** every destination read lock taken,
 /// closing the TOCTOU window between freshness check and read.
@@ -136,9 +130,8 @@ pub(crate) fn with_resolved_item<R>(
     {
         let inner = doc.inner.read_py_attached(value.py());
         check_fresh(doc)?;
-        let ctx = ReadCtx { doc, inner: &inner };
-        if let Some(result) = resolve_other_item(value, &ctx, |item| f(&inner, item))? {
-            return result.map(Some);
+        if let Some(item) = same_document_item(value, doc, &inner)? {
+            return f(&inner, item).map(Some);
         }
     }
     let Some(extracted) = try_extract_item(value)? else {
@@ -149,47 +142,22 @@ pub(crate) fn with_resolved_item<R>(
     f(&inner, &extracted.0).map(Some)
 }
 
-// ---------------------------------------------------------------------------
-// Private pieces shared by `with_resolved_item`'s same-doc-reuse path.
-// ---------------------------------------------------------------------------
-
-/// Carries an existing destination guard so that same-document proxy/Document
-/// resolution can reuse it instead of acquiring a (non-reentrant) nested read.
-struct ReadCtx<'a> {
-    doc: &'a Document,
-    inner: &'a DocumentRs,
-}
-
-/// Resolve `value` as an `ItemProxy` or `Document` under the destination
-/// guard `ctx`, calling `f` with the borrow.  Returns `None` when `value` is
-/// neither.  Same-document needles reuse `ctx`'s guard.
-fn resolve_other_item<R>(
+/// Resolve same-document operands using the caller's existing read guard.
+fn same_document_item<'a>(
     value: &Bound<'_, PyAny>,
-    ctx: &ReadCtx<'_>,
-    f: impl Fn(&ItemRs) -> R,
-) -> PyResult<Option<R>> {
+    doc: &Document,
+    inner: &'a DocumentRs,
+) -> PyResult<Option<&'a ItemRs>> {
     if let Ok(proxy) = value.cast::<ItemProxy>() {
         let proxy = proxy.get();
-        let doc = proxy.document.bind(value.py()).get();
-        if std::ptr::eq(ctx.doc, doc) {
-            // Same document: reuse the caller's guard.  `check_fresh` is
-            // coherent because any invalidating mutation would have been
-            // stamped into the trie before the guard was taken.
+        if std::ptr::eq(doc, proxy.doc(value.py())) {
             proxy.check_fresh(doc)?;
-            let item = proxy.navigate(ctx.inner)?;
-            return Ok(Some(f(item)));
+            return proxy.navigate(inner).map(Some);
         }
-        let (_doc, inner) = proxy.read_checked(value.py())?;
-        let item = proxy.navigate(&inner)?;
-        return Ok(Some(f(item)));
-    }
-    if let Ok(doc_bound) = value.cast::<Document>() {
-        let doc = doc_bound.get();
-        if std::ptr::eq(ctx.doc, doc) {
-            return Ok(Some(f(ctx.inner.as_item())));
-        }
-        let inner = doc.inner.read_py_attached(value.py());
-        return Ok(Some(f(inner.as_item())));
+    } else if let Ok(other) = value.cast::<Document>()
+        && std::ptr::eq(doc, other.get())
+    {
+        return Ok(Some(inner.as_item()));
     }
     Ok(None)
 }
@@ -723,5 +691,67 @@ pub(crate) fn parse_as<T: pyo3::type_object::PyTypeInfo>(
             "{class_name}.parse() requires a {expected} value, got {}",
             result.bind(py).get_type().qualname()?,
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, mpsc};
+    use std::thread;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn cross_document_comparison_allows_destination_writes() {
+        Python::initialize();
+        Python::attach(|py| {
+            for use_proxy in [false, true] {
+                let destination = Arc::new(Document::from_inner("value = 1".parse().unwrap()));
+                let source =
+                    Py::new(py, Document::from_inner("value = 1".parse().unwrap())).unwrap();
+                let value = if use_proxy {
+                    Py::new(py, ItemProxy::new(source.clone_ref(py), vec![], 0))
+                        .unwrap()
+                        .into_any()
+                } else {
+                    source.clone_ref(py).into_any()
+                };
+                let source_guard = source.get().inner.write_py_attached(py);
+                let (checked_tx, checked_rx) = mpsc::channel();
+                let comparison_destination = Arc::clone(&destination);
+                let comparison = thread::spawn(move || {
+                    Python::attach(|py| {
+                        with_resolved_item(
+                            value.bind(py),
+                            &comparison_destination,
+                            |_| {
+                                let _ = checked_tx.send(());
+                                Ok(())
+                            },
+                            |inner, needle| {
+                                Ok(equality::items_structural_eq(inner.as_item(), needle))
+                            },
+                        )
+                    })
+                });
+
+                let wrote = py.detach(move || {
+                    checked_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    if let Some(mut inner) = destination.inner.try_write_for(Duration::from_secs(1))
+                    {
+                        inner["value"] = toml_edit::value(2);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                drop(source_guard);
+                let result = py.detach(|| comparison.join().unwrap()).unwrap();
+
+                assert!(wrote, "comparison blocked a write to its destination");
+                assert_eq!(result, Some(false));
+            }
+        });
     }
 }

@@ -241,14 +241,11 @@ impl DictProxy {
         }
         let dict = dict_ops::copy_mapping_to_pydict(other, py)?;
         let base = slf.as_super().get();
-        let (_doc, inner) = base.read_checked(py)?;
-        let item = base.navigate(&inner)?;
-        let tbl = item
-            .as_table_like()
-            .ok_or_else(|| item_ops::unsupported_op(item, "|"))?;
-        for (k, v) in tbl.iter() {
-            dict.set_item(k, item_ops::item_to_py(v, py)?)?;
-        }
+        let snapshot = {
+            let (_doc, inner) = base.read_checked(py)?;
+            base.navigate(&inner)?.clone()
+        };
+        dict_ops::extend_pydict(&dict, snapshot)?;
         Ok(dict.into_any().unbind())
     }
 

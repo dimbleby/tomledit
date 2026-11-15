@@ -70,53 +70,48 @@ NATIVE_DATA["dates"] = {
 }
 
 
-def train_parsing() -> int:
-    checksum = 0
+def train_parsing() -> None:
     for _ in range(8_000 // WORKER_COUNT):
-        checksum += len(loads(SMALL_FIXTURE))
+        _ = len(loads(SMALL_FIXTURE))
     for _ in range(1_800 // WORKER_COUNT):
-        checksum += len(Document.parse(FIXTURE))
+        _ = len(Document.parse(FIXTURE))
     for _ in range(1_200 // WORKER_COUNT):
-        checksum += len(loads(FIXTURE))
+        _ = len(loads(FIXTURE))
     for _ in range(300 // WORKER_COUNT):
-        checksum += len(Document.parse(FIXTURE).as_toml())
-    return checksum
+        Document.parse(FIXTURE).as_toml()
 
 
-def train_reads() -> int:
+def train_reads() -> None:
     doc = Document.parse(FIXTURE)
-    checksum = 0
     for repetition in range(4_000 // WORKER_COUNT):
         section_number = repetition % SECTION_COUNT
         section = doc[f"section_{section_number}"]
         read_kind = repetition % 4
         if read_kind == 0:
-            checksum += int(section["ordinal"])
-            checksum += int(section["values"][repetition % 4])
-            checksum += len(section["values"][1:3])
+            _ = int(section["ordinal"])
+            _ = int(section["values"][repetition % 4])
+            _ = section["values"][1:3]
         elif read_kind == 1:
-            checksum += len(section["name"].value)
-            checksum += len(section["name"].inline_comment or "")
-            checksum += len(section["ordinal"].comment or "")
-            checksum += int("name" in section)
+            _ = section["name"].value
+            _ = section["name"].inline_comment
+            _ = section["ordinal"].comment
+            _ = "name" in section
         elif read_kind == 2:
             metadata = section["metadata"]
-            checksum += len(metadata["owner"].value)
-            checksum += int(metadata["priority"])
-            checksum += len(metadata["labels"][repetition % 2].value)
-            checksum += len(metadata.keys())
+            _ = metadata["owner"].value
+            _ = int(metadata["priority"])
+            _ = metadata["labels"][repetition % 2].value
+            _ = len(metadata.keys())
         else:
-            checksum += int(section["members"][repetition % 2]["score"])
-            checksum += int(bool(section["enabled"]))
-            checksum += int(float(section["ratio"]) * 1_000)
-            checksum += len(section.items())
+            _ = int(section["members"][repetition % 2]["score"])
+            _ = bool(section["enabled"])
+            _ = float(section["ratio"])
+            _ = len(section.items())
     for _ in range(400 // WORKER_COUNT):
-        checksum += len(doc.value)
-    return checksum
+        _ = doc.value
 
 
-def train_mutations() -> int:
-    checksum = 0
+def train_mutations() -> None:
     for repetition in range(80 // WORKER_COUNT):
         doc = Document.parse(FIXTURE)
         for section_number in range(0, SECTION_COUNT, 9):
@@ -151,31 +146,25 @@ def train_mutations() -> int:
         doc["published"] = datetime(2026, 9, 5, 18, repetition % 60, tzinfo=UTC)
         doc["release_date"] = date(2026, 9, repetition % 28 + 1)
         doc["release_time"] = time(18, repetition % 60, repetition % 60)
-        checksum += len(doc.as_toml())
-    return checksum
+        doc.as_toml()
 
 
-def train_io() -> int:
-    checksum = 0
+def train_io() -> None:
     for _ in range(2_000 // WORKER_COUNT):
         text = dumps(NATIVE_DATA)
-        checksum += len(loads(text))
+        _ = len(loads(text))
 
         buffer = io.BytesIO()
         dump(NATIVE_DATA, buffer)
         buffer.seek(0)
-        checksum += len(load(buffer))
-    return checksum
+        _ = len(load(buffer))
 
 
 def train() -> None:
-    checksum = train_parsing()
-    checksum += train_reads()
-    checksum += train_mutations()
-    checksum += train_io()
-    if checksum <= 0:
-        msg = "PGO workload did not exercise tomledit"
-        raise RuntimeError(msg)
+    train_parsing()
+    train_reads()
+    train_mutations()
+    train_io()
 
 
 if __name__ == "__main__":

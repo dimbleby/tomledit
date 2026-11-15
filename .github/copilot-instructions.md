@@ -181,4 +181,6 @@ Use `from __future__ import annotations` (enforced by ruff).
   Comparisons use `with_resolved_item`: reuse the guard for same-document
   operands, but snapshot cross-document operands before locking the destination.
   Nested read locks can deadlock behind queued writers.
+  Unpack slice bounds before locking; `__index__` can re-enter the document.
+  Adjust the resolved bounds against the current length under the lock.
 - **`from __future__ import annotations`** is required in every Python file.

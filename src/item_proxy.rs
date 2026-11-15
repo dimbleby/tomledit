@@ -237,7 +237,8 @@ impl ItemProxy {
         py: Python<'py>,
     ) -> PyResult<(&'py Document, parking_lot::RwLockReadGuard<'py, DocumentRs>)> {
         let doc = self.doc(py);
-        let guard = doc.read_checked(py, &self.path, self.revision.load(Ordering::Relaxed))?;
+        let guard = doc.inner.read_py_attached(py);
+        self.check_fresh(doc)?;
         Ok((doc, guard))
     }
 
@@ -251,7 +252,8 @@ impl ItemProxy {
         parking_lot::RwLockWriteGuard<'py, DocumentRs>,
     )> {
         let doc = self.doc(py);
-        let guard = doc.write_checked(py, &self.path, self.revision.load(Ordering::Relaxed))?;
+        let guard = doc.inner.write_py_attached(py);
+        self.check_fresh(doc)?;
         Ok((doc, guard))
     }
 

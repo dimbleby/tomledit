@@ -79,6 +79,8 @@ atomically acquire the document's `inner` lock **and** verify the proxy is still
 fresh — closing the TOCTOU window between the freshness check and the read/write
 under free-threading.
 Always prefer them over a separate `bind` + `inner.read/write` sequence.
+The proxy revision must be loaded after acquiring `inner`, since another
+operation can refresh the same proxy while a thread waits for the lock.
 
 ```rust
 pub fn my_method(&self, py: Python<'_>) -> PyResult<...> {
@@ -113,7 +115,7 @@ invalidation).
 
 | File                                                  | Role                                                                                        |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `document.rs`                                         | `Document` class; owns `read_checked`/`write_checked`                                       |
+| `document.rs`                                         | `Document` class; owns freshness checks and fixed-revision reads for views                  |
 | `item_proxy.rs`                                       | `ItemProxy` base + `resolve_proxy()` + `read_checked`/`write_checked` helpers               |
 | `dict_proxy.rs` / `list_proxy.rs` / `scalar_proxy.rs` | Subclass pymethods                                                                          |
 | `item_ops.rs` / `dict_ops.rs` / `list_ops.rs`         | Pure logic helpers (no PyO3 class)                                                          |

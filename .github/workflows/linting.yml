@@ -69,7 +69,7 @@ jobs:
           allow-prereleases: true
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
 
       - name: Check lockfile
         run: uv lock --check
@@ -148,7 +148,7 @@ jobs:
           python-version: "3.x"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
 
       - name: Build with coverage instrumentation and run tests
         env:

@@ -24,6 +24,8 @@ make build          # Build and install, dev profile (no-op if up to date)
 make test           # Rust unit tests + Python tests (builds first)
 make lint           # All linters: fmt, clippy, ruff, mypy, ty
 make coverage       # Instrumented build + llvm-cov report
+make docs           # Build the Zensical site into site/
+make docs-serve     # Preview the site locally
 ```
 
 To run a single test: `make build && pytest tests/test_comments.py::TestComment::test_set_comment -v`
@@ -56,7 +58,7 @@ AtomicU64`.
 
 - **`Document`** (`document.rs`) — wraps `toml_edit::DocumentMut`.
   `MutableMapping`.
-  `Document.parse(text)` round-trips; `Document()` or `Document({"key": "value"})`
+  `tomledit.loads(text)` round-trips; `Document()` or `Document({"key": "value"})`
   creates new.
   `str(doc)` → Python repr; `doc.as_toml()` → TOML text.
 - **`Item`** (`item_proxy.rs`) — base class for live references.

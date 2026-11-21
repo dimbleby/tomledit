@@ -20,6 +20,7 @@ dynamic = [
 
 [project.urls]
 Changelog = "https://github.com/dimbleby/tomledit/blob/main/CHANGELOG.md"
+Documentation = "https://dimbleby.github.io/tomledit/"
 Issues = "https://github.com/dimbleby/tomledit/issues"
 Repository = "https://github.com/dimbleby/tomledit"
 
@@ -29,6 +30,11 @@ dev = [
   "mypy>=1.19.1",
   "pytest>=8.4.2",
   "typing-extensions>=4.15.0",
+]
+docs = [
+  "markdown-exec>=1.12.5",
+  "mkdocstrings[python]>=1.0",
+  "zensical>=0.1.0",
 ]
 
 [build-system]

@@ -640,6 +640,7 @@ impl ItemProxy {
 
     // ---- shared methods ----
 
+    /// Remove all entries from a table or array. Not supported for scalars.
     pub fn clear(&self, py: Python<'_>) -> PyResult<()> {
         let (doc, mut inner) = self.write_checked(py)?;
         let item = self.navigate_mut(&mut inner)?;
@@ -661,12 +662,6 @@ impl ItemProxy {
     }
 
     /// Parse a TOML value fragment, preserving its representation.
-    ///
-    /// Use this when you need a specific TOML representation that can't be
-    /// expressed through plain Python types, e.g. hex integers or literal strings:
-    ///
-    ///     doc["mask"] = Item.parse("0xFF")
-    ///     doc["msg"]  = Item.parse("'''multi\nline'''")
     #[staticmethod]
     pub(crate) fn parse(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
         let value: ValueRs = text

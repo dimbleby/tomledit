@@ -1,6 +1,7 @@
 # tomledit
 
 [![PyPI](https://img.shields.io/pypi/v/tomledit)](https://pypi.org/project/tomledit/)
+[![Docs](https://img.shields.io/badge/docs-zensical-informational)](https://dimbleby.github.io/tomledit/)
 
 A format-preserving TOML editor for Python, powered by Rust's
 [toml_edit](https://docs.rs/toml_edit).
@@ -10,7 +11,7 @@ ordering are preserved.
 
 ## Quick start
 
-Given a TOML file like this:
+Save this as `example.toml`:
 
 ```toml
 [project]
@@ -29,17 +30,19 @@ ordering are all preserved:
 ```python
 from pathlib import Path
 
-from tomledit import Document
+from tomledit import dump, load
 
-text = Path("pyproject.toml").read_text(encoding="utf-8")
-doc = Document.parse(text)
+path = Path("example.toml")
+with path.open("rb") as f:
+    doc = load(f)
 
 doc["project"]["version"].comment = "# Bumped for release"
 doc["project"]["version"] = "2.0.0"
 doc["project"]["keywords"].append("important-keyword")
 doc["project"]["keywords"].inline_comment = "# updated"
 
-Path("pyproject.toml").write_text(doc.as_toml(), encoding="utf-8")
+with path.open("wb") as f:
+    dump(doc, f)
 ```
 
 The result:
@@ -71,7 +74,9 @@ the value being pointed at.
 In such cases the `Item` is made stale:
 
 ```python
-doc = Document.parse('arr = ["a", "b"]')
+from tomledit import loads
+
+doc = loads('arr = ["a", "b"]')
 first = doc["arr"][0]         # `first` mostly behaves as "a"
 doc["arr"][0] = "changed"     # prefer `first` still to be "a", but...
 print(first)                  # RuntimeError: this Item is stale
@@ -96,3 +101,7 @@ print(first)                  # still "a"
 For many usage patterns, stale `Item`s will never be an issue.
 If they become a problem for you, you might prefer
 [tomlrt](https://pypi.org/project/tomlrt/).
+
+## Documentation
+
+Full docs at <https://dimbleby.github.io/tomledit/>.

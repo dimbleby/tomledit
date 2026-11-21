@@ -1,3 +1,6 @@
+SHELL := /bin/bash
+.SHELLFLAGS := -o pipefail -c
+
 .PHONY: help
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -54,6 +57,14 @@ mypy:
 ty:
 	ty check
 
+.PHONY: docs
+docs: build ## Build the docs site
+	uv run --locked --group docs zensical build --clean
+
+.PHONY: docs-serve
+docs-serve: docs ## Preview the docs locally
+	uv run --locked --group docs zensical serve
+
 .PHONY: coverage-build
 coverage-build: .coverage-stamp
 .coverage-stamp: $(RUST_SOURCES) Cargo.toml Cargo.lock pyproject.toml uv.lock
@@ -73,4 +84,4 @@ coverage: coverage-build ## Instrumented build + coverage report
 clean: ## Remove build artifacts and caches
 	cargo clean
 	rm -f .build-stamp .coverage-stamp
-	rm -rf .hypothesis .mypy_cache .pytest_cache .ruff_cache
+	rm -rf .hypothesis .mypy_cache .pytest_cache .ruff_cache site

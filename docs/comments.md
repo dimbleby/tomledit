@@ -16,6 +16,6 @@ assert dumps(doc) == '# Bumped for release\nversion = "2.0.0" # Keep in sync wit
 print(dumps(doc), end="")
 ```
 
-Some TOML readers reject comments inside inline tables. If a field needs its
-own comment, use a standard table (`[server]`) rather than an inline table
-(`server = { ... }`) for compatibility.
+Comments on fields in inline tables require TOML 1.1. For TOML 1.0
+compatibility, use a table header such as `[server]` instead of
+`server = { ... }`.

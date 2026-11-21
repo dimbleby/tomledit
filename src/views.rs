@@ -67,21 +67,16 @@ fn iterable_to_pyset<'py>(
     set_type.call1((other,))?.cast_into().map_err(Into::into)
 }
 
-/// Build a Python set from our string keys.
-fn keys_to_pyset<'py>(
-    doc: &DocumentRs,
-    path: &[Key],
+fn forward_set_op<'py>(
     py: Python<'py>,
-) -> PyResult<Bound<'py, PySet>> {
-    let keys = get_keys(doc, path)?;
-    PySet::new(py, keys.iter())
+    other: &Bound<'py, PyAny>,
+    op: &str,
+    ours: impl FnOnce() -> PyResult<Bound<'py, PySet>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let theirs = iterable_to_pyset(py, other)?;
+    ours()?.call_method1(op, (theirs,))
 }
 
-/// Build a Python set of `(key, value)` tuples from the table at `path`.
-///
-/// Values are converted via `item_to_py`; non-hashable values (tables,
-/// arrays) cause `PySet::add` to raise `TypeError`, matching the behavior
-/// of `dict.items()` on the same input.
 /// Build a `(key, item_to_py(item))` Python tuple.
 fn entry_to_pytuple<'py>(
     py: Python<'py>,
@@ -93,20 +88,6 @@ fn entry_to_pytuple<'py>(
         py,
         [key.into_pyobject(py)?.into_any(), py_val.into_bound(py)],
     )
-}
-
-fn items_to_pyset<'py>(
-    doc: &DocumentRs,
-    path: &[Key],
-    py: Python<'py>,
-) -> PyResult<Bound<'py, PySet>> {
-    let parent = item_ops::navigate_path(doc, path)?;
-    let set = PySet::empty(py)?;
-    dict_ops::for_each_entry(parent, |key, item| {
-        set.add(entry_to_pytuple(py, key, item)?)?;
-        Ok(())
-    })?;
-    Ok(set)
 }
 
 fn get_keys(doc: &DocumentRs, path: &[Key]) -> PyResult<Vec<String>> {
@@ -142,19 +123,20 @@ fn with_child_proxies(
     mut f: impl FnMut(&str, Py<PyAny>) -> PyResult<()>,
 ) -> PyResult<()> {
     let doc = document.bind(py).get();
-    let snapshots: Vec<(String, ProxyParts)> = {
+    let snapshots = {
         let inner = doc.read_checked(py, path, view_revision)?;
         let revision = doc.revision();
-        let item = item_ops::navigate_path(&inner, path)?;
-        dict_ops::item_keys(item)?
-            .into_iter()
-            .map(|k| {
-                let mut child_path = path.to_vec();
-                child_path.push(Key::Str(k.clone()));
-                let parts = ProxyParts::snapshot(&inner, child_path, revision)?;
-                Ok((k, parts))
+        let table = dict_ops::as_dict_like(item_ops::navigate_path(&inner, path)?, "keys()")?;
+        table
+            .iter()
+            .map(|(key, child)| {
+                let mut child_path = Vec::with_capacity(path.len() + 1);
+                child_path.extend_from_slice(path);
+                child_path.push(Key::Str(key.to_owned()));
+                let parts = ProxyParts::from_item(child, child_path, revision);
+                (key.to_owned(), parts)
             })
-            .collect::<PyResult<_>>()?
+            .collect::<Vec<_>>()
     };
     for (k, parts) in snapshots {
         let proxy = parts.build(document, py)?;
@@ -182,6 +164,11 @@ impl KeysView {
             path,
             revision,
         }
+    }
+
+    fn to_pyset<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PySet>> {
+        let (_doc, inner) = self.read_checked(py)?;
+        PySet::new(py, get_keys(&inner, &self.path)?.iter())
     }
 }
 
@@ -248,12 +235,7 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let theirs = iterable_to_pyset(py, other)?;
-        let ours = {
-            let (_doc, inner) = self.read_checked(py)?;
-            keys_to_pyset(&inner, &self.path, py)?
-        };
-        ours.call_method1("__or__", (theirs,))
+        forward_set_op(py, other, "__or__", || self.to_pyset(py))
     }
 
     fn __sub__<'py>(
@@ -273,18 +255,13 @@ impl KeysView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let theirs = iterable_to_pyset(py, other)?;
-        let ours = {
-            let (_doc, inner) = self.read_checked(py)?;
-            keys_to_pyset(&inner, &self.path, py)?
-        };
-        ours.call_method1("__xor__", (theirs,))
+        forward_set_op(py, other, "__xor__", || self.to_pyset(py))
     }
 
     // Reflected set operators for `set() OP keys`.  `|`, `&` and `^` are
     // commutative, so they delegate to the forward methods.  `-` is not:
     // `other - keys` subtracts *our* keys from `other`, which we do by
-    // building a Python set of our keys and calling its `__sub__`.
+    // building a Python set of our keys and calling `other`'s `__sub__`.
 
     fn __ror__<'py>(
         &self,
@@ -316,19 +293,11 @@ impl KeysView {
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let theirs = iterable_to_pyset(py, other)?;
-        let ours = {
-            let (_doc, inner) = self.read_checked(py)?;
-            keys_to_pyset(&inner, &self.path, py)?
-        };
-        theirs.call_method1("__sub__", (ours,))
+        theirs.call_method1("__sub__", (self.to_pyset(py)?,))
     }
 
     fn __eq__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let ours = {
-            let (_doc, inner) = self.read_checked(py)?;
-            keys_to_pyset(&inner, &self.path, py)?
-        };
-        ours.eq(other)
+        self.to_pyset(py)?.eq(other)
     }
 }
 
@@ -428,6 +397,16 @@ impl ItemsView {
             path,
             revision,
         }
+    }
+
+    fn to_pyset<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PySet>> {
+        let (_doc, inner) = self.read_checked(py)?;
+        let parent = item_ops::navigate_path(&inner, &self.path)?;
+        let set = PySet::empty(py)?;
+        dict_ops::for_each_entry(parent, |key, item| {
+            set.add(entry_to_pytuple(py, key, item)?)
+        })?;
+        Ok(set)
     }
 }
 
@@ -540,12 +519,7 @@ impl ItemsView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let theirs = iterable_to_pyset(py, other)?;
-        let ours = {
-            let (_doc, inner) = self.read_checked(py)?;
-            items_to_pyset(&inner, &self.path, py)?
-        };
-        ours.call_method1("__or__", (theirs,))
+        forward_set_op(py, other, "__or__", || self.to_pyset(py))
     }
 
     fn __and__<'py>(
@@ -553,12 +527,7 @@ impl ItemsView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let theirs = iterable_to_pyset(py, other)?;
-        let ours = {
-            let (_doc, inner) = self.read_checked(py)?;
-            items_to_pyset(&inner, &self.path, py)?
-        };
-        ours.call_method1("__and__", (theirs,))
+        forward_set_op(py, other, "__and__", || self.to_pyset(py))
     }
 
     fn __sub__<'py>(
@@ -566,12 +535,7 @@ impl ItemsView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let theirs = iterable_to_pyset(py, other)?;
-        let ours = {
-            let (_doc, inner) = self.read_checked(py)?;
-            items_to_pyset(&inner, &self.path, py)?
-        };
-        ours.call_method1("__sub__", (theirs,))
+        forward_set_op(py, other, "__sub__", || self.to_pyset(py))
     }
 
     fn __xor__<'py>(
@@ -579,12 +543,7 @@ impl ItemsView {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let theirs = iterable_to_pyset(py, other)?;
-        let ours = {
-            let (_doc, inner) = self.read_checked(py)?;
-            items_to_pyset(&inner, &self.path, py)?
-        };
-        ours.call_method1("__xor__", (theirs,))
+        forward_set_op(py, other, "__xor__", || self.to_pyset(py))
     }
 
     // Reflected forms: `|`, `&`, `^` are commutative; `-` is not.
@@ -619,10 +578,6 @@ impl ItemsView {
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let theirs = iterable_to_pyset(py, other)?;
-        let ours = {
-            let (_doc, inner) = self.read_checked(py)?;
-            items_to_pyset(&inner, &self.path, py)?
-        };
-        theirs.call_method1("__sub__", (ours,))
+        theirs.call_method1("__sub__", (self.to_pyset(py)?,))
     }
 }

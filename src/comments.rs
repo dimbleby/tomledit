@@ -291,12 +291,6 @@ impl SlotPrefix {
         format!("{}{}{}", self.head, self.block, self.indent)
     }
 
-    /// The inline-comment text (without the structural newline), or empty
-    /// when the slot has no newline at all.
-    fn inline(&self) -> &str {
-        self.head.strip_suffix('\n').unwrap_or("")
-    }
-
     /// Replace the block-comment portion.  A non-empty `block` ensures the
     /// structural newline is present (upgrading single-line layout); an
     /// empty `block` preserves the existing layout.
@@ -305,18 +299,6 @@ impl SlotPrefix {
             self.head = String::from("\n");
         }
         self.block = block;
-    }
-
-    /// Return `raw` with its inline-comment portion replaced by `new_inline`.
-    /// A non-empty `new_inline` ensures the structural newline is present
-    /// (upgrading single-line layout); an empty `new_inline` preserves the
-    /// existing layout.
-    fn with_inline(raw: &str, new_inline: &str) -> String {
-        let mut parts = Self::split(raw);
-        if !new_inline.is_empty() || !parts.head.is_empty() {
-            parts.head = format!("{new_inline}\n");
-        }
-        parts.join()
     }
 
     /// Return `raw` with its block-comment portion replaced by `comment`,
@@ -400,6 +382,15 @@ pub(crate) fn suffix_holds_break(suffix: &str) -> bool {
 pub(crate) trait CommentPreservation {
     fn save_inline_comments(&self) -> Vec<String>;
     fn restore_inline_comments(&mut self, comments: &[String]);
+}
+
+fn split_inline_slot(raw: &str) -> (&str, &str) {
+    raw.split_once('\n').unwrap_or(("", raw))
+}
+
+fn updated_inline_slot(raw: &str, inline: &str) -> Option<String> {
+    let (current, rest) = split_inline_slot(raw);
+    (current != inline).then(|| format!("{inline}\n{rest}"))
 }
 
 // -- Array helpers --
@@ -501,21 +492,15 @@ fn array_write_slot(arr: &mut toml_edit::Array, idx: usize, raw: &str) {
 impl CommentPreservation for toml_edit::Array {
     fn save_inline_comments(&self) -> Vec<String> {
         (0..self.len())
-            .map(|i| {
-                SlotPrefix::split(array_read_slot(self, i))
-                    .inline()
-                    .to_owned()
-            })
+            .map(|i| split_inline_slot(array_read_slot(self, i)).0.to_owned())
             .collect()
     }
 
     fn restore_inline_comments(&mut self, comments: &[String]) {
         debug_assert_eq!(comments.len(), self.len());
         for (i, inline) in comments.iter().enumerate() {
-            let raw = array_read_slot(self, i);
-            if SlotPrefix::split(raw).inline() != inline {
-                let new_raw = SlotPrefix::with_inline(raw, inline);
-                array_write_slot(self, i, &new_raw);
+            if let Some(raw) = updated_inline_slot(array_read_slot(self, i), inline) {
+                array_write_slot(self, i, &raw);
             }
         }
     }
@@ -563,8 +548,8 @@ impl CommentPreservation for toml_edit::InlineTable {
         let keys: Vec<&str> = self.iter().map(|(k, _)| k).collect();
         (0..keys.len())
             .map(|i| {
-                SlotPrefix::split(it_read_slot(self, keys[i], keys.get(i + 1).copied()))
-                    .inline()
+                split_inline_slot(it_read_slot(self, keys[i], keys.get(i + 1).copied()))
+                    .0
                     .to_owned()
             })
             .collect()
@@ -575,10 +560,8 @@ impl CommentPreservation for toml_edit::InlineTable {
         let keys: Vec<String> = self.iter().map(|(k, _)| k.to_owned()).collect();
         for (i, inline) in comments.iter().enumerate() {
             let next_key = keys.get(i + 1).map(String::as_str);
-            let raw = it_read_slot(self, &keys[i], next_key);
-            if SlotPrefix::split(raw).inline() != inline {
-                let new_raw = SlotPrefix::with_inline(raw, inline);
-                it_write_slot(self, &keys[i], next_key, &new_raw);
+            if let Some(raw) = updated_inline_slot(it_read_slot(self, &keys[i], next_key), inline) {
+                it_write_slot(self, &keys[i], next_key, &raw);
             }
         }
     }
@@ -589,17 +572,15 @@ impl CommentPreservation for toml_edit::InlineTable {
 /// Get the inline comment for array element `idx` from a parent `ItemRs`.
 pub(crate) fn get_array_inline_comment(parent: &ItemRs, idx: usize) -> Option<String> {
     let array = parent.as_value()?.as_array()?;
-    extract_inline_comment(SlotPrefix::split(array_read_slot(array, idx)).inline())
+    extract_inline_comment(split_inline_slot(array_read_slot(array, idx)).0)
 }
 
 /// Set the inline comment for array element `idx`.  `inline` is a
 /// pre-validated raw suffix (e.g. `" # note"`) or empty to clear.
 pub(crate) fn set_array_inline_comment(array: &mut toml_edit::Array, idx: usize, inline: &str) {
-    let raw = array_read_slot(array, idx).to_owned();
-    if SlotPrefix::split(&raw).inline() == inline {
-        return;
+    if let Some(raw) = updated_inline_slot(array_read_slot(array, idx), inline) {
+        array_write_slot(array, idx, &raw);
     }
-    array_write_slot(array, idx, &SlotPrefix::with_inline(&raw, inline));
 }
 
 /// Get the inline comment for an inline-table entry by key name.
@@ -611,7 +592,7 @@ pub(crate) fn get_inline_table_inline_comment(
     // If the key doesn't exist, skip_while exhausts the iterator.
     iter.next()?;
     let next_key = iter.next().map(|(k, _)| k);
-    extract_inline_comment(SlotPrefix::split(it_read_slot(it, key, next_key)).inline())
+    extract_inline_comment(split_inline_slot(it_read_slot(it, key, next_key)).0)
 }
 
 /// Set the inline comment for an inline-table entry by key name.
@@ -628,16 +609,9 @@ pub(crate) fn set_inline_table_inline_comment(
         .skip_while(|(k, _)| *k != key)
         .nth(1)
         .map(|(k, _)| k.to_owned());
-    let raw = it_read_slot(it, key, next_key.as_deref()).to_owned();
-    if SlotPrefix::split(&raw).inline() == inline {
-        return;
+    if let Some(raw) = updated_inline_slot(it_read_slot(it, key, next_key.as_deref()), inline) {
+        it_write_slot(it, key, next_key.as_deref(), &raw);
     }
-    it_write_slot(
-        it,
-        key,
-        next_key.as_deref(),
-        &SlotPrefix::with_inline(&raw, inline),
-    );
 }
 
 /// Extract (and clear) an inline comment from a value's decor suffix.
@@ -689,11 +663,7 @@ pub(crate) fn strip_value_suffix_inline(value: &mut ValueRs) {
 /// Get the block comment from an element's decor prefix.
 pub(crate) fn get_element_block_comment(decor: &toml_edit::Decor) -> Option<String> {
     let raw = decor.prefix()?.as_str()?;
-    let parts = SlotPrefix::split(raw);
-    if parts.block.is_empty() {
-        return None;
-    }
-    extract_block_comment(&parts.block)
+    extract_block_comment(&SlotPrefix::split(raw).block)
 }
 
 /// Set the block comment in an element's decor prefix, preserving any inline
@@ -779,17 +749,7 @@ fn is_first_inline_table_key(it: &toml_edit::InlineTable, key: &str) -> bool {
 
 /// Extract the block comment from an inline table key's prefix.
 fn get_inline_table_block_comment(it: &toml_edit::InlineTable, key: &str) -> Option<String> {
-    let raw = it.key(key)?.leaf_decor().prefix()?.as_str()?;
-    if is_first_inline_table_key(it, key) {
-        // The first key's prefix is `\n<comment>\n<indent>` (set inserts the
-        // leading `\n` so the comment starts on its own line after `{`).
-        // Strip the framing before extracting.
-        extract_block_comment(raw.strip_prefix('\n').unwrap_or(raw).trim_end())
-    } else {
-        // Non-first key: the prefix mixes the previous key's inline comment
-        // with this key's block comment; SlotPrefix separates them.
-        extract_block_comment(&SlotPrefix::split(raw).block)
-    }
+    get_element_block_comment(it.key(key)?.leaf_decor())
 }
 
 /// Derive the canonical indent for an inline table.

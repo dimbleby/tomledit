@@ -1031,6 +1031,17 @@ class TestComment:
         doc = Document.parse("t = {x = 1, y = 2}\n")
         assert doc["t"]["x"].comment is None
 
+    def test_opening_brace_comment_is_not_a_key_comment(self) -> None:
+        doc = Document.parse("t = { # opening\n x = 1}\n")
+        entry = doc["t"]["x"]
+        assert entry.comment is None
+
+        entry.comment = "# key"
+        assert entry.comment == "# key"
+        entry.comment = None
+        assert entry.comment is None
+        assert doc.as_toml() == "t = { # opening\n x = 1}\n"
+
     def test_set_inline_table_key_comment(self) -> None:
         """Setting a block comment on an inline table key produces a
         multi-line inline table (valid TOML 1.1)."""

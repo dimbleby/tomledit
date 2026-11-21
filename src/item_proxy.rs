@@ -454,12 +454,16 @@ impl ProxyParts {
     /// the resulting proxy's revision is consistent with the navigated
     /// item.
     pub(crate) fn snapshot(inner: &DocumentRs, path: Vec<Key>, revision: u64) -> PyResult<Self> {
-        let kind = item_kind(item_ops::navigate_path(inner, &path)?);
-        Ok(Self {
+        let item = item_ops::navigate_path(inner, &path)?;
+        Ok(Self::from_item(item, path, revision))
+    }
+
+    pub(crate) fn from_item(item: &ItemRs, path: Vec<Key>, revision: u64) -> Self {
+        Self {
             path,
             revision,
-            kind,
-        })
+            kind: item_kind(item),
+        }
     }
 
     /// Build the typed Python proxy.  Holds no document locks.

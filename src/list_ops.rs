@@ -554,30 +554,40 @@ pub(crate) fn item_delitem_slice(target: ArrayLikeMut<'_>, indices: &[usize]) {
     sorted.sort_unstable();
     sorted.dedup();
     sorted.reverse();
+    remove_descending(target, &sorted);
+}
 
-    match target {
+/// Remove in-bounds indices in descending order, returning the last removed item.
+fn remove_descending(target: ArrayLikeMut<'_>, indices: &[usize]) -> Option<Item> {
+    let (&last, rest) = indices.split_last()?;
+    let removing_first = last == 0;
+    let removing_last = indices[0] + 1 == target.len();
+    let removed = match target {
         ArrayLikeMut::Array(arr) => {
             let mut ic = arr.save_inline_comments();
-            let removing_first = sorted.last() == Some(&0);
-            let removing_last = !sorted.is_empty() && sorted.first() == Some(&(arr.len() - 1));
             let decor = save_removal_decor(arr, removing_first, removing_last);
-            for idx in sorted {
+            for &idx in rest {
                 arr.remove(idx);
                 ic.remove(idx);
             }
+            let removed = arr.remove(last);
+            ic.remove(last);
             arr.restore_inline_comments(&ic);
             apply_removal_decor(arr, &decor);
+            ItemRs::Value(removed)
         }
         ArrayLikeMut::Aot(aot) => {
-            let removing_first = sorted.last() == Some(&0);
-            for idx in sorted {
+            for &idx in rest {
                 aot.remove(idx);
             }
+            let removed = aot.remove(last);
             if removing_first {
                 fix_first_aot_prefix(aot);
             }
+            ItemRs::Table(removed)
         }
-    }
+    };
+    Some(Item(removed))
 }
 
 /// Assign to a slice of an array-like item.
@@ -901,32 +911,12 @@ pub(crate) fn item_insert(
 /// Remove the element at `index`.  Returns the removed item and an
 /// `Affected` descriptor for proxy invalidation.
 pub(crate) fn item_remove_at(target: ArrayLikeMut<'_>, index: usize) -> PyResult<(Item, Affected)> {
-    match target {
-        ArrayLikeMut::Array(arr) => {
-            if index >= arr.len() {
-                return Err(PyIndexError::new_err("array index out of range"));
-            }
-            let affected = Affected::for_removal(index, arr.len());
-            let mut ic = arr.save_inline_comments();
-            let decor = save_removal_decor(arr, index == 0, index == arr.len() - 1);
-            let removed = arr.remove(index);
-            ic.remove(index);
-            arr.restore_inline_comments(&ic);
-            apply_removal_decor(arr, &decor);
-            Ok((Item(ItemRs::Value(removed)), affected))
-        }
-        ArrayLikeMut::Aot(aot) => {
-            if index >= aot.len() {
-                return Err(PyIndexError::new_err("array index out of range"));
-            }
-            let affected = Affected::for_removal(index, aot.len());
-            let removed = aot.remove(index);
-            if index == 0 {
-                fix_first_aot_prefix(aot);
-            }
-            Ok((Item(ItemRs::Table(removed)), affected))
-        }
+    let len = target.len();
+    if index >= len {
+        return Err(PyIndexError::new_err("array index out of range"));
     }
+    let removed = remove_descending(target, &[index]).expect("one index to remove");
+    Ok((removed, Affected::for_removal(index, len)))
 }
 
 pub(crate) fn item_extend(target: ArrayLikeMut<'_>, items: Vec<Item>) -> PyResult<()> {

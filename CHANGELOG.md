@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Inline tables no longer report a comment after `{` as the first key's comment.
+
 ## 1.2.10 (15 November 2026)
 
 - Fix several locking and thread-safety bugs, including on free-threaded Python.

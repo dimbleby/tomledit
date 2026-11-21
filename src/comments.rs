@@ -663,11 +663,7 @@ pub(crate) fn strip_value_suffix_inline(value: &mut ValueRs) {
 /// Get the block comment from an element's decor prefix.
 pub(crate) fn get_element_block_comment(decor: &toml_edit::Decor) -> Option<String> {
     let raw = decor.prefix()?.as_str()?;
-    let parts = SlotPrefix::split(raw);
-    if parts.block.is_empty() {
-        return None;
-    }
-    extract_block_comment(&parts.block)
+    extract_block_comment(&SlotPrefix::split(raw).block)
 }
 
 /// Set the block comment in an element's decor prefix, preserving any inline
@@ -753,17 +749,7 @@ fn is_first_inline_table_key(it: &toml_edit::InlineTable, key: &str) -> bool {
 
 /// Extract the block comment from an inline table key's prefix.
 fn get_inline_table_block_comment(it: &toml_edit::InlineTable, key: &str) -> Option<String> {
-    let raw = it.key(key)?.leaf_decor().prefix()?.as_str()?;
-    if is_first_inline_table_key(it, key) {
-        // The first key's prefix is `\n<comment>\n<indent>` (set inserts the
-        // leading `\n` so the comment starts on its own line after `{`).
-        // Strip the framing before extracting.
-        extract_block_comment(raw.strip_prefix('\n').unwrap_or(raw).trim_end())
-    } else {
-        // Non-first key: the prefix mixes the previous key's inline comment
-        // with this key's block comment; SlotPrefix separates them.
-        extract_block_comment(&SlotPrefix::split(raw).block)
-    }
+    get_element_block_comment(it.key(key)?.leaf_decor())
 }
 
 /// Derive the canonical indent for an inline table.

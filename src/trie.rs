@@ -68,9 +68,7 @@ impl MutationTrie {
     /// already invalidates all descendant proxies.
     pub(crate) fn stamp(&mut self, path: &[Key]) -> u64 {
         self.revision += 1;
-        let node = self.root.walk(path);
-        node.revised_at = self.revision;
-        node.children.clear();
+        self.root.walk(path).invalidate(self.revision);
         self.revision
     }
 
@@ -78,10 +76,10 @@ impl MutationTrie {
     /// base path into a temporary Vec. Returns the new revision.
     pub(crate) fn stamp_child(&mut self, path: &[Key], child: &Key) -> u64 {
         self.revision += 1;
-        let parent = self.root.walk(path);
-        let child_node = parent.children.entry(child.clone()).or_default();
-        child_node.revised_at = self.revision;
-        child_node.children.clear();
+        self.root
+            .walk(path)
+            .child_mut(child.clone())
+            .invalidate(self.revision);
         self.revision
     }
 
@@ -91,20 +89,27 @@ impl MutationTrie {
         self.revision += 1;
         let parent = self.root.walk(path);
         for i in from..to {
-            let child_node = parent.children.entry(Key::Int(i)).or_default();
-            child_node.revised_at = self.revision;
-            child_node.children.clear();
+            parent.child_mut(Key::Int(i)).invalidate(self.revision);
         }
         self.revision
     }
 }
 
 impl TrieNode {
+    fn invalidate(&mut self, revision: u64) {
+        self.revised_at = revision;
+        self.children.clear();
+    }
+
+    fn child_mut(&mut self, key: Key) -> &mut Self {
+        self.children.entry(key).or_default()
+    }
+
     /// Walk to the node at `path`, creating intermediates as needed.
     fn walk(&mut self, path: &[Key]) -> &mut Self {
         let mut node = self;
         for key in path {
-            node = node.children.entry(key.clone()).or_default();
+            node = node.child_mut(key.clone());
         }
         node
     }

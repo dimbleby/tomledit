@@ -1097,14 +1097,7 @@ pub(crate) fn item_set_multiline(target: ArrayLikeMut<'_>, indent: usize) {
     if let ArrayLikeMut::Array(arr) = target
         && !arr.is_empty()
     {
-        let prefix = format!("\n{}", " ".repeat(indent));
-        for val in arr.iter_mut() {
-            let decor = val.decor_mut();
-            decor.set_prefix(&prefix);
-            decor.set_suffix("");
-        }
-        arr.set_trailing_comma(true);
-        arr.set_trailing("\n");
+        comments::format_array_multiline(arr, indent);
     }
 }
 

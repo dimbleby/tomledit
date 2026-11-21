@@ -404,6 +404,69 @@ pub(crate) trait CommentPreservation {
 
 // -- Array helpers --
 
+fn format_array_gap(
+    before_separator: &str,
+    after_separator: &str,
+    has_comma: bool,
+    indent: &str,
+) -> String {
+    // A line containing only the old comma isn't a blank line to preserve.
+    let after_separator = if has_comma && before_separator.contains('\n') {
+        after_separator
+            .trim_start_matches([' ', '\t', '\r'])
+            .strip_prefix('\n')
+            .unwrap_or(after_separator)
+    } else {
+        after_separator
+    };
+    let raw = format!("{before_separator}{after_separator}");
+    if raw.trim().is_empty() {
+        return "\n".to_owned();
+    }
+
+    let mut lines = raw.trim_end_matches([' ', '\t', '\r']).lines();
+    let mut result = String::new();
+    let head = lines.next().unwrap_or_default();
+    if head.trim_start().starts_with('#') {
+        result.push_str(head);
+    }
+    result.push('\n');
+    for line in lines.map(str::trim_start) {
+        if !line.is_empty() {
+            result.push_str(indent);
+            result.push_str(line);
+        }
+        result.push('\n');
+    }
+    result
+}
+
+pub(crate) fn format_array_multiline(arr: &mut toml_edit::Array, indent: usize) {
+    let indent = " ".repeat(indent);
+    let mut suffix = String::new();
+    for value in arr.iter_mut() {
+        let mut prefix = format_array_gap(
+            &suffix,
+            value_prefix(value).unwrap_or_default(),
+            true,
+            &indent,
+        );
+        prefix.push_str(&indent);
+        suffix.clear();
+        suffix.push_str(value_suffix(value).unwrap_or_default());
+        let decor = value.decor_mut();
+        decor.set_prefix(prefix);
+        decor.set_suffix("");
+    }
+    arr.set_trailing(format_array_gap(
+        &suffix,
+        arr.trailing().as_str().unwrap_or_default(),
+        arr.trailing_comma(),
+        &indent,
+    ));
+    arr.set_trailing_comma(true);
+}
+
 /// Read the slot that holds array element `idx`'s inline comment: the line
 /// break following the element carries the comment, so the slot is the
 /// element's own suffix when that suffix holds the break (leading-comma layout,

@@ -2261,6 +2261,86 @@ class TestSetMultiline:
             ]
         """)
 
+    def test_reindent_preserves_array_comments(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            # above the array
+            arr = [ # after the opening bracket
+              1, # first
+
+              # above the second
+              # another line
+              2,
+              # before the closing bracket
+            ] # after the array
+        """)
+        )
+        arr = doc["arr"]
+        arr.set_multiline()
+        expected = toml_literal("""
+            # above the array
+            arr = [ # after the opening bracket
+                1, # first
+
+                # above the second
+                # another line
+                2,
+                # before the closing bracket
+            ] # after the array
+        """)
+        assert doc.as_toml() == expected
+
+        arr.set_multiline()
+        assert doc.as_toml() == expected
+
+    def test_preserves_comments_before_commas_and_bracket(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            arr = [1 # first
+              , # above the second
+              [2, # inside the nested array
+                3] # last element
+              # before the closing bracket
+            ]
+        """)
+        )
+        arr = doc["arr"]
+        arr.set_multiline(indent=2)
+        assert doc.as_toml() == toml_literal("""
+            arr = [
+              1, # first
+              # above the second
+              [2, # inside the nested array
+                3], # last element
+              # before the closing bracket
+            ]
+        """)
+        assert arr[0].inline_comment == "# first"
+        assert arr[1].comment == "# above the second"
+        assert arr[1].inline_comment == "# last element"
+
+    def test_relocating_commas_does_not_add_blank_lines(self) -> None:
+        doc = Document.parse(
+            toml_literal("""
+            arr = [1 # first
+              ,
+              2 # second
+
+              ,
+              # before the closing bracket
+            ]
+        """)
+        )
+        doc["arr"].set_multiline()
+        assert doc.as_toml() == toml_literal("""
+            arr = [
+                1, # first
+                2, # second
+
+                # before the closing bracket
+            ]
+        """)
+
     def test_empty_array_is_noop(self) -> None:
         doc = Document.parse("arr = []\n")
         doc["arr"].set_multiline()

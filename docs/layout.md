@@ -31,7 +31,7 @@ its own. This setting does not affect inline tables.
 ## Reformatting
 
 Use [`set_multiline()`][tomledit.ListItem.set_multiline] to put each element of
-an ordinary array on its own line. Use [`fmt()`][tomledit.Item.fmt] to
-normalize an item's formatting, for example to remove line breaks between
-array elements. Neither operation reformats an array of tables. Both can
-remove comments inside an ordinary array, including before the closing bracket.
+an ordinary array on its own line while keeping comments. Use
+[`fmt()`][tomledit.Item.fmt] to normalize formatting, for example to remove
+line breaks between array elements. `fmt()` can remove comments inside the
+array. Neither operation reformats an array of tables.

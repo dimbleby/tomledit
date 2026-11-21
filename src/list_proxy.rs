@@ -451,8 +451,7 @@ impl ListProxy {
     /// trailing comma after the last element. Use `.fmt()` to remove line breaks
     /// between elements.
     ///
-    /// Removes comments inside the array at this level. No-op on empty arrays
-    /// and arrays of tables.
+    /// Preserves comments. No-op on empty arrays and arrays of tables.
     #[pyo3(signature = (*, indent=4))]
     pub fn set_multiline(slf: &Bound<'_, Self>, py: Python<'_>, indent: usize) -> PyResult<()> {
         let base = slf.as_super().get();

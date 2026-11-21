@@ -142,6 +142,7 @@ impl DictProxy {
         ))
     }
 
+    /// Return the live item for `key`, or `default` if the key is absent.
     #[pyo3(signature = (key, default=None, /))]
     pub fn get(
         slf: &Bound<'_, Self>,
@@ -164,6 +165,8 @@ impl DictProxy {
         parts.build(&base.document, py)
     }
 
+    /// Remove `key` and return its value as a plain Python object.
+    /// If the key is absent, return the supplied default or raise `KeyError`.
     #[pyo3(signature = (key, /, *default))]
     pub fn pop(
         slf: &Bound<'_, Self>,
@@ -283,6 +286,8 @@ impl DictProxy {
         Ok(())
     }
 
+    /// Return the live item for `key`, inserting `default` if the key is absent.
+    /// Inserting requires a non-`None` default because TOML has no null value.
     #[pyo3(signature = (key, default=None, /))]
     pub fn setdefault(
         slf: &Bound<'_, Self>,
@@ -309,14 +314,14 @@ impl DictProxy {
         parts.build(&base.document, py)
     }
 
-    /// Whether this table's header is implicit (suppressed in TOML output).
+    /// Whether this table can be written without its own header.
     ///
-    /// An implicit table like ``[a]`` in ``[a.b]\nx = 1`` has no ``[a]``
-    /// header — it exists only because ``a.b`` requires it.  Inline tables
-    /// are never implicit; this always returns ``False`` for them.
+    /// For example, ``[a.b]`` creates a parent table ``a`` even when the file
+    /// has no ``[a]`` header. Inline tables always return ``False``.
     ///
-    /// Setting to ``True`` suppresses the header; setting to ``False``
-    /// makes it explicit.  Silently ignored on inline tables.
+    /// Setting to ``True`` suppresses the header only if the table has no
+    /// values of its own. Setting to ``False`` makes the header explicit.
+    /// Assignments are ignored on inline tables.
     #[getter]
     pub fn get_implicit(slf: &Bound<'_, Self>, py: Python<'_>) -> PyResult<bool> {
         let base = slf.as_super().get();

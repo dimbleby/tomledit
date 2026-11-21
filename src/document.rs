@@ -21,7 +21,7 @@ use crate::views::{ItemsView, KeysView, ValuesView};
 ///
 /// Create an empty document with ``Document()``, or from a dict with
 /// ``Document({"key": "value"})``.  To round-trip an existing TOML file
-/// use ``Document.parse(text)`` which retains comments and whitespace.
+/// use ``tomledit.loads(text)`` which retains comments and whitespace.
 #[pyclass(frozen, mapping, module = "tomledit")]
 pub(crate) struct Document {
     pub(crate) inner: RwLock<DocumentRs>,
@@ -165,6 +165,7 @@ impl Document {
         self.inner.read_py_attached(py).len()
     }
 
+    /// Return the live item for `key`, or `default` if the key is absent.
     #[pyo3(signature = (key, default=None, /))]
     pub fn get(
         slf: &Bound<'_, Self>,
@@ -229,6 +230,8 @@ impl Document {
         Ok(())
     }
 
+    /// Remove `key` and return its value as a plain Python object.
+    /// If the key is absent, return the supplied default or raise `KeyError`.
     #[pyo3(signature = (key, /, *default))]
     pub fn pop(
         slf: &Bound<'_, Self>,
@@ -322,6 +325,8 @@ impl Document {
         Ok(())
     }
 
+    /// Return the live item for `key`, inserting `default` if the key is absent.
+    /// Inserting requires a non-`None` default because TOML has no null value.
     #[pyo3(signature = (key, default=None, /))]
     pub fn setdefault(
         slf: &Bound<'_, Self>,

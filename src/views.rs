@@ -142,19 +142,20 @@ fn with_child_proxies(
     mut f: impl FnMut(&str, Py<PyAny>) -> PyResult<()>,
 ) -> PyResult<()> {
     let doc = document.bind(py).get();
-    let snapshots: Vec<(String, ProxyParts)> = {
+    let snapshots = {
         let inner = doc.read_checked(py, path, view_revision)?;
         let revision = doc.revision();
-        let item = item_ops::navigate_path(&inner, path)?;
-        dict_ops::item_keys(item)?
-            .into_iter()
-            .map(|k| {
-                let mut child_path = path.to_vec();
-                child_path.push(Key::Str(k.clone()));
-                let parts = ProxyParts::snapshot(&inner, child_path, revision)?;
-                Ok((k, parts))
+        let table = dict_ops::as_dict_like(item_ops::navigate_path(&inner, path)?, "keys()")?;
+        table
+            .iter()
+            .map(|(key, child)| {
+                let mut child_path = Vec::with_capacity(path.len() + 1);
+                child_path.extend_from_slice(path);
+                child_path.push(Key::Str(key.to_owned()));
+                let parts = ProxyParts::from_item(child, child_path, revision);
+                (key.to_owned(), parts)
             })
-            .collect::<PyResult<_>>()?
+            .collect::<Vec<_>>()
     };
     for (k, parts) in snapshots {
         let proxy = parts.build(document, py)?;

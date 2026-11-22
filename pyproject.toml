@@ -32,6 +32,7 @@ dev = [
   "typing-extensions>=4.15.0",
 ]
 docs = [
+  "griffelib>=2.4.1",
   "markdown-exec>=1.12.5",
   "mkdocstrings[python]>=1.0",
   "zensical>=0.1.0",
@@ -48,6 +49,7 @@ pgo-command = "python tools/pgo_workload.py"
 
 [tool.mypy]
 files = "."
+exclude = ['^tools/docs_griffe\.py$']
 strict = true
 enable_error_code = [
   "deprecated",
@@ -99,3 +101,6 @@ strict = true
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
+
+[tool.ty.src]
+exclude = ["tools/docs_griffe.py"]

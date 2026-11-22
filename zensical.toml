@@ -39,6 +39,7 @@ languages = ["python"]
 
 [project.plugins.mkdocstrings.handlers.python.options]
 allow_inspection = true
+extensions = ["tools/docs_griffe.py:TomleditStubs"]
 force_inspection = true
 show_root_heading = true
 show_root_full_path = false
@@ -46,3 +47,4 @@ show_bases = false
 show_labels = false
 show_source = false
 separate_signature = true
+show_signature_annotations = true

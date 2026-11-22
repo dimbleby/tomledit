@@ -17,6 +17,7 @@ class TomleditStubs(Extension):
     def on_package(self, *, pkg: Module, loader: GriffeLoader, **kwargs: Any) -> None:
         if pkg.name != "tomledit":
             return
+
         path = Path(__file__).resolve().parents[1] / "tomledit.pyi"
         stub = visit(
             pkg.name,

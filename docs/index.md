@@ -4,10 +4,6 @@ Edit TOML from Python without reformatting the whole file. Parse a document,
 change the values you need, and write it back with comments, whitespace, and
 ordering preserved around the edits.
 
-```shell
-pip install tomledit
-```
-
 - [Quickstart](quickstart.md): edit and save an existing TOML file.
 - [Working with items](working-with-items.md): edit TOML like ordinary Python
   data and learn when item references become stale.

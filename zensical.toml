@@ -17,7 +17,13 @@ nav = [
 generator = false
 
 [project.theme]
-features = ["content.code.copy", "toc.follow"]
+features = [
+  "content.code.copy",
+  "navigation.instant",
+  "navigation.sections",
+  "navigation.top",
+  "toc.follow",
+]
 
 [[project.theme.palette]]
 media = "(prefers-color-scheme: light)"
@@ -41,10 +47,10 @@ languages = ["python"]
 allow_inspection = true
 extensions = ["tools/docs_griffe.py:TomleditStubs"]
 force_inspection = true
-show_root_heading = true
-show_root_full_path = false
+separate_signature = true
 show_bases = false
 show_labels = false
-show_source = false
-separate_signature = true
+show_root_full_path = false
+show_root_heading = true
 show_signature_annotations = true
+show_source = false

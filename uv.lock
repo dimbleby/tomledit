@@ -870,6 +870,7 @@ dev = [
     { name = "typing-extensions" },
 ]
 docs = [
+    { name = "griffelib" },
     { name = "markdown-exec" },
     { name = "mkdocstrings", extra = ["python"] },
     { name = "zensical" },
@@ -885,6 +886,7 @@ dev = [
     { name = "typing-extensions", specifier = ">=4.15.0" },
 ]
 docs = [
+    { name = "griffelib", specifier = ">=2.4.1" },
     { name = "markdown-exec", specifier = ">=1.12.5" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0" },
     { name = "zensical", specifier = ">=0.1.0" },

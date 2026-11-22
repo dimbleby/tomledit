@@ -93,6 +93,9 @@ print(first)                  # this is fine
 If you just need the plain Python value, grab it with `.value`:
 
 ```python
+from tomledit import loads
+
+doc = loads('arr = ["a", "b"]')
 first = doc["arr"][0].value   # "a" - a regular string, not a path
 doc["arr"][0] = "changed"
 print(first)                  # still "a"

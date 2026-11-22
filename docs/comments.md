@@ -19,3 +19,7 @@ print(dumps(doc), end="")
 Comments on fields in inline tables require TOML 1.1. For TOML 1.0
 compatibility, use a table header such as `[server]` instead of
 `server = { ... }`.
+
+A comment attached to an [implicit table](layout.md#implicit-tables) won't
+appear in the output unless that table has a header. Give it one by setting
+`table.implicit = False`.

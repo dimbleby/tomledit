@@ -31,7 +31,26 @@ its own. This setting does not affect inline tables.
 ## Reformatting
 
 Use [`set_multiline()`][tomledit.ListItem.set_multiline] to put each element of
-an ordinary array on its own line while keeping comments. Use
-[`fmt()`][tomledit.Item.fmt] to normalize formatting, for example to remove
-line breaks between array elements. `fmt()` can remove comments inside the
-array. Neither operation reformats an array of tables.
+an ordinary array on its own line while keeping comments. For example, start
+with this array:
+
+```toml
+ports = [80, # HTTP
+    443]
+```
+
+Then reformat it:
+
+```python exec="on" source="above" result="toml"
+from tomledit import loads
+
+doc = loads("ports = [80, # HTTP\n    443]\n")
+doc["ports"].set_multiline()
+assert doc.as_toml() == "ports = [\n    80, # HTTP\n    443,\n]\n"  # markdown-exec: hide
+print(doc.as_toml(), end="")
+```
+
+Use [`fmt()`][tomledit.Item.fmt] to normalize formatting, for example to remove
+line breaks between array elements. Unlike `set_multiline()`, `fmt()` can
+remove comments inside the array. Neither operation reformats an array of
+tables.

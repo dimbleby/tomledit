@@ -62,5 +62,19 @@ Use `.value` when you need a snapshot that won't change with the document, as
 with `original_version` above. A table or array's `.value` converts its nested
 entries too. Use `doc.value` for the whole document as a dictionary.
 
-Use `.value` also when passing an item to an API that expects a native Python
-value, such as `json.dumps()`.
+## Choosing how a new value is written
+
+Use [`Item.parse()`][tomledit.Item.parse] to set a value using a specific TOML
+spelling. It takes just the value, not a `key = value` line. For example,
+assigning the Python integer `255` writes `255`; parsing a TOML literal lets
+you write it in hexadecimal with the underscores and leading zeros you choose:
+
+```python exec="on" source="above" result="toml"
+from tomledit import Item, loads
+
+doc = loads("mask = 255\n")
+doc["mask"] = Item.parse("0x00_FF")
+assert doc["mask"].value == 255  # markdown-exec: hide
+assert doc.as_toml() == "mask = 0x00_FF\n"  # markdown-exec: hide
+print(doc.as_toml(), end="")
+```

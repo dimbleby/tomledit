@@ -18,7 +18,7 @@ dictionary and list operations, see [Working with items](working-with-items.md).
 
 ::: tomledit.Item
     options:
-      members: [as_toml, value, comment, inline_comment, fmt]
+      members: [parse, as_toml, value, comment, inline_comment, fmt]
 
 ::: tomledit.DictItem
     options:

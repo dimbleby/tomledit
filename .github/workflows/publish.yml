@@ -161,6 +161,11 @@ jobs:
           manylinux: ${{ matrix.platform.manylinux || 'auto' }}
           rustup-components: ${{ matrix.platform.pgo && 'llvm-tools-preview' || '' }}
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          before-script-linux: |
+            # The manylinux2014 cross-GCC lacks C11 atomics; keep its sysroot.
+            if [ "${{ matrix.platform.manylinux }}" = "2_17" ] && [ -n "${TARGET_SYSROOT:-}" ]; then
+              export "CC_${CARGO_BUILD_TARGET//-/_}=clang --target=$CARGO_BUILD_TARGET --sysroot=$TARGET_SYSROOT"
+            fi
           args: >-
             --release --locked --compatibility pypi --out dist
             --interpreter

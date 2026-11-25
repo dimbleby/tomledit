@@ -158,6 +158,8 @@ ordinary release profile because their instrumented wheels cannot run during
 profile training. Windows ARM64 is also non-PGO because its Rust-generated
 instrumentation profiles cannot currently be merged by `llvm-profdata`; track
 rust-lang/rust#156675 before re-enabling it.
+Manylinux2014 cross-builds compile C with Clang and the existing target
+sysroot because the bundled GCC 4.8 lacks C11 atomics.
 
 **Tests** are in `tests/`, split by concern.
 Shared fixtures in `conftest.py`.
